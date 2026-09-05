@@ -83,6 +83,9 @@ add_ut_test(qa_CarrierMap)
 # verifies the preamble's half-repeat through the library FFT, so it reaches SimdFFT and needs the inliner depth -O2
 # provides
 gr_pin_test_optimization(qa_CarrierMap -O2)
+add_ut_test(qa_TransferFrame)
+add_ut_test(qa_SpacePacket)
+add_ut_test(qa_PacketExtractor)
 add_ut_test(qa_ChunkReassembly)
 
 if(EMSCRIPTEN)
@@ -166,6 +169,9 @@ target_link_libraries(qa_Bch PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Convolutional PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Interleaver PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_CarrierMap PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_TransferFrame PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_SpacePacket PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_PacketExtractor PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_ChunkReassembly PRIVATE gnuradio-algorithm)
 
 add_executable(example_ImChart example_ImChart.cpp)
