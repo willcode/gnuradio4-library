@@ -62,6 +62,7 @@ add_ut_test(qa_ReedSolomon)
 add_ut_test(qa_Bch)
 add_ut_test(qa_Convolutional)
 add_ut_test(qa_Interleaver)
+add_ut_test(qa_ChunkReassembly)
 
 if(EMSCRIPTEN)
   # Simple HTTP server used only for unit tests.
@@ -132,6 +133,7 @@ target_link_libraries(qa_ReedSolomon PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Bch PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Convolutional PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Interleaver PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_ChunkReassembly PRIVATE gnuradio-algorithm)
 
 add_executable(example_ImChart example_ImChart.cpp)
 target_link_libraries(example_ImChart PRIVATE gnuradio-algorithm)
