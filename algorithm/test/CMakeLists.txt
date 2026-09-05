@@ -17,6 +17,9 @@ add_ut_test(qa_algorithm_fourier)
 add_ut_test(qa_UncertainValue)
 add_ut_test(qa_UncertainValueFormatter)
 add_ut_test(qa_UncertainValueCompatibility)
+add_ut_test(qa_SpectralCalibration)
+# reaches SimdFFT, whose always_inline helpers do not inline at the qa tier's default level
+gr_pin_test_optimization(qa_SpectralCalibration -O2)
 # SimdFFT's always_inline helpers need the inliner depth -O2 provides; at -O1 the unresolved indirect call is a hard
 # error. Applies to both tests that include it.
 gr_pin_test_optimization(qa_algorithm_fourier -O2)
@@ -107,6 +110,7 @@ target_link_libraries(qa_algorithm_fourier PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_UncertainValue PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_UncertainValueFormatter PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_UncertainValueCompatibility PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_SpectralCalibration PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_DataSetEstimators PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_FilterDesign PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_FilterTool PRIVATE gnuradio-algorithm)
