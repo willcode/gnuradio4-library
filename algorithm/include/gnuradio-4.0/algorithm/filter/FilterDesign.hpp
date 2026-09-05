@@ -520,10 +520,10 @@ struct LowpassSearch {
     return out;
 }
 
-namespace detail {
-
-/// @brief sin(pi x) / (pi x), one at zero.
+/// @brief sin(pi x) / (pi x), one at zero. Public because designs outside this header use the same definition.
 [[nodiscard]] inline double sincPi(double x) { return x == 0.0 ? 1.0 : std::sin(std::numbers::pi * x) / (std::numbers::pi * x); }
+
+namespace detail {
 
 /// @brief The ideal lowpass impulse response `2f sinc(2 f k)` at integer offset @p k.
 [[nodiscard]] inline double idealLowpass(double f, double k) { return 2.0 * f * sincPi(2.0 * f * k); }
