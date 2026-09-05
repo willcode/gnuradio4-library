@@ -19,6 +19,7 @@
 
 using namespace boost::ut;
 using gr::signal::Phasor;
+using gr::timing::DelaySchedule;
 using gr::timing::FrequencySchedule;
 using gr::timing::offsetFor;
 using gr::timing::SampleClock;
@@ -337,6 +338,60 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         const SampleClock               clock(0ULL, 0LL, 48'000ULL, 1ULL);
 
         expect(nothrow([&] { schedule.phaseIncrementsFor(clock, 0ULL, std::span<double>{}); }));
+        expect(nothrow([&] { schedule.valuesFor(clock, 0ULL, std::span<double>{}); }));
+    };
+
+    "valuesFor walks the same cursor a point evaluation would search"_test = [] {
+        const std::vector<std::int64_t> times{0LL, 3'000'000LL, 7'000'000LL, 25'000'000LL};
+        const std::vector<double>       offsets{-1'000., 500., 500., -250.};
+        const FrequencySchedule         schedule(times, offsets);
+        const SampleClock               clock(0ULL, -2'000'000LL, 48'000ULL, 1ULL);
+
+        constexpr std::size_t kSamples = 4'096UZ;
+        std::vector<double>   walked(kSamples);
+        schedule.valuesFor(clock, 0ULL, walked);
+
+        // Against the independently written oracle the agreement is numerical: the oracle weights the two knots
+        // and the kernel adds a slope, which are the same line reached two ways and differ in the last bits.
+        double worst  = 0.;
+        bool   sameAs = true;
+        for (std::size_t k = 0UZ; k < kSamples; ++k) {
+            worst  = std::max(worst, std::abs(walked[k] - oracleOffset(times, offsets, clock.timeOf(k))));
+            sameAs = sameAs && walked[k] == schedule.offsetAt(clock.timeOf(k));
+        }
+        expect(lt(worst, 1e-9)) << "the cursor walk is the search; worst difference" << worst;
+        expect(sameAs) << "and it is the bit-identical answer a per-sample point evaluation gives";
+
+        // The span is a pure function of the absolute index, so a chunked caller reads the same values.
+        std::vector<double> chunked(kSamples);
+        for (std::size_t at = 0UZ; at < kSamples; at += 7UZ) {
+            const std::size_t n = std::min(7UZ, kSamples - at);
+            schedule.valuesFor(clock, at, std::span<double>(chunked).subspan(at, n));
+        }
+        expect(that % std::ranges::equal(walked, chunked)) << "seven at a time reads what one call reads";
+    };
+
+    "a delay schedule is the same table under a different unit"_test = [] {
+        const std::vector<std::int64_t> times{0LL, 1'000'000'000LL, 3'000'000'000LL};
+        const std::vector<double>       delays{8.339e-3, 6.0e-3, 2.5e-3};
+        const DelaySchedule             schedule(times, delays);
+
+        expect(schedule.size() == 3UZ);
+        expect(schedule.delayAt(-1LL) == delays.front()) << "the first value holds before the table";
+        expect(schedule.delayAt(4'000'000'000LL) == delays.back()) << "the last value holds after it";
+        expect(schedule.delayAt(500'000'000LL) == 0.5 * (delays[0] + delays[1])) << "the midpoint of a segment is the mean of its ends";
+        expect(schedule.maxValue() == delays.front());
+        expect(schedule.minValue() == delays.back());
+
+        // The slope is the segment's, clamped to a real segment at both ends: a delay table's consumer wants
+        // the rate the table is running at, and the derivative does not exist at a knot or outside the table.
+        expect(std::abs(schedule.segmentSlopePerSecond(500'000'000LL) - (delays[1] - delays[0])) < 1e-18) << "the first segment falls 2.339 ms in one second";
+        expect(schedule.segmentSlopePerSecond(9'000'000'000LL) == schedule.segmentSlopePerSecond(2'000'000'000LL)) << "past the table the last segment's slope stands";
+
+        expect(throws<std::invalid_argument>([&] {
+            const std::vector<double> broken{1., std::numeric_limits<double>::infinity(), 2.};
+            (void)DelaySchedule(times, broken);
+        })) << "a non-finite delay is refused, in the delay schedule's own words";
     };
 };
 
