@@ -1,7 +1,9 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <map>
 #include <numbers>
 #include <print>
@@ -266,6 +268,92 @@ const boost::ut::suite toneGeneratorTests = [] {
             }
             expect(hasNonZero) << std::format("type={} produced all zeros", static_cast<int>(type));
         }
+    };
+
+    // The value type cannot hold time, and this is what that costs. At 1 MS/s the tick is 1e-6 s, which a float
+    // second-accumulator rounds as soon as its ULP approaches it: within the first second the tone reads
+    // 953.674 Hz, past 16.777 s the tick rounds to twice its size, and at t = 32 s the tick is below half an ULP
+    // and the accumulator stops moving, freezing every waveform that reads it on DC. The generator keeps an exact
+    // sample count instead, so the arm below asserts the phase after thirty seconds and the arm beside it runs the
+    // accumulator that used to carry it, the way qa_SampleClock demonstrates the double's failure rather than
+    // asserting it.
+    "a float Sin holds its frequency past thirty seconds"_test = [] {
+        constexpr float       sampleRate = 1.0e6f;
+        constexpr float       frequency  = 1000.f;
+        constexpr double      twoPi      = 2. * std::numbers::pi_v<double>;
+        constexpr std::size_t kWindow    = 4096UZ;
+        constexpr std::size_t kBlocks    = 7325UZ; // 30'003'200 samples, 30.0032 s at 1 MS/s
+        constexpr std::size_t kTotal     = kBlocks * kWindow;
+
+        ToneGenerator<float> gen;
+        gen.configure(ToneType::Sin, frequency, sampleRate, 0.f, 1.f, 0.f);
+
+        std::vector<float> window(kWindow);
+        for (std::size_t block = 0; block < kBlocks; ++block) {
+            gen.fill(window);
+        }
+        expect(eq(gen._sampleIndex, static_cast<std::uint64_t>(kTotal))) << "the count is the time, and it is exact";
+
+        // The reference is the analytic instant of each sample: at these magnitudes the cycle count is 3.0e4 with a
+        // double ULP of 3.6e-12, so std::sin of its reduced argument is exact to far below the float tolerance.
+        // Correlating the window against sin and cos of that argument reads the accumulated phase directly, and the
+        // correlation runs over whole cycles -- 4000 samples is four of them here -- because over a partial cycle
+        // the sin-cos cross term does not vanish and would read as a phase the generator does not have.
+        constexpr std::size_t kWholeCycles = 4000UZ;
+        const std::size_t     first        = kTotal - kWindow;
+        std::vector<double>   reference(kWindow);
+        double                maxError   = 0.;
+        double                inPhase    = 0.;
+        double                quadrature = 0.;
+        for (std::size_t i = 0; i < kWindow; ++i) {
+            const double cycles = static_cast<double>(frequency) * static_cast<double>(first + i) / static_cast<double>(sampleRate);
+            const double theta  = twoPi * (cycles - std::floor(cycles));
+            const double got    = static_cast<double>(window[i]);
+            reference[i]        = std::sin(theta);
+            maxError            = std::max(maxError, std::abs(got - reference[i]));
+            if (i >= kWindow - kWholeCycles) {
+                inPhase += got * reference[i];
+                quadrature += got * std::cos(theta);
+            }
+        }
+        const double phaseError = std::atan2(quadrature, inPhase);
+        expect(lt(maxError, 1e-4)) << std::format("worst sample error over the last 4096 of {} samples: {:.3e}", kTotal, maxError);
+        expect(lt(std::abs(phaseError), 1e-5)) << std::format("accumulated phase error after 30 s: {:.3e} rad", phaseError);
+
+        // the same stream through a float second-accumulator, which is the form this kernel used to keep
+        float       elapsed    = 0.f;
+        const float tick       = 1.f / sampleRate;
+        double      afterOneS  = 0.;
+        std::size_t stallIndex = 0UZ;
+        for (std::size_t n = 0; n < kTotal; ++n) {
+            const float before = elapsed;
+            elapsed += tick;
+            if (elapsed == before && stallIndex == 0UZ) {
+                stallIndex = n;
+            }
+            if (n + 1UZ == 1'000'000UZ) {
+                afterOneS = static_cast<double>(elapsed);
+            }
+        }
+        expect(gt(std::abs(afterOneS - 1.), 5e-3)) << std::format("the accumulator reads {:.7f} s where one second has passed", afterOneS);
+        expect(gt(stallIndex, 0UZ)) << "the accumulator is expected to stop advancing";
+        expect(lt(stallIndex, kTotal)) << std::format("the accumulator stops at sample {} of {}", stallIndex, kTotal);
+        expect(eq(elapsed, 32.f)) << std::format("the accumulator stands at {} s where {} s have passed", elapsed, static_cast<double>(kTotal) / static_cast<double>(sampleRate));
+
+        // a frozen time is a frozen argument: the old form's last window is one repeated value, DC where a 1 kHz
+        // tone should be, and it stands a full amplitude away from the tone the same parameters describe
+        const float        omega = 2.f * std::numbers::pi_v<float> * frequency;
+        std::vector<float> stalled(kWindow);
+        double             oldError = 0.;
+        for (std::size_t i = 0; i < kWindow; ++i) {
+            stalled[i] = std::sin(omega * elapsed);
+            elapsed += tick;
+            oldError = std::max(oldError, std::abs(static_cast<double>(stalled[i]) - reference[i]));
+        }
+        const auto [low, high] = std::minmax_element(stalled.begin(), stalled.end());
+        expect(eq(*low, *high)) << "the old form's last window carries no tone at all";
+        expect(gt(oldError, 0.99)) << std::format("the old form's worst error over that window: {:.3e}", oldError);
+        std::println("30 s at 1 MS/s: worst sample error {:.3e}, phase error {:.3e} rad; the float accumulator reads {:.7f} s at 1 s, stops at sample {}, stands at {} s and is off by {:.3f}", maxError, phaseError, afterOneS, stallIndex, elapsed, oldError);
     };
 };
 
