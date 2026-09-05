@@ -70,7 +70,7 @@ struct FilterParameters {
     double      gain{1.0};                                       /// required total filter gain
     double      rippleDb{0.1};                                   /// Maximum allowed ripple in the pass-band [dB].
     double      attenuationDb{40};                               /// Minimum required attenuation in the stop-band [dB].
-    double      beta{1.6};                                       /// default beta for Kaiser-type windowing
+    double      beta{std::numeric_limits<double>::quiet_NaN()};  /// window shape parameter (Kaiser beta, Tukey alpha, ...); NaN takes the window's own default
     double      fs{std::numeric_limits<double>::quiet_NaN()};    /// Sampling frequency for digital filters [Hertz].
 };
 
@@ -988,12 +988,12 @@ FilterCoefficients<T> designResonatorRF(T samplingRateHz, T frequency, T Q, std:
 namespace fir {
 
 template<std::floating_point T>
-[[nodiscard]] inline constexpr FilterCoefficients<T> generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T beta = static_cast<T>(1.6)) {
+[[nodiscard]] inline constexpr FilterCoefficients<T> generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T param = std::numeric_limits<T>::quiet_NaN()) {
     const T    M    = static_cast<T>(N - 1) / static_cast<T>(2);
     const auto sinc = [](T x, T a = std::numbers::pi_v<T>) noexcept -> T { return x == static_cast<T>(0) ? static_cast<T>(1) : std::sin(a * x) / (a * x); };
 
     std::vector<T> coefficients(N);
-    gr::algorithm::window::create(coefficients, window, beta);
+    gr::algorithm::window::create(coefficients, window, param);
 
     std::size_t index = 0; // Index variable to keep track of the current index
     std::ranges::transform(coefficients, coefficients.begin(), [&index, M, fc, &sinc](T coeff) { return coeff * static_cast<T>(2) * fc * sinc(static_cast<T>(2) * fc * (static_cast<T>(index++) - M)); });
