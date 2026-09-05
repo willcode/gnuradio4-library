@@ -83,6 +83,10 @@ add_ut_test(qa_CarrierMap)
 # verifies the preamble's half-repeat through the library FFT, so it reaches SimdFFT and needs the inliner depth -O2
 # provides
 gr_pin_test_optimization(qa_CarrierMap -O2)
+add_ut_test(qa_LteSyncSignals)
+# builds its scenes and both kernel references through the library FFT, so it reaches SimdFFT and needs the inliner
+# depth -O2 provides; the correlation sweeps also want it
+gr_pin_test_optimization(qa_LteSyncSignals -O2)
 add_ut_test(qa_Imbe)
 add_ut_test(qa_TransferFrame)
 add_ut_test(qa_SpacePacket)
@@ -171,6 +175,7 @@ target_link_libraries(qa_Bch PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Convolutional PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Interleaver PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_CarrierMap PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_LteSyncSignals PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_Imbe PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_TransferFrame PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_SpacePacket PRIVATE gnuradio-algorithm)
