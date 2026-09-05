@@ -1,4 +1,5 @@
 add_ut_test(qa_MeasurementSlot)
+add_ut_test(qa_Kurtosis)
 add_ut_test(qa_MeasurementRecord)
 add_ut_test(qa_SampleClock)
 add_ut_test(qa_FrequencySchedule)
@@ -88,6 +89,7 @@ endif()
 
 target_link_libraries(qa_MeasurementSlot PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_MeasurementRecord PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_Kurtosis PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_SampleClock PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_FrequencySchedule PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_TrajectoryFile PRIVATE gnuradio-algorithm)
