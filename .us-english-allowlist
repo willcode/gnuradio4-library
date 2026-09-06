@@ -1,0 +1,16 @@
+# Spellings this tree does not change, for tools/us-english-scan.py.
+#
+# Everything we have written since upstream/main is US English. Text we inherited is not
+# retrofitted, and a name upstream owns is spelled the way upstream spells it, in code and in the
+# prose that names it. Each line is a path glob, or a path glob and the word it exempts.
+#
+# This file names British spellings, so it exempts itself.
+.us-english-allowlist
+
+# gr::filter::Frequency::Normalised is upstream's enumerator, in FilterTool.hpp; the doc comment
+# names it.
+algorithm/include/gnuradio-4.0/algorithm/filter/FilterDesign.hpp:Normalised
+
+# A published title, cited as it was published: Danesfahani, G. R., Jeans, T. G., "Optimisation of
+# modified Mueller and Muller algorithm", Electronics Letters.
+algorithm/include/gnuradio-4.0/algorithm/sync/TimingErrorDetector.hpp:Optimisation
