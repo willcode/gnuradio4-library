@@ -15,7 +15,27 @@
 #include <gnuradio-4.0/algorithm/fourier/SimdFFT.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
+// vendored, third_party/pocketfft, BSD-3-Clause. GCC cannot prove the plan pointers non-null once the mixed-radix
+// codelets are inlined, so -Wnull-dereference fires inside the header; the diagnostic is raised by an optimizer pass
+// after inlining and is therefore not suppressed by the system include the build puts the directory on.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+#include <pocketfft/pocketfft_hdronly.h>
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
 namespace gr::algorithm {
+
+/// @brief transform engine behind FFT<>::compute()
+enum class FftBackend {
+    Native,    /// this file's radix-2 kernels, and Bluestein for the other lengths
+    Simd,      /// SimdFFT.hpp, for the sizes it accepts; Native for the rest
+    PocketFFT, /// third_party/pocketfft, a per-instance FFTPACK/Bluestein plan for any length
+    Auto       /// per length, from the measurements in docs/specs/spec-fft-backends.md
+};
 
 namespace detail {
 
@@ -94,14 +114,16 @@ constexpr void fft_stage_kernel(C* data, const C* twiddles, std::size_t halfsize
 } // namespace detail
 
 /**
- * @brief radix-2 / Bluestein DFT with an optional SimdFFT backend, for any transform length.
+ * @brief radix-2 / Bluestein DFT with optional SimdFFT and PocketFFT backends, for any transform length.
  *
  * Transforms are unnormalized, matching SimdFFT's convention: feeding the output of a
  * Direction::Forward instance into a Direction::Backward one of the same length returns N times the
- * input. Real-valued input (R2C) is forward-only.
+ * input. Real-valued input (R2C) is forward-only. Every backend keeps that convention and produces
+ * the same full N-bin spectrum, so `backend` changes the cost of compute() and not its result beyond
+ * the rounding each engine's own factorization implies.
  *
  * compute() mutates per-instance scratch (SimdFFT state, aligned buffers, Bluestein caches, the
- * per-length plan cache): hold one instance per thread.
+ * PocketFFT plan, the per-length plan cache): hold one instance per thread.
  */
 template<typename TInput, gr::meta::complex_like TOutput = std::conditional_t<gr::meta::complex_like<TInput>, TInput, std::complex<TInput>>, Direction TDirection = Direction::Forward>
 requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>))
@@ -122,7 +144,18 @@ struct FFT {
     SimdFFT<ValueType, kTransform>                            simdFFT{};
     std::vector<ValueType, gr::allocator::Aligned<ValueType>> alignedInputBuffer{};
     std::vector<ValueType, gr::allocator::Aligned<ValueType>> alignedOutputBuffer{};
-    bool                                                      useSimdFFT{true};
+
+    /// the one-dimensional PocketFFT plan for this instance's current length. Built through
+    /// pocketfft::detail directly rather than through the header's c2c()/r2c() drivers, so the plan is this
+    /// instance's own and the header's global plan cache and its mutex are never reached.
+    using PocketPlan = std::conditional_t<kTransform == Transform::Complex, pocketfft::detail::pocketfft_c<ValueType>, pocketfft::detail::pocketfft_r<ValueType>>;
+    std::unique_ptr<PocketPlan> pocketPlan{};
+    std::size_t                 pocketPlanBuilds{0UZ}; ///< plans built since construction; one per distinct length, not one per compute()
+
+    FftBackend backend{FftBackend::Auto};
+    /// deprecated: kept so callers that set it keep their meaning. It is read only when backend is Auto, where
+    /// false pins the Native path, as it did when it was the only switch. Set backend instead.
+    bool useSimdFFT{true};
 
     void initAll() {
         precomputeTwiddleFactors();
@@ -145,6 +178,51 @@ struct FFT {
         return compute(in, std::vector<TOutput, output_alloc_t>(in.size()));
     }
 
+    /// the backend compute() will run for this length: never Auto, and never one that cannot take the length
+    [[nodiscard]] FftBackend resolveBackend(std::size_t n) const noexcept {
+        FftBackend selected = backend;
+        if (selected == FftBackend::Auto) {
+            selected = useSimdFFT ? autoBackend(n) : FftBackend::Native;
+        }
+        if (selected == FftBackend::Simd && !SimdFFT<ValueType, kTransform>::canProcessSize(n, Order::Ordered)) {
+            selected = FftBackend::Native;
+        }
+        return selected;
+    }
+
+    /// n's largest prime factor, squared, against n: true where a mixed-radix engine has to fall back on a direct
+    /// O(p^2) codelet for one factor rather than splitting it further
+    [[nodiscard]] static constexpr bool largestPrimeFactorExceedsRoot(std::size_t n) noexcept {
+        std::size_t remaining = n;
+        while (remaining > 1UZ && (remaining & 1UZ) == 0UZ) {
+            remaining >>= 1UZ;
+        }
+        for (std::size_t divisor = 3UZ; divisor * divisor <= remaining; divisor += 2UZ) {
+            while (remaining % divisor == 0UZ) {
+                remaining /= divisor;
+            }
+        }
+        return remaining * remaining > n;
+    }
+
+    /// What Auto picks, from bm_fft_backends and docs/specs/spec-fft-backends.md, measured in single precision on
+    /// one performance core:
+    ///
+    ///   * SimdFFT at every length it accepts. It is the fastest of the three from N = 512 to 2^22 -- 0.31 to 0.57
+    ///     ns per butterfly unit against PocketFFT's 1.05 to 1.42 -- and its accuracy is the precision's own.
+    ///   * PocketFFT at the composite lengths SimdFFT rejects: 1.08 ns per unit against the radix-2/Bluestein
+    ///     path's 3.37 at N = 1250 and 3.27 at N = 105, and an error at float epsilon against that path's, which
+    ///     grows with the transform length because its twiddles come from a recurrence.
+    ///   * the native path where the largest prime factor exceeds sqrt(n), which is where PocketFFT's own
+    ///     factorization can leave a direct codelet in place: 5.69 ns per unit at the prime N = 1009 against the
+    ///     fork's Bluestein at 2.11.
+    [[nodiscard]] static FftBackend autoBackend(std::size_t n) noexcept {
+        if (SimdFFT<ValueType, kTransform>::canProcessSize(n, Order::Ordered)) {
+            return FftBackend::Simd;
+        }
+        return largestPrimeFactorExceedsRoot(n) ? FftBackend::Native : FftBackend::PocketFFT;
+    }
+
     template<typename InRange, typename OutRange>
     bool trySimdFFT(const InRange& in, OutRange&& out) {
         if (simdFFT.size() != in.size()) {
@@ -154,6 +232,26 @@ struct FFT {
             return trySimdFFT_C2C(in, out, in.size());
         } else {
             return trySimdFFT_R2C(in, out, in.size());
+        }
+    }
+
+    /// PocketFFT works in place on a contiguous buffer, so the output range is the workspace: false is returned
+    /// for the ranges that cannot serve as one, and compute() then takes the Native path.
+    template<typename InRange, typename OutRange>
+    bool tryPocketFFT([[maybe_unused]] const InRange& in, [[maybe_unused]] OutRange&& out) {
+        if constexpr (!requires {
+                          { out.data() } -> std::convertible_to<TOutput*>;
+                      }) {
+            return false;
+        } else {
+            const std::size_t N = in.size();
+            ensurePocketPlan(N);
+            if constexpr (kTransform == Transform::Complex) {
+                pocketFFT_C2C(in, out);
+            } else {
+                pocketFFT_R2C(in, out, N);
+            }
+            return true;
         }
     }
 
@@ -172,8 +270,18 @@ private:
 
         selectPlan(size);
 
-        if (useSimdFFT && SimdFFT<ValueType, kTransform>::canProcessSize(size, Order::Ordered) && trySimdFFT(in, out)) { // use SimdFFT if enabled and size is supported
-            return;
+        switch (resolveBackend(size)) {
+        case FftBackend::Simd:
+            if (trySimdFFT(in, out)) { // the size was checked by resolveBackend()
+                return;
+            }
+            break;
+        case FftBackend::PocketFFT:
+            if (tryPocketFFT(in, out)) { // false only for an output range this backend cannot address
+                return;
+            }
+            break;
+        default: break;
         }
 
         // fallback to original implementation
@@ -191,6 +299,45 @@ private:
         } else {
             ensureBluesteinTable(size);
             transformBluestein(out);
+        }
+    }
+
+    /// unnormalized, so the plan's scale factor is one; forward and backward differ only in the flag
+    static constexpr bool kPocketForward = !kInverse;
+
+    void ensurePocketPlan(std::size_t N) {
+        if (!pocketPlan || pocketPlan->length() != N) {
+            pocketPlan = std::make_unique<PocketPlan>(N);
+            ++pocketPlanBuilds;
+        }
+    }
+
+    void pocketFFT_C2C(const auto& in, auto&& out) {
+        using PocketComplex = pocketfft::detail::cmplx<ValueType>;
+        static_assert(sizeof(PocketComplex) == sizeof(TOutput) && alignof(PocketComplex) == alignof(TOutput), "PocketFFT's cmplx<T> must have std::complex<T>'s layout to transform the output range in place");
+
+        std::ranges::transform(in, out.begin(), [](const auto& v) { return static_cast<TOutput>(v); });
+        pocketPlan->exec(reinterpret_cast<PocketComplex*>(out.data()), ValueType(1), kPocketForward);
+    }
+
+    /// R2C is forward-only, and produces the same full N-bin spectrum the other two backends do: PocketFFT's
+    /// half-complex result [DC, Re(1), Im(1), …, Nyquist] is unpacked and mirrored by Hermitian symmetry.
+    void pocketFFT_R2C(const auto& in, auto&& out, std::size_t N) {
+        if (alignedOutputBuffer.size() != N) { // the SimdFFT path's scratch, also N reals and also written before it is read
+            alignedOutputBuffer.resize(N);
+        }
+        std::ranges::transform(in, alignedOutputBuffer.begin(), [](const auto& v) { return static_cast<ValueType>(v); });
+        pocketPlan->exec(alignedOutputBuffer.data(), ValueType(1), true);
+
+        out[0]            = TOutput(alignedOutputBuffer[0], ValueType(0)); // DC has no twin
+        std::size_t index = 1UZ;
+        std::size_t bin   = 1UZ;
+        for (; index + 1UZ < N; index += 2UZ, ++bin) {
+            out[bin]     = TOutput(alignedOutputBuffer[index], alignedOutputBuffer[index + 1UZ]);
+            out[N - bin] = std::conj(out[bin]);
+        }
+        if (index < N) { // even N: the Nyquist bin is real and, like DC, unmirrored
+            out[bin] = TOutput(alignedOutputBuffer[index], ValueType(0));
         }
     }
 
@@ -371,6 +518,7 @@ private:
         std::unique_ptr<FFT<TOutput, TOutput>>                    fftCache{};
         std::vector<TOutput, gr::allocator::Aligned<TOutput>>     aCache{};
         std::vector<TOutput, gr::allocator::Aligned<TOutput>>     bCache{};
+        std::unique_ptr<PocketPlan>                               pocketPlan{};
     };
 
     // a parked plan holds the whole per-length state, ~16 MB at N = 2^20 for complex<float>, so the count is
@@ -390,6 +538,7 @@ private:
         fftCache.swap(plan.fftCache);
         aCache.swap(plan.aCache);
         bCache.swap(plan.bCache);
+        pocketPlan.swap(plan.pocketPlan);
     }
 
     // the slot that yields the incoming plan takes the outgoing one, so a cached length change is a plain swap
