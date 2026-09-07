@@ -14,3 +14,6 @@ algorithm/include/gnuradio-4.0/algorithm/filter/FilterDesign.hpp:Normalised
 # A published title, cited as it was published: Danesfahani, G. R., Jeans, T. G., "Optimisation of
 # modified Mueller and Muller algorithm", Electronics Letters.
 algorithm/include/gnuradio-4.0/algorithm/sync/TimingErrorDetector.hpp:Optimisation
+
+# Vendored sources are inherited text: taken verbatim from their own project and never respelled.
+third_party/*
