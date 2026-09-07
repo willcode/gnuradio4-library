@@ -16,14 +16,16 @@
 #include <gnuradio-4.0/algorithm/fourier/SimdFFT.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-// vendored, third_party/pocketfft, BSD-3-Clause. GCC cannot prove the plan pointers non-null once the mixed-radix
-// codelets are inlined, so -Wnull-dereference fires inside the header; the diagnostic is raised by an optimizer pass
-// after inlining and is therefore not suppressed by the system include the build puts the directory on.
+// vendored, BSD-3-Clause. The path is the one the header is installed at, so it resolves for any consumer that has
+// the include root on its path and not only for one that takes a second include directory from the CMake target.
+// GCC cannot prove the plan pointers non-null once the mixed-radix codelets are inlined, so -Wnull-dereference fires
+// inside the header; the diagnostic is raised by an optimizer pass after inlining and a system include does not
+// suppress it.
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnull-dereference"
 #endif
-#include <pocketfft/pocketfft_hdronly.h>
+#include <gnuradio-4.0/third_party/pocketfft/pocketfft_hdronly.h>
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
@@ -34,7 +36,7 @@ namespace gr::algorithm {
 enum class FftBackend {
     Native,    /// this file's radix-2 kernels, and Bluestein for the other lengths
     Simd,      /// SimdFFT.hpp, for the sizes it accepts; Native for the rest
-    PocketFFT, /// third_party/pocketfft, a per-instance FFTPACK/Bluestein plan for any length
+    PocketFFT, /// the vendored PocketFFT, a per-instance FFTPACK/Bluestein plan for any length
     FourStep,  /// one long power-of-two complex transform split into two batches through PocketFFT's multi-dimensional driver, over `threads` threads
     Auto       /// per length, from the measurements in docs/specs/spec-fft-backends.md
 };
