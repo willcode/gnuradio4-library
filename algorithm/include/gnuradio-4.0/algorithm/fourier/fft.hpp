@@ -170,8 +170,8 @@ struct FFT {
 
     /// threads one compute() may use. One is the shape every caller had before this member existed: the whole
     /// transform runs on the calling thread. Above one, and at a length the four-step takes, Auto splits the
-    /// transform over that many threads; the count is clamped to hardware_concurrency() at every call, so a
-    /// setting larger than the machine never oversubscribes it. The instance stays single-consumer either way:
+    /// transform over that many threads; the count is clamped to the machine's core count, so a setting larger
+    /// than the machine never oversubscribes it. The instance stays single-consumer either way:
     /// the extra threads live only for the duration of one compute() and touch only this instance's buffers.
     std::size_t threads{1UZ};
 
@@ -212,10 +212,15 @@ struct FFT {
         return selected;
     }
 
-    /// threads one compute() will actually use: the request, never below one and never above what the machine has
+    /// threads one compute() will actually use: the request, never below one and never above what the machine has.
+    /// The machine's count is read once per process: hardware_concurrency() is three syscalls on glibc, and a short
+    /// transform -- the 2 to 256-point inverse per commutator step of a polyphase channelizer -- costs less than that.
     [[nodiscard]] std::size_t effectiveThreads() const noexcept {
-        const unsigned int available = std::thread::hardware_concurrency();
-        return std::clamp(threads, 1UZ, available == 0U ? 1UZ : static_cast<std::size_t>(available));
+        static const std::size_t available = [] {
+            const unsigned int reported = std::thread::hardware_concurrency();
+            return reported == 0U ? 1UZ : static_cast<std::size_t>(reported);
+        }();
+        return std::clamp(threads, 1UZ, available);
     }
 
     /// The shortest length Auto takes the split at. It is a policy bound and not a capability one: below it the two
