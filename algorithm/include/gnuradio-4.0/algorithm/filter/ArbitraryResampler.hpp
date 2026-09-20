@@ -133,7 +133,7 @@ struct ArmBank {
  * @brief `arm[p][r] = h[p + (r-1)*L]` from `p = -1` up, each arm reversed, arms adjacent.
  *
  * The `r = 0` column is `h[p-L]`: zero for every arm below `L`, and the first real tap of the wrap
- * arms, which is what makes the wrap branch free. Substituting `r' = r-1` leaves
+ * arms, which keeps the wrap branch free. Substituting `r' = r-1` leaves
  * `sum_r' h[p + r'*L] * x[a-1-r']` for `p < L`, the arm-`p` output anchored at `a-1`, and for
  * `p >= L` the same expression is the wrapped arm reading the next input sample.
  *
