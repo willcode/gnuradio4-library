@@ -21,8 +21,8 @@ namespace gr::algorithm::fft {
  * and the band integral is `sum_k psd[k] * fs / N`. Parseval makes that come out at the signal's own mean
  * power: `sum_k |X[k]|^2 = N * sum_n |x[n] w[n]|^2`, so the integral reduces to
  * `sum_n |x[n]|^2 w[n]^2 / sum(w^2)`, which for a constant-envelope input of amplitude A is exactly `A^2`,
- * whatever window was used. That is what makes the density calibration window-independent, and it is why
- * the density is the quantity kept.
+ * whatever window was used. That identity makes the density calibration window-independent, and the
+ * density is therefore the quantity kept.
  *
  * A tone read off its own peak bin is the other question and needs the other correction. The window spreads
  * a tone over several bins, so the peak density under-states it by the window's equivalent noise bandwidth;

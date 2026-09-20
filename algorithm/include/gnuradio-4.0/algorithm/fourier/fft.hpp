@@ -430,8 +430,8 @@ private:
     // Memory traffic per transform, in records (32 MiB each at N = 2^22 for complex<float>): the first batch reads
     // the input and writes the work buffer, the twiddle pass reads the work buffer and the table and writes the
     // work buffer, the second batch reads the work buffer and writes the output -- six records against the two of
-    // one flat transform. That traffic is what the batched driver's factor is bought with, and it is why the split
-    // is taken only from kFourStepMinSize upward.
+    // one flat transform. That traffic is the cost of the batched driver's factor, and the split is therefore taken
+    // only from kFourStepMinSize upward.
 
     void ensureFourStepTables(std::size_t N) {
         if (fourStepTwiddles.size() == N) {
