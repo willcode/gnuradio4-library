@@ -125,14 +125,14 @@ struct IndexAt {
  * floor read the other way: the last sample at or before a time, with the sub-sample remainder returned exactly
  * beside it rather than left for the caller to re-derive.
  *
- * `anchor_rem` is the anchor's own position within its nanosecond, a numerator over `rate_num`. It is what
+ * `anchor_rem` is the anchor's own position within its nanosecond, a numerator over `rate_num`. That remainder
  * makes `rebase` exact: without it, moving the anchor to an index whose time is not a whole nanosecond would
  * shift every later conversion by up to one nanosecond, and `rebase` exists to keep long runs inside the
  * 128-bit domain without changing the map at all. A clock built by hand leaves it zero, which says the anchor
  * sits exactly on its nanosecond.
  *
  * A clock is an immutable value. `rebase` moves the anchor and `withRate` starts a new rate at a stated index,
- * both returning new clocks: a rate change is a new anchor at the change point, which is what lets a
+ * both returning new clocks: a rate change is a new anchor at the change point, which lets a
  * discontinuity be represented rather than smeared across the samples on either side of it.
  *
  * Time is nanoseconds since the Unix epoch and nothing else: this kernel never interprets a calendar, so leap
@@ -178,7 +178,7 @@ struct SampleClock {
     [[nodiscard]] constexpr std::uint64_t periodNsNum() const noexcept { return kNsPerSecond * rate_den; }
 
     /// The rate as a `double`, for radian arithmetic that is floating point anyway. Never for an index or a
-    /// nanosecond count — that is what the rational above is for.
+    /// nanosecond count; the rational above serves those.
     [[nodiscard]] constexpr double rateHz() const noexcept { return static_cast<double>(rate_num) / static_cast<double>(rate_den); }
 
     /// The offset from `anchor_ns` split into whole nanoseconds and the exact remainder within the last one.
@@ -195,8 +195,8 @@ struct SampleClock {
         }
 
         // Below the anchor the numerator is negative, and a floor is not a truncation: the quotient rounds away
-        // from zero whenever the division leaves anything behind, and the remainder is what is left to reach the
-        // next whole nanosecond up.
+        // from zero whenever the division leaves anything behind, and the remainder gives the distance left to
+        // the next whole nanosecond up.
         const detail::U128 product = detail::mul(anchor_index - index, period);
         if (detail::less(product, anchor_rem)) {
             return NsSplit{0LL, anchor_rem - product.lo};

@@ -87,8 +87,8 @@ public:
      *
      * The derivative does not exist at a knot and does not exist outside the table, so this is not a
      * derivative: it is the slope of the one segment the time belongs to, clamped to a real segment at both
-     * ends the way `valueAt` clamps its value. A caller comparing a table against a rate — which is what
-     * `worstRangeRateMismatch` does — needs exactly that, and would otherwise have to reach into the knots and
+     * ends the way `valueAt` clamps its value. A caller comparing a table against a rate — `worstRangeRateMismatch`
+     * does exactly that — needs the segment slope, and would otherwise have to reach into the knots and
      * re-derive it.
      */
     [[nodiscard]] double segmentSlopePerSecond(std::int64_t t_ns) const noexcept { return _slopes[locate(t_ns)] * 1e9; }
@@ -155,7 +155,7 @@ protected:
 
     /// The value at a time already known to belong to `segment`. The two knot times are answered with the knot
     /// values themselves rather than through the line, so a point evaluated as the end of one segment and as the
-    /// start of the next gives the same bits — which is what lets the cursor walk stand in for a fresh search.
+    /// start of the next gives the same bits, which lets the cursor walk replace a fresh search.
     [[nodiscard]] double evaluate(std::size_t segment, std::int64_t t_ns) const noexcept {
         if (t_ns <= _times.front()) {
             return _values.front();
@@ -209,8 +209,8 @@ public:
      * @brief The radian increments for `out.size()` samples starting at `firstIndex` on `clock`.
      *
      * `out[k]` is `2*pi` times the integral of the offset, in cycles, across the interval from `timeOf` of
-     * sample `firstIndex + k` to `timeOf` of the next one. It is what `Phasor::mixModulated` consumes, one
-     * increment per sample, in the same `double` the phasor accumulates in.
+     * sample `firstIndex + k` to `timeOf` of the next one. `Phasor::mixModulated` consumes these increments, one
+     * per sample, in the same `double` the phasor accumulates in.
      */
     void phaseIncrementsFor(const SampleClock& clock, std::uint64_t firstIndex, std::span<double> out) const noexcept {
         if (out.empty()) {
