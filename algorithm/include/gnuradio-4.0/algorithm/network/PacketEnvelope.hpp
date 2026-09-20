@@ -67,7 +67,7 @@ inline constexpr std::uint16_t kLastItemTypeCode  = 13U;         ///< `gr::pmt::
 ///
 /// The enumeration is deliberately confined to what the header can express by itself. A refusal that needs the
 /// transport's own frame sizes, the reader's item type, its size bound or a metadata parser belongs to the block, not
-/// here — that split is what keeps this file usable from a socket, a byte stream and a file alike.
+/// here — that split keeps this file usable from a socket, a byte stream and a file alike.
 enum class EnvelopeError : std::uint8_t {
     BadMagic,            ///< the first four bytes are not `GR4P`
     BadVersion,          ///< `wire_version` is zero, which is not a version
@@ -179,7 +179,7 @@ template<> struct ItemTypeCode<std::complex<double>>   { static constexpr std::u
 template<typename T>
 inline constexpr std::uint16_t kItemTypeCode = ItemTypeCode<T>::value;
 
-/// @brief Whether `T` is a payload item type this envelope carries.
+/// @brief True when `T` is a payload item type this envelope carries.
 template<typename T>
 concept EnvelopeItem = requires { ItemTypeCode<T>::value; } && std::is_trivially_copyable_v<T> && itemSizeOf(ItemTypeCode<T>::value) == sizeof(T);
 
@@ -232,7 +232,7 @@ inline constexpr void writeU32(std::span<std::uint8_t> bytes, std::size_t at, st
 ///
 /// The order is not arbitrary. `magic` comes first so foreign traffic is named as foreign rather than as corruption —
 /// a subscriber that filters silently learns nothing, while a magic mismatch is one counted refusal. `wire_version`,
-/// `byte_order` and `header_bytes` come next because they are what locates the CRC. The CRC then runs before any
+/// `byte_order` and `header_bytes` come next because they locate the CRC. The CRC then runs before any
 /// remaining field is believed, so every other single-bit corruption in the covered bytes lands on one name instead
 /// of on whichever field the flipped bit happened to be in.
 [[nodiscard]] inline std::expected<EnvelopeHeader, EnvelopeError> decodeHeader(std::span<const std::uint8_t> bytes) noexcept {
