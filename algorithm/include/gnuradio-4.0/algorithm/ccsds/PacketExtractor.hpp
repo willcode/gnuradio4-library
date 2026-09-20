@@ -30,8 +30,8 @@
  * calculated location of the beginning of the first Packet is not consistent with the location
  * indicated by the First Header Pointer, then the Packet Extraction Function shall assume that the
  * First Header Pointer is correct, and shall continue the extraction based on that assumption."* The
- * pointer wins over the held fragment's own length, and that is what makes one lost frame cost one
- * packet rather than the rest of the pass. After any loss, the next frame whose pointer is neither
+ * pointer wins over the held fragment's own length. One lost frame therefore costs one packet
+ * rather than the rest of the pass. After any loss, the next frame whose pointer is neither
  * reserved value re-establishes a packet boundary from that frame alone.
  *
  * **Bounded state, proved rather than capped.** Between calls the held fragment never exceeds

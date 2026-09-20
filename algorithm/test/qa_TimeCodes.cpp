@@ -138,8 +138,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decode(tfield, cdsLayout(2U, 0U, true), kEpoch1950Ns, 0, instant) == TimeStatus::ok);
         expect(eq(instant.ns, kEpoch1950Ns)) << "day 0 of a 1950-epoch CDS code is 1950-01-01T00:00:00Z";
 
-        // The same day count against the Level-1 epoch is 1958, which is what says the epoch is read
-        // from the layout and not assumed.
+        // The same day count against the Level-1 epoch gives 1958. The epoch is therefore read from
+        // the layout and not assumed.
         expect(decode(tfield, cdsLayout(2U, 0U, false), kEpoch1950Ns, 0, instant) == TimeStatus::ok);
         expect(eq(instant.ns, -kEpoch1958Ns));
     };
@@ -267,8 +267,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
             expect(gt(checked, 0ULL));
         }
 
-        // The minimum spacing between adjacent fractions at m = 3 is 59 ns, which is what makes the
-        // map injective at that width and not at the next.
+        // The minimum spacing between adjacent fractions at m = 3 is 59 ns, which keeps the map
+        // injective at that width and not at the next.
         std::int64_t  minimumStep = kNsPerSecond;
         std::uint32_t discard     = 0U;
         for (std::uint64_t f = 0ULL; f + 1ULL < (1ULL << 24U); f += 9973ULL) {
@@ -529,7 +529,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(eq(instant.ns, 569'524'843'999'999'999LL)) << "which a double path does not reliably produce";
         expect(eq(instant.sub_ns_ps, 999U));
 
-        // A short fraction pads on the right, which is what a decimal fraction means.
+        // A short fraction pads on the right, as a decimal fraction requires.
         expect(decodeAscii("1988-01-18T17:20:43.5", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
         expect(eq(instant.ns, 569'524'843'500'000'000LL));
         expect(decodeAscii("1988-01-18T17:20:43.", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);

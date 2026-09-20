@@ -14,8 +14,8 @@
  * them is the implementation restated:
  *
  *   - every field round trips through write and parse over its full declared range, and a field at
- *     its maximum leaves its neighbors alone while one past its maximum is refused, which is what
- *     asserts the widths as consequences rather than as comments;
+ *     its maximum leaves its neighbors alone while one past its maximum is refused, which asserts
+ *     the widths as consequences rather than as comments;
  *   - nine header octet literals assembled by hand from the standards' bit positions, so a boundary
  *     that moves by one bit fails here and nowhere else. The pair that matters most is the first
  *     octet of a TM and an AOS header carrying the same spacecraft identifier of 42: 0x02 against
@@ -366,7 +366,7 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         expect(assembled == straight);
 
         // And the Galois realization of 4.1.4.6.2.2, seeded with the bit pattern that subsection
-        // publishes, produces the same sequence -- which is what says the two forms are one code.
+        // publishes, produces the same sequence -- the two forms are one code.
         expect(galoisOidFill(assembled.size()) == straight);
 
         // Reset returns the register to the all-ones seed of 4.1.4.6.2.1.

@@ -87,7 +87,7 @@ enum class TimeStatus {
     axis_overflow         //!< the instant is outside the signed 64-bit nanosecond axis
 };
 
-/// @brief What a P-field declares, or what a caller supplies where the P-field is implicit.
+/// @brief The time code's shape, as a P-field declares it or as a caller supplies it where the P-field is implicit.
 struct Layout {
     TimeCodeKind kind             = TimeCodeKind::cuc;
     bool         custom_epoch     = false; //!< identification 010 (CUC) or bit 4 set (CDS)
@@ -488,8 +488,8 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         }
         // 3.2.1: the code is TAI-based and the axis is UTC-based, so the caller's offset is the only
         // thing that can relate them and no table is consulted. A 32-bit offset of seconds is at most
-        // 2.15e18 ns and so fits the axis on its own; the difference is what can leave it, and that is
-        // tested before it is formed rather than detected in a wrapped result.
+        // 2.15e18 ns and so fits the axis on its own; the difference can leave the axis, and the code
+        // tests for that before forming it rather than detecting a wrapped result.
         if (taiUtcOffsetSeconds != 0) {
             const std::int64_t offsetNs = std::int64_t{taiUtcOffsetSeconds} * kNsPerSecond;
             if (detail::subtractOverflows(value, offsetNs)) {
@@ -621,7 +621,7 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * subfields and their separators. There is no P-field (3.5.2).
  *
  * 3.5.1.3 permits subsets, and this kernel **accepts right-truncation and refuses left-truncation**,
- * because the axis is what decides: a right-truncated form still names an instant with the omitted
+ * because the axis decides: a right-truncated form still names an instant with the omitted
  * subfields at their zero values, while a form with no year — or a time-only subset — names no instant
  * at all. Rule (d) forbids partial subfields, so `1988-1-18` is a bad character and not a lenient two.
  *

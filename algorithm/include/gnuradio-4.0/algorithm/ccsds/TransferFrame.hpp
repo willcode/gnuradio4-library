@@ -12,10 +12,10 @@
  * channel and a frame count. Three standards define three of them and they are close enough to be
  * confused and far enough apart that confusing them is silent: CCSDS 132.0-B-3 (TM), 732.0-B-4 (AOS) and
  * 232.0-B-4 (TC). Each gets its own type here rather than one parameterized header, because the three
- * differences below are what a shared parser gets wrong.
+ * a shared parser gets the three differences below wrong.
  *
  *   - The version number is `'00'` for TM and TC and `'01'` for AOS (132.0-B-3 4.1.2.2.2.2,
- *     732.0-B-4 4.1.2.2.2.2). It is the field that says which of the three these octets are, so a
+ *     732.0-B-4 4.1.2.2.2.2). This field says which of the three these octets are, so a
  *     mismatch is fatal and every other status here is not.
  *   - TM's spacecraft identifier is ten bits and its virtual channel identifier three; AOS's are eight
  *     and six. The boundary between the two fields therefore sits two bits apart in the two headers,
@@ -94,7 +94,7 @@ inline constexpr void writeField(std::span<std::uint8_t> octets, std::size_t bit
     }
 }
 
-/// @brief Whether `value` fits `width` bits, which is what `field_out_of_range` means.
+/// @brief True when `value` fits `width` bits. A value that does not fit yields `field_out_of_range`.
 [[nodiscard]] inline constexpr bool fits(std::uint32_t value, std::size_t width) noexcept { return width >= 32UZ || value < (1U << width); }
 
 } // namespace detail
@@ -451,7 +451,7 @@ struct Clcw {
 /**
  * @brief Parse a CLCW.
  *
- * The control word type and the CLCW version number together are what say these four octets are a
+ * The control word type and the CLCW version number together identify these four octets as a
  * CLCW: 4.2.1.2 fixes the type at `'0'` and 4.2.1.3 the version at `'00'`, and a field carrying
  * anything else is a Type-2 report or a control word of another kind. Both are therefore
  * `bad_version`, which is the one fatal status here, and the caller reads `ocfReportType` first if it
@@ -535,13 +535,13 @@ struct SequenceGap {
  * The standard specifies the 32-cell shift register with `h(x) = x^32 + x^22 + x^2 + x + 1`, the
  * Fibonacci form seeded all ones and never restarted (4.1.4.6.2.1), and publishes the first ten octets
  * of the result in the NOTE to 4.1.4.6.2.2: `FF FF FF FF 6D B6 D8 61 45 1F`. Those ten octets are
- * reproduced by the register below and by nothing else, which is what makes them the test.
+ * reproduced by the register below and by nothing else. They are therefore the test.
  *
  * The register holds stage 1 in the most significant bit and stage 32 in the least. The output is
  * stage 32 and the feedback is the exclusive-or of stages 1, 2, 22 and 32, most significant bit first,
  * which is the standard's `D0 + D1 + D2 + D22 + D32` read in the transmission direction. Written as a
  * recurrence over the output sequence that is `x^32 + x^31 + x^30 + x^10 + 1`, the reciprocal of the
- * stated polynomial, and the reciprocal is what the standard's own anchor selects.
+ * stated polynomial, and the standard's own anchor selects that reciprocal.
  *
  * 4.1.4.6.2.1's "shall not be restarted" is a transmitter property: the generator runs across frames
  * rather than resetting per frame, which is why the state lives in the object and `next` is not pure.
