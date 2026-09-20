@@ -60,7 +60,7 @@
  * - **The reported ratios are self-consistent.** `a - lambda_- = P|h_0|^2` and `b - lambda_- = P|h_1|^2`, so the
  *   two branch figures sum to `(a + b - 2 lambda_-)/lambda_- = (lambda_+ - lambda_-)/lambda_-`, the combined
  *   figure. `SNR_out = SNR_0 + SNR_1` therefore holds as an identity on the estimates themselves and not only on
- *   the truth, whatever the data is, which is what catches a sign or an eigenvalue swap immediately.
+ *   the truth, whatever the data is, which catches a sign or an eigenvalue swap immediately.
  * - **The orthogonal output nulls the signal.** For a unit `w`, `u = [-conj(w_1), conj(w_0)]` satisfies
  *   `w^H u = 0` identically, so it carries no component of `h` and is the interference-and-noise-only channel.
  *
@@ -79,13 +79,13 @@
  */
 namespace gr::measurement {
 
-/// How the two branches are turned into one.
+/// The rule that turns the two branches into one.
 enum class PolarizationMode : std::uint8_t {
     mrc,      ///< the maximal-ratio combination, where the output ratios add
     selection ///< the stronger branch alone, chosen from the same covariance
 };
 
-/// What the reported weight vector is scaled to.
+/// The scaling of the reported weight vector.
 enum class PolarizationNormalization : std::uint8_t {
     unit_noise, ///< the output noise power equals one branch's, so the reported ratios compare directly to a branch's
     unit_signal ///< the output signal power is 1
@@ -114,7 +114,7 @@ enum class PolarizationNormalization : std::uint8_t {
     return std::nullopt;
 }
 
-/// Where an unbounded figure is reported instead, in linear power ratio: 60 dB. Every use of it is counted, so a
+/// The figure reported in place of an unbounded one, in linear power ratio: 60 dB. Every use of it is counted, so a
 /// finite number here is never mistaken for a measurement.
 inline constexpr double kPolarizationSaturation = 1e6;
 
@@ -148,7 +148,7 @@ struct PolarizationEstimate {
 };
 
 /// @brief The estimate a caller uses before it has measured anything: branch @p branch through unchanged, the
-/// other on the orthogonal port. It is the one choice that is right in every case that matters — a valid signal,
+/// other on the orthogonal port. This choice is right in every case that matters — a valid signal,
 /// no phase discontinuity relative to what follows once branch 0 is the gauge reference, and no invented phase.
 [[nodiscard]] inline PolarizationEstimate polarizationPassthrough(std::size_t branch = 0UZ) {
     PolarizationEstimate out;
@@ -284,8 +284,8 @@ public:
 
         out.saturatedSnr = !(out.lambdaMinus > 0.);
         if (out.saturatedSnr) {
-            // All three figures are the cap, so the additive identity below does not hold here; that is what
-            // `saturatedSnr` says, and it is why a consumer reads the flag before the numbers.
+            // All three figures are the cap, so the additive identity below does not hold here.
+            // `saturatedSnr` reports that, and a consumer reads the flag before the numbers.
             out.branchSnr0  = kPolarizationSaturation;
             out.branchSnr1  = kPolarizationSaturation;
             out.combinedSnr = kPolarizationSaturation;

@@ -192,7 +192,7 @@ private:
  * ```
  *
  * and the leading factor is exactly the reciprocal of that: **`E[SK] = 1` exactly**, at every `M` and every `d`,
- * not asymptotically. That exactness is what makes the criterion assertable rather than approximate.
+ * not asymptotically. That exactness makes the criterion assertable rather than approximate.
  */
 [[nodiscard]] inline double spectralKurtosis(double s1, double s2, std::size_t m, double shape) noexcept {
     if (!(s1 > 0.) || m < 2UZ) {
@@ -209,8 +209,8 @@ private:
  * @brief `Var(SK) = 2 M^2 d (d+1) / ((M-1)(Md+2)(Md+3))`, from the same Dirichlet moments.
  *
  * It tends to `2(d+1)/(dM)`, and at `d = 1` it is `4M^2/((M-1)(M+2)(M+3))`, approaching `4/M`. Carrying it
- * beside a spectral-kurtosis record is what lets a downstream threshold be set in standard deviations without
- * the consumer re-deriving it.
+ * beside a spectral-kurtosis record lets a downstream threshold be set in standard deviations without the
+ * consumer re-deriving it.
  */
 [[nodiscard]] inline double spectralKurtosisVariance(std::size_t m, double shape) noexcept {
     if (m < 2UZ) {
@@ -302,8 +302,8 @@ public:
      * @brief The per-bin statistic at shape @p shape, and how many bins had no signal at all to divide by.
      *
      * A bin whose `S1` is exactly zero has no defined `SK` and is written as zero and counted. One dead bin is a
-     * property of the signal rather than of the record, so the count is what a consumer reads and not a flag on
-     * the whole spectrum.
+     * property of the signal rather than of the record, so a consumer reads the count rather than a flag on the
+     * whole spectrum.
      */
     [[nodiscard]] std::size_t evaluate(double shape, std::span<double> out) const {
         if (out.size() != _s1.size()) {

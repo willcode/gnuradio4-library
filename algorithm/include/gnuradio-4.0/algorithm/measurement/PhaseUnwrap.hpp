@@ -17,7 +17,7 @@
  * @brief Instantaneous phase carried as an exact integer cycle count beside a fractional phase, never as a float sum.
  *
  * The instantaneous phase of a complex stream is `atan2(im, re)`, wrapped to `[-pi, pi)`. Unwrapping adds back
- * the whole turns, and the only question is what carries the turns. The answer is arithmetic:
+ * the whole turns. The accumulator that carries those turns decides the accuracy:
  *
  * - A **`float`** accumulator holding total radians has a 24-bit significand. At `2*pi*10^9` radians its spacing
  *   is **512 radians — 81.5 whole cycles per representable step**. It stops resolving a milliradian past about
@@ -47,7 +47,7 @@
  * per sample, that is when `|f| < fs/2`. Below that bound the wrapped difference determines the turn uniquely;
  * at or above it two different turn counts produce the same wrapped difference and no algorithm operating on the
  * samples alone can choose. That is Nyquist restated for phase, and it is not something this can check — it can
- * only observe that a step came close, which is what `maxStepFraction` and `nSuspectSteps()` are: an
+ * only observe that a step came close. `maxStepFraction` and `nSuspectSteps()` carry that observation: an
  * observability hook, not a detector.
  */
 namespace gr::measurement {
