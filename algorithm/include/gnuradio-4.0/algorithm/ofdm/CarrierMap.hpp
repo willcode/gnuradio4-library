@@ -14,7 +14,7 @@
 
 namespace gr::ofdm {
 
-/// What a carrier is used for. Guards are everything the numerology did not claim, so the three are disjoint
+/// The role a carrier plays. Guards are everything the numerology did not claim, so the three are disjoint
 /// and complete over the transform by construction rather than by a check that could be forgotten.
 enum class Occupancy : std::uint8_t { Guard, Data, Pilot };
 
@@ -32,10 +32,10 @@ enum class Occupancy : std::uint8_t { Guard, Data, Pilot };
  * bin `fft_len/2`, while `+fft_len/2` does not exist. A numerology that names it is refused rather than folded,
  * because folding it would silently move a carrier to the other side of the band.
  *
- * A numerology is the data set and the pilot set. Everything else is guard, which is what makes the three
- * disjoint and complete over `fft_len` without a completeness check: guards are computed as the complement, so
- * there is nothing for the caller to get wrong and nothing for the class to have to reject. What is checked is
- * that no carrier falls outside the range, that neither set repeats a carrier, and that the two sets do not
+ * A numerology is the data set and the pilot set. Everything else is guard, which makes the three disjoint and
+ * complete over `fft_len` without a completeness check: guards are computed as the complement, so there is
+ * nothing for the caller to get wrong and nothing for the class to have to reject. The constructor checks that
+ * no carrier falls outside the range, that neither set repeats a carrier, and that the two sets do not
  * share one. DC is a carrier like any other here — a numerology may use it or leave it guarded — and
  * `dcOccupied()` says which, so a consumer never has to infer it from a set it did not build.
  *
@@ -211,8 +211,8 @@ private:
  * carrier's parity and its bin's parity are the same and "even carrier" and "even bin" name the same set.
  *
  * The occupied band is the `occupied` carriers closest to DC, DC itself excluded: `-occupied/2 … -1` and
- * `1 … occupied/2`. DC carries nothing, because a preamble is what a receiver measures its own frequency error
- * against and a DC term is the one component a residual offset cannot be seen against. The even members of that
+ * `1 … occupied/2`. DC carries nothing, because a receiver measures its own frequency error against the
+ * preamble and a DC term is the one component a residual offset cannot be seen against. The even members of that
  * band each take a QPSK point scaled by `sqrt(2)`, so each holds twice the power a fully occupied symbol would
  * put on a carrier and the preamble's total energy comes to `2 * evenCarrierCount`, which is `occupied` itself
  * whenever `occupied/2` is even — the case every published numerology is in.
