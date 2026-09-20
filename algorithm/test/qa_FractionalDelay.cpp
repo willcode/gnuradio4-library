@@ -35,7 +35,7 @@ constexpr double kRolloff = 0.2;
 
 using Complex = std::complex<float>;
 
-/// A unit tone at @p f0 cycles per sample, which is what a fractional delay's contract is written against: a
+/// A unit tone at @p f0 cycles per sample, the signal a fractional delay's contract is written against: a
 /// delay of `d` samples is a phase rotation of `-2*pi*f0*d` and nothing else.
 [[nodiscard]] std::vector<Complex> tone(double f0, std::size_t n) {
     std::vector<Complex> out(n);
