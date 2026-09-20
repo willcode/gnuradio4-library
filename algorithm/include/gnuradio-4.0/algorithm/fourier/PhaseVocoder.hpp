@@ -22,8 +22,8 @@ namespace gr::algorithm {
  * replayed at `analysisHop / synthesisHop` times its original pace with the spectral content
  * untouched. Each bin's synthesis phase advances by the bin's MEASURED frequency — its center plus
  * the principal value of the analysis phase advance's deviation from the center's, divided by the
- * analysis hop — rather than by the center alone, which is what keeps a partial that sits between
- * bins coherent from frame to frame. The first frame adopts its analysis phase outright, so a
+ * analysis hop — rather than by the center alone, which keeps a partial that sits between bins
+ * coherent from frame to frame. The first frame adopts its analysis phase outright, so a
  * stream that begins mid-tone begins coherent instead of at an arbitrary offset.
  *
  * The spectrum is never modified, so no two bins collide in the output and there is no amplitude
