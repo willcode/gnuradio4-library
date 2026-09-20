@@ -52,7 +52,7 @@
  * ```
  *
  * These bound the *ideal* interpolator; the realized floor is the prototype's own delivered passband ripple,
- * so a bank sized past that point buys nothing without also raising the attenuation. The default here is
+ * so a bank sized past that point improves nothing unless the attenuation also rises. The default here is
  * `q = 1` at a 60 dB design, hence `L = 32`, which `arbitraryBankSize` reads off.
  *
  * **Why the bound holds under a moving delay.** It is derived for a fixed fractional offset. A moving delay
@@ -72,7 +72,7 @@ inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
 /**
  * @brief The prototype for a pure delay over a bank of @p bankSize arms.
  *
- * `designArbitraryResampler` with `minRate = 1`, which is what a pure delay is: the stopband edge is `0.5/L`
+ * `designArbitraryResampler` with `minRate = 1`, the design a pure delay takes: the stopband edge is `0.5/L`
  * and the bank neither decimates nor interpolates, it only shifts. Named here so that a caller building a delay
  * line does not have to know that the rate it would otherwise pass is the identity.
  */
@@ -121,8 +121,8 @@ inline void fractionalDelayQ32(std::span<const double> delaySeconds, double samp
  * `(N-1)/(2L)` input samples, stated and not compensated — the Lagrange weights add none of their own, being
  * exact at their nodes. The extra whole sample is the bank's: the wrap arm's first tap reads one input sample
  * past the window's anchor, so the anchor is placed one sample behind the output to keep every read inside the
- * span the caller handed over. Paying it is what makes the stream chunk independent; not paying it would make
- * the last output of every chunk depend on the first sample of the next.
+ * span the caller handed over. Paying that sample makes the stream chunk independent; without it the last
+ * output of every chunk would depend on the first sample of the next.
  */
 template<typename T>
 requires PolyphaseSample<T>
