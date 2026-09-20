@@ -46,8 +46,8 @@ constexpr std::array<double, 2>   kOverlaps{0., 0.5};
  *
  * One window costs one transform pair of length `M = acfTransformLength(N, L)` plus `O(M)` for the taper, the
  * magnitude squaring and the accumulation, so an input sample costs `2 * 5 M log2(M) / H` real operations. The last
- * rows time the transform pair alone at each `M`, which is what the estimator's cost is measured against: the
- * difference between a grid row and its transform row is everything this code does that the transform does not.
+ * rows time the transform pair alone at each `M`, the baseline the estimator's cost is measured against: the
+ * difference between a grid row and its transform row covers everything this code does beyond the transform.
  */
 void benchAutocorrelation() {
     using namespace benchmark;
