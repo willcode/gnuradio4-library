@@ -12,8 +12,8 @@
  *
  * The header carries a length count that is **one fewer** than the packet data field's octets
  * (4.1.3.5.2, and 4.1.3.5.3 writes it out as `C = (Total Number of Octets in the Packet Data Field)
- * - 1`). That convention is the whole of what this header is easy to get wrong, and it is handled here
- * by holding the wire value in the struct and putting the `+ 1` in exactly one function:
+ * - 1`). That convention is the one thing this header is easy to get wrong. The code holds the wire
+ * value in the struct and puts the `+ 1` in exactly one function:
  *
  *     packet_data_field_octets = data_length + 1
  *     total_packet_octets      = 6 + data_length + 1 = data_length + 7
@@ -67,7 +67,7 @@ struct SpacePacketHeader {
 /// @brief The whole packet's length in octets, header included. Derived: `6 + data_length + 1`.
 [[nodiscard]] inline constexpr std::size_t totalPacketOctets(const SpacePacketHeader& header) noexcept { return kSpacePacketHeaderSize + packetDataOctets(header); }
 
-/// @brief Whether this packet is an idle packet, 133.0-B-2 4.1.3.3.4.4.
+/// @brief True for an idle packet, 133.0-B-2 4.1.3.3.4.4.
 [[nodiscard]] inline constexpr bool isIdlePacket(const SpacePacketHeader& header) noexcept { return header.apid == kIdleApid; }
 
 [[nodiscard]] inline constexpr ParseStatus parseSpacePacketHeader(std::span<const std::uint8_t> octets, SpacePacketHeader& out) noexcept {
