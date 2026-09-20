@@ -34,7 +34,7 @@ staircase, the unpack probe and its one-bit-move property, the three on-air para
 amplitude chain through the prediction re-blend, determinism, and the concealment advance — all
 reproduce through the reference implementation.
 
-**`v5/gr5/imbe.py` is what was translated.** The header follows it statement for statement,
+**The translation source is `v5/gr5/imbe.py`.** The header follows it statement for statement,
 including the arithmetic order the note pins as codec state: which harmonic count feeds `Lmax`
 in the phase stage (the synthesizer's previous count, never the predictor's), which feeds the
 prediction interpolation (the predictor's, initially 30), and the exact order of the three draw
@@ -63,7 +63,7 @@ None of that realization is carried here. Specifically:
 The consequence is stated as plainly as the rule: **sample-exact equality with the fixed-point
 decoder is not a conformance criterion and is not claimed.** Conformance is stated structurally
 and functionally — packing, determinism, state advance, boundary and transition behavior — and
-those are what `qa_Imbe` asserts.
+`qa_Imbe` asserts those.
 
 ## What it was checked against
 
@@ -79,13 +79,12 @@ decoders fresh and fed the same parameter words in transmitted order:
   to within a couple of least-significant samples.
 
 The residual is float against table-driven fixed point. The measurement is the fixture plus the
-two decoders, so it reproduces anywhere — and it earns its keep: its first run is what caught a
-unit convention in the enhancement denominator (the fundamental there is cycles per sample, not
-radians), which had been costing about 2 dB of formant level on every loud frame. That is an
-A/B doing exactly the job the licensing line assigns it.
+two decoders, so it reproduces anywhere. Its first run caught a unit convention in the
+enhancement denominator (the fundamental there is cycles per sample, not radians) that had been
+costing about 2 dB of formant level on every loud frame. That is an A/B doing exactly the job
+the licensing line assigns it.
 
 Against the reference implementation the header was translated from, the check is direct
 equality of decoded PCM on the fixtures the qa carries — the same equations in both languages,
 both in float64 — with the qa asserting the note's pinned vectors rather than a golden stream,
-because last-ulp arithmetic is what floats across platforms while structure and determinism do
-not.
+because last-ulp arithmetic varies across platforms while structure and determinism do not.

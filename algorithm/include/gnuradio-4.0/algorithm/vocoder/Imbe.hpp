@@ -16,7 +16,7 @@
  * become 160 samples of 8 kHz speech. 144 transmitted bits carry 88 information bits, which
  * is where the two rates in the name come from.
  *
- * The decoder is stated in real arithmetic. What the standard pins exactly is exact here —
+ * The decoder is stated in real arithmetic. Everything the standard pins exactly is exact here —
  * the bit fields, the allocation and quantizer tables, the Park-Miller noise generator and
  * its consumption order, the window values, the band-bin edges — and the synthesis math is
  * `double` throughout. That is a deliberate boundary: the constants, tables, layouts and

@@ -13,14 +13,14 @@
  * The IMBE 7200x4400 decoder is specified in real arithmetic, so these tests pin what the
  * specification pins and refuse to pin what it deliberately leaves free.
  *
- * What is pinned exactly: the bit fields (the unpack probe exercises every field boundary, and
+ * Pinned exactly: the bit fields (the unpack probe exercises every field boundary, and
  * the three on-air parameter sets are real transmitted voice, where a wrong boundary cannot
  * hide), the integer rules (the L staircase), the noise generator and its consumption order
  * (twelve outputs plus the two anchors that catch a decoder drawing the wrong number of times
  * at construction), and the amplitude chain end to end, including the prediction re-blend that
  * only shows up on the second codeword.
  *
- * What is pinned structurally rather than sample for sample: synthesis. Two fresh decoders
+ * Pinned structurally rather than sample for sample: synthesis. Two fresh decoders
  * agree and a reset one matches a fresh one, because the noise generator is integer and its
  * consumption order is codec state; a concealed frame is not a repeat of the previous output,
  * because phases, predictor, tail and seed all keep advancing through it; and every output
