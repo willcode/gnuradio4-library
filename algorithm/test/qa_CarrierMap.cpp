@@ -97,8 +97,8 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         }
         expect(that % std::ranges::all_of(claimed, [](int n) { return n == 1; })) << "every bin is claimed exactly once by exactly one set";
 
-        // The bins are in the order the carriers were named, because that order is what a symbol assembler
-        // walks: the n-th data symbol goes to the n-th data carrier.
+        // The bins are in the order the carriers were named, because a symbol assembler walks that order:
+        // the n-th data symbol goes to the n-th data carrier.
         for (std::size_t i = 0UZ; i < map.nData(); ++i) {
             expect(eq(map.dataBins()[i], CarrierMap::binOf(64UZ, numerology.data[i])));
         }
@@ -138,7 +138,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         expect(eq(CarrierMap::pilotSymbolIndex(1UZ, 0UZ, 4UZ, 6UZ), 4UZ));
         expect(eq(CarrierMap::pilotSymbolIndex(2UZ, 0UZ, 4UZ, 6UZ), 2UZ));
 
-        // The reduction before the multiply is what keeps a stream-absolute symbol index from overflowing, and
+        // The reduction before the multiply keeps a stream-absolute symbol index from overflowing, and
         // it is congruent to the unreduced form rather than merely close to it.
         constexpr std::size_t kHuge = std::size_t{1} << 62;
         for (const std::size_t cycleLength : {3UZ, 6UZ, 13UZ}) {
