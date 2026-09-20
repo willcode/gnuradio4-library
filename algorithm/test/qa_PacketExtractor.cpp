@@ -16,9 +16,9 @@
  * rule, and the criterion the group exists for is the third test below -- one zone lost between two
  * fragments of a spanning packet costs exactly one packet, not the rest of the pass.
  *
- * The negative control is in the same file and is the point of it: a reassembler that ignores the
- * pointer and simply concatenates, fed the same three zones, is asserted to produce a *wrong* second
- * packet. That is what the pointer buys, stated as a difference rather than as a warning.
+ * The negative control sits in the same file: a reassembler that ignores the pointer and simply
+ * concatenates, fed the same three zones, is asserted to produce a *wrong* second packet. The
+ * difference between the two arms states the pointer rule's effect rather than warning about it.
  */
 namespace {
 

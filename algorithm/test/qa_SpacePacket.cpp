@@ -9,8 +9,8 @@
 #include <gnuradio-4.0/algorithm/ccsds/SpacePacket.hpp>
 
 /*
- * The space packet primary header is six octets and one arithmetic convention, and the convention is
- * the whole of what this file is for. 133.0-B-2 4.1.3.5.3 states it as an equation --
+ * The space packet primary header is six octets and one arithmetic convention, and that convention is
+ * the subject of this file. 133.0-B-2 4.1.3.5.3 states it as an equation --
  * C = (octets in the packet data field) - 1 -- so these tests assert the numbers it produces and the
  * numbers the other reading produces, rather than restating the rule:
  *
