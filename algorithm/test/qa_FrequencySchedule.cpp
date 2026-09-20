@@ -57,7 +57,7 @@ constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
     return cycles;
 }
 
-/// Kahan summation, because the question is what the increments are, not how well a naive loop adds 48000 of
+/// Kahan summation, because the test measures the increments and not how well a naive loop adds 48000 of
 /// them: a plain sum of a 3e4 rad total loses more than the 1e-9 the increments themselves are held to.
 [[nodiscard]] double compensatedSum(std::span<const double> values) {
     double sum          = 0.;
@@ -174,7 +174,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         std::println("qa_FrequencySchedule: worst per-sample increment difference against a per-sample search {:.3e} rad", worst);
         expect(lt(worst, 1e-12));
 
-        // The cursor is what a chunk boundary resets, so a dense table is where chunk independence is worth
+        // A chunk boundary resets the cursor, so a dense table is where chunk independence is worth
         // asking about a second time.
         std::vector<double> oneAtATime(kSamples);
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
@@ -185,7 +185,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
 
     // Criterion 3's sign anchor. The spec quotes +10.207 kHz for this case; worked out it is
     // 437e6 * 7000 / 299792458 = 10203.7257 Hz, so the spec's figure is 3.3 Hz high and the correct one is
-    // pinned here. What matters beyond the digits is the sign: closing reads high.
+    // pinned here. Beyond the digits the sign matters: closing reads high.
     "a closing pass reads high, to the hertz"_test = [] {
         const double closing = offsetFor(-7'000., 437e6);
 
@@ -267,11 +267,11 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
 
     // The composition a Doppler-correcting block is: a schedule's increments straight into the phasor that
     // rides them. Neither kernel is interesting alone — the schedule produces numbers nobody reads and the
-    // phasor takes increments from anywhere — so the pair is what has to be shown working, at kernel level,
+    // phasor takes increments from anywhere — so the pair has to be shown working, at kernel level,
     // before a block puts a name on it.
     //
     // A two-knot ramp from -5 kHz to +15 kHz across two seconds at 48 kS/s. The mixed tone's angle is unwrapped
-    // against the schedule's own closed-form integral and the residual is what is asserted, at every sample
+    // against the schedule's own closed-form integral and the residual is asserted at every sample
     // rather than at the end: an error that grew with the run would show as a residual that grew, and an error
     // that did not grow is the property a coherent demodulator downstream depends on.
     //
