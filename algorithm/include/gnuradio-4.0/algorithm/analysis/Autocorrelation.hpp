@@ -54,7 +54,7 @@
  */
 namespace gr::analysis {
 
-/// @brief Which sequence the estimator is handed: the samples themselves, or their mean-removed squared magnitude.
+/// @brief The sequence the estimator correlates: the samples themselves, or their mean-removed squared magnitude.
 enum class AcfKind : std::uint8_t { Complex, Envelope };
 
 /// @brief Which divisor turns the accumulated products into an estimate of `R(tau)`.
@@ -140,7 +140,7 @@ struct AcfConfig {
  *
  * On noise the record's values are Rayleigh with `E|.|^2 = 1/nPairs`, so the median is `sqrt(ln2 / nPairs)` and
  * `10 log10(gamma / median) = 5 log10(ln(nLags/pFa) / ln 2)` — the pair count cancels, leaving a figure that depends
- * on the searched-lag count and the stated rate alone. A median reference and not an absolute one is what makes this
+ * on the searched-lag count and the stated rate alone. A median reference, rather than an absolute one, makes this
  * usable on a real capture, where a receiver's own envelope wander sits as a broad pedestal under every lag.
  */
 [[nodiscard]] inline double acfPeakDetectThresholdDb(std::size_t nLags, double pFa) noexcept {
@@ -179,7 +179,7 @@ struct AcfConfig {
  * the same height: at `nLags = 1024` and `pFa = 1e-3` the Rayleigh threshold realizes a per-lag rate of `2e-4` on a
  * real estimate against the `9.8e-7` it was designed for, a per-record rate of about 0.2. A real estimate therefore
  * takes `u = normalDeviate(pFa/nLags) / sqrt(nPairs)`, and its median is `0.6745/sqrt(nPairs)` rather than
- * `sqrt(ln2/nPairs)`, which is what the decibel form divides by.
+ * `sqrt(ln2/nPairs)`; the decibel form divides by that median.
  */
 [[nodiscard]] inline double acfRealThreshold(std::size_t nPairs, std::size_t nLags, double pFa) noexcept {
     if (nPairs == 0UZ || nLags == 0UZ || !(pFa > 0.) || !(pFa < 1.)) {
@@ -442,7 +442,7 @@ struct Autocorrelation {
         _config.falseAlarmRate = pFa;
     }
 
-    /// @brief Whether the correlated sequence is real, which decides the tail a threshold is computed from: the
+    /// @brief True when the correlated sequence is real, which decides the tail a threshold is computed from: the
     /// envelope kind squares magnitudes, and the complex kind of a real input correlates real samples.
     [[nodiscard]] bool                    realValued() const noexcept { return _config.kind == AcfKind::Envelope || std::is_same_v<T, float>; }
     [[nodiscard]] std::uint64_t           streamAt() const noexcept { return _segmenter.streamAt; }
