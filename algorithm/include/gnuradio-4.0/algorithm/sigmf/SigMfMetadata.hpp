@@ -709,8 +709,8 @@ namespace detail {
 
     if (metadata.captures.empty()) {
         // An empty `captures` array is not an error: the specification gives it a meaning, which is
-        // one capture segment beginning at sample zero. Materializing that segment here is what
-        // lets every step downstream assume the array holds at least one.
+        // one capture segment beginning at sample zero. Materializing that segment here lets every
+        // step downstream assume the array holds at least one.
         metadata.captures.emplace_back();
     }
     return metadata;
