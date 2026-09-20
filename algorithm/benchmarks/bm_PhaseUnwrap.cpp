@@ -31,9 +31,9 @@ constexpr std::size_t kRepeats = 200UZ;
 } // namespace
 
 /// Per sample the unwrapper does one `atan2`, one subtract, two compares and one integer add. `atan2` is a
-/// transcendental and the phase *is* the measurement, so there is no equivalent form that avoids it -- but its
-/// share should be attributed rather than assumed, which is what the second row does: the same loop with the
-/// transcendental replaced by a cheap monotone stand-in, so the difference is the call's own cost.
+/// transcendental and the phase *is* the measurement; no equivalent form avoids it. The second row attributes its
+/// share: the same loop runs with the transcendental replaced by a cheap monotone stand-in, and the difference
+/// between the two rows is the call's own cost.
 void benchPhaseUnwrap() {
     using namespace benchmark;
     using boost::ut::operator""_test;
