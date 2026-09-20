@@ -19,8 +19,8 @@
  * @brief Reassembling a file delivered as chunks in ordinary frames, in bounded memory.
  *
  * Many mission protocols deliver an image, a spectrum sweep or a log as a sequence of chunks carried
- * in whatever frames the link already has, and they are all the same engine with a different header
- * read. That is what this file is: the engine is general and knows no protocol, and the per-protocol
+ * in whatever frames the link already has, and one engine serves them all under a different header
+ * read. This file holds that engine: it is general and protocol-independent, and the per-protocol
  * part is a pure function from a record to a `ChunkDescriptor`. Two general descriptor formats ship —
  * a fixed header carrying a chunk index over a fixed chunk size, and one carrying a byte offset — and
  * a protocol whose header is its own supplies a descriptor directly.
@@ -54,7 +54,7 @@
  * `max_file_bytes` have no defaults and zero is refused for both, because the quantity bounded is not
  * one record but the sum of every file in flight, and the values that size it — an offset, a declared
  * size, a chunk count — all arrive from the air. `peakBytes` states the worst case from the settings
- * themselves, which is what a graph needs to state its own. `max_file_bytes` is refused above
+ * themselves, so a graph can state its own. `max_file_bytes` is refused above
  * `2^31 - 1` so that every payload this engine produces fits a record extent by construction.
  *
  * **Eviction counts records and never reads a clock.** A wall-clock timeout makes a graph's output
@@ -96,7 +96,7 @@ struct FlagSpec {
 /**
  * @brief What a protocol's format function returns, carrying no protocol knowledge whatever.
  *
- * Position is an index, an offset, or neither. Where both are present the **offset wins** and the
+ * Position is an index, an offset, or neither. With both present the **offset wins** and the
  * index is carried only for regression detection, because an offset is a statement about the file and
  * an index is a statement about the transmission.
  *
@@ -149,7 +149,7 @@ struct OffsetChunkFormat {
 
 using ChunkFormat = std::variant<IndexedChunkFormat, OffsetChunkFormat>;
 
-/// @brief Why a configuration was refused, each naming what is wrong with it.
+/// @brief The reason a configuration was refused, each value naming what is wrong with it.
 enum class FormatError { ok, field_too_wide, field_reaches_payload, fields_overlap, index_required, offset_required, chunk_size_required, cannot_complete, open_files_required, file_bytes_required, file_bytes_too_large, gaps_required };
 
 [[nodiscard]] inline constexpr std::string_view formatErrorName(FormatError error) noexcept {
@@ -349,7 +349,7 @@ namespace detail {
 /// @brief `spec-packet-to-dataset.md`'s extent bound, which `max_file_bytes` may not exceed.
 inline constexpr std::uint64_t kMaxFileBytes = static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max());
 
-/// @brief Why a file left the engine before it was released.
+/// @brief The reason a file left the engine before it was released.
 enum class EvictReason { none, cap, stale, superseded, no_position, reconfigure, at_stop, completed };
 
 /// @brief What a completed or evicted file says about itself. Every value is a count, never a verdict.
@@ -426,7 +426,7 @@ public:
         }
     }
 
-    /// @brief Whether a configuration is admissible, naming what is wrong with it.
+    /// @brief Checks a configuration, returning `ok` or the error naming what is wrong with it.
     [[nodiscard]] static FormatError validate(const Config& config) {
         if (config.max_open_files == 0UZ) {
             return FormatError::open_files_required;
@@ -790,7 +790,7 @@ private:
             file.facts.declared_check = descriptor.declared_check;
         }
 
-        // Where both are declared and a chunk size is configured, the two agree exactly when the last
+        // With both declared and a chunk size configured, the two agree exactly when the last
         // chunk is non-empty and no longer than a chunk.
         if (file.facts.declared_size.has_value() && file.facts.declared_chunks.has_value() && chunkSize() != 0UZ) {
             const std::uint64_t chunk = chunkSize();
@@ -890,7 +890,7 @@ private:
                 // One bit says one cell is covered, so a cell filled only in part would report coverage the
                 // file does not have. Only the last chunk of a file is allowed to be short, and where a
                 // declaration already says which index that is, any other index carrying a short payload is
-                // a malformed chunk. Where nothing says yet where the file ends the chunk is admitted and
+                // a malformed chunk. Until something says where the file ends, the chunk is admitted and
                 // its index remembered, since only one index can turn out to be the last one.
                 const std::optional<std::uint64_t> last = lastIndex(file);
                 if (last.has_value()) {
@@ -949,7 +949,7 @@ private:
         // Part of this chunk is already held with different bytes in it. The first write stands whether it
         // covered the whole range or only some of it, so the chunk is refused entire rather than written
         // around the disagreement: half a chunk placed against a copy that contradicts the other half is a
-        // file no consumer could reason about, and the refusal is what puts it on the reject port.
+        // file no consumer could reason about, and the refusal puts it on the reject port.
         if (alreadyIn != 0ULL && coveredDiffers(file, begin, payload)) {
             ++file.facts.conflicts;
             return RefusalReason::content_conflict;
@@ -1003,7 +1003,7 @@ private:
         return high > low ? high - low : 0ULL;
     }
 
-    /// @brief Whether the parts of this chunk that are already covered disagree with what is held.
+    /// @brief True when the parts of this chunk that are already covered disagree with what is held.
     ///
     /// Only the covered sub-ranges are compared: the uncovered ones have not been written yet and
     /// comparing them would report a conflict against zeros on every partially overlapping chunk.
