@@ -39,7 +39,7 @@ constexpr std::uint64_t kTrimReducedDen = 10'000ULL;
 ///
 /// The upper bound is not strict, and that is the floor showing through rather than a weakness: the next sample
 /// may start part-way through the very nanosecond the time names, in which case its floored time is that same
-/// nanosecond. `remainder_num` is what distinguishes the two cases exactly, and the tests below pin it against
+/// nanosecond. `remainder_num` distinguishes the two cases exactly, and the tests below pin it against
 /// hand-worked values rather than leaning on this predicate for it.
 [[nodiscard]] bool bracketsTime(const SampleClock& clock, std::int64_t t_ns) {
     const IndexAt at = clock.indexOf(t_ns);
@@ -146,7 +146,7 @@ const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
 
     // Criterion 2. The anchor is bookkeeping, not part of the map: rebasing anywhere — inside the span, above it,
     // below it, on a sample whose time is not a whole nanosecond — must leave every conversion bit-identical.
-    // `anchor_rem` is what makes that true; a rebase that dropped it would shift the whole span by a nanosecond.
+    // `anchor_rem` makes that true; a rebase that dropped it would shift the whole span by a nanosecond.
     "rebase leaves the map bit-identical"_test = [] {
         constexpr std::uint64_t kBase = kBeyondDouble;
         constexpr std::size_t   kSpan = 4'096UZ;
@@ -171,7 +171,7 @@ const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
             }
         }
 
-        // Rebasing twice is rebasing once, which is what makes it safe to do on every buffer.
+        // Rebasing twice is rebasing once, which makes it safe to do on every buffer.
         const SampleClock twice = clock.rebase(kBase + 3ULL).rebase(kBase + 11ULL);
         const SampleClock once  = clock.rebase(kBase + 11ULL);
         expect(eq(twice.anchor_ns, once.anchor_ns));

@@ -11,13 +11,13 @@
 
 namespace {
 
-/// The table's own ceiling, which is the only size worth measuring: the loader runs once at staging, so what a
-/// caller needs to know is what the worst file costs, not what a typical one does.
+/// The table's own ceiling, the only size worth measuring: the loader runs once at staging, so a caller needs the
+/// cost of the worst file rather than the cost of a typical one.
 constexpr std::size_t kKnots   = std::size_t{1} << 20;
 constexpr std::size_t kRepeats = 3UZ;
 
 /// A two-column pass table in one of the two time scales. The unix_ns arm is the cheap one by construction --
-/// one `from_chars` against a fixed-width calendar parse -- so the pair is what says what the calendar costs.
+/// one `from_chars` against a fixed-width calendar parse -- so the difference between the arms gives the calendar's cost.
 [[nodiscard]] std::string passFile(bool iso) {
     constexpr std::int64_t kEpochSeconds = 1'788'000'000LL;
 

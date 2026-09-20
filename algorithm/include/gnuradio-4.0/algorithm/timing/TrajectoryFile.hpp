@@ -163,8 +163,8 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
 }
 
 /// A header key begins with a letter or an underscore and a knot's time never does — it begins with a digit or
-/// a sign under either time scale. That is what separates the two, and it is why the header block can end at
-/// the first knot line while an unknown key on a line that is plainly a header still refuses.
+/// a sign under either time scale. That first character separates the two, and the header block can therefore
+/// end at the first knot line while an unknown key on a line that is plainly a header still refuses.
 [[nodiscard]] inline bool trajectoryLooksLikeKey(std::string_view token) noexcept {
     if (token.empty()) {
         return false;
@@ -292,8 +292,8 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
         trajectoryRefuse(line, "a calendar field is out of range", field);
     }
 
-    // 4-digit years reach 9999 and the axis reaches 2262-04-11; the product below is what runs out first, so it
-    // is checked against the axis rather than against the year.
+    // 4-digit years reach 9999 and the axis reaches 2262-04-11; the product below runs out first, so it is
+    // checked against the axis rather than against the year.
     constexpr std::int64_t kMaxSeconds = std::numeric_limits<std::int64_t>::max() / 1'000'000'000LL;
 
     const std::int64_t seconds = std::chrono::sys_days(date).time_since_epoch().count() * 86'400LL + hour * 3'600LL + minute * 60LL + second;
@@ -549,8 +549,8 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
  *
  * The figure a consistent pair produces is not zero, and its size is arithmetic rather than tolerance: the
  * secant slope of a piecewise-linear table sampled every `h` seconds from a curve whose second derivative is
- * bounded by `a` differs from the true derivative by at most `a*h/2`, so that is what a consistent pair reads
- * and what the QA asserts against.
+ * bounded by `a` differs from the true derivative by at most `a*h/2`, so a consistent pair reads that bound
+ * and the QA asserts against it.
  */
 [[nodiscard]] inline double worstRangeRateMismatch(const DelaySchedule& delay, const FrequencySchedule& frequency, double carrierHz) {
     if (!(carrierHz > 0.) || !std::isfinite(carrierHz)) {

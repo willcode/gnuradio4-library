@@ -124,7 +124,7 @@ const boost::ut::suite<"ScheduleAnchor"> _schedule_anchor = [] {
         expect(anchor.nReanchors() == 0ULL);
 
         // The reason it does not move, as a number: re-anchoring 1 s later on a schedule reading 10 kHz would
-        // step the accumulated phase by 2*pi*10^4 rad, which is what a coherent demodulator downstream rides.
+        // step the accumulated phase by 2*pi*10^4 rad, the phase a coherent demodulator downstream rides.
         const FrequencySchedule schedule = passSchedule();
         const SampleClock       held     = anchor.clock(48'000ULL, 1ULL);
         const SampleClock       moved(kTagIndex + 1'000ULL, static_cast<std::int64_t>(kTagTimeNs) + 1'000'000'000LL, 48'000ULL, 1ULL);

@@ -37,7 +37,7 @@ constexpr double kCarrierHz = 437e6;
 [[nodiscard]] std::string wellFormed(std::string_view columns, std::string_view timeScale, std::string_view knots) { return std::format("#!gr4-trajectory 1\ncolumns {}\ntime_scale {}\ncarrier_hz 437000000\n{}", columns, timeScale, knots); }
 
 /// The exception's type, and the line number in its message. Every refusal names a line, and the line number
-/// is the only part of a parse failure an operator can act on, so it is what the test reads.
+/// is the only part of a parse failure an operator can act on, so the test reads it.
 void refuses(std::string_view text, std::size_t line, std::string_view label) {
     bool        threw = false;
     std::string message;
@@ -300,7 +300,7 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
         expect(std::abs(worst - bound) <= bound * 1e-9) << "a consistent pair reads a*h/2 and no more";
 
         // Perturbing one knot away from the residual's own sign raises the figure by exactly the perturbation,
-        // which is what says the function measures rather than returning a constant.
+        // which shows the function measures rather than returning a constant.
         std::vector<double> rates(t.frequency->offsets().begin(), t.frequency->offsets().end());
         rates[pass.knots / 2UZ] -= offsetFor(1., kCarrierHz);
         const FrequencySchedule perturbed(t.frequency->times(), rates);
