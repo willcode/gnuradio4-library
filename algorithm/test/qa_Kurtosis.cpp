@@ -36,8 +36,8 @@ namespace {
 constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 using Complex           = std::complex<float>;
 
-/// The mean and the sample standard deviation of a run of readings, which is what every band below is applied
-/// to: the criteria assert a distribution, not a value.
+/// The mean and the sample standard deviation of a run of readings. Every band below is applied to this pair:
+/// the criteria assert a distribution, not a value.
 struct Spread {
     double mean{0.};
     double sigma{0.};
@@ -340,7 +340,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         // Unlike the carrier arm this one has a finite-M correction that is not derived anywhere, and it is
         // largest where the interferer is rarest: at p = 0.1 only about a tenth of the M estimates carry it. So
         // the criterion is convergence rather than a pinned tolerance -- the deviation is measured at two values
-        // of M and asserted to fall, which is what says the closed form is the limit and the gap is the
+        // of M and asserted to fall, which shows the closed form to be the limit and the gap the
         // correction.
         for (const double p : {0.1, 0.25, 0.5}) {
             constexpr double kSignal = 100.;

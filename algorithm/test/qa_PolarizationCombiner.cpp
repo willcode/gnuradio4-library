@@ -409,14 +409,14 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
 
         // The signal's own amplitude is not identifiable from the covariance -- only `P|h|^2 = lambda_+ -
         // lambda_-` is -- so unit_signal is the scale that makes the combined output's signal power one, and
-        // that is what it reports.
+        // it reports that scale.
         std::vector<Complex> signal(kWindow);
         polarizationCombine(scene.signal0, scene.signal1, unitSignal, signal);
         std::println("unit_signal scale {:.6f}, realized output signal power {:.6f}", unitSignal.scale, meanPower(signal));
         expect(approx(meanPower(signal), 1., 0.02)) << "the combined output's signal power is 1";
         expect(approx(unitSignal.scale, 1. / std::sqrt(unitSignal.lambdaPlus - unitSignal.lambdaMinus), 1e-12));
 
-        // The ratios do not depend on the scale, which is what makes them comparable across normalizations.
+        // The ratios do not depend on the scale, which makes them comparable across normalizations.
         expect(approx(unitNoise.combinedSnr, unitSignal.combinedSnr, 1e-12));
     };
 };

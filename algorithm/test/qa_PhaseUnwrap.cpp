@@ -121,7 +121,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(aliased.cycles() == -kTurns) << "0.6 cycles per sample reads the alias at -0.4, exactly";
         expect(aliased.nSuspectSteps() == 0ULL) << "and the step is 0.8*pi either way, so the observability hook does not fire -- it is a hook, not a detector";
 
-        // What does fire is a step that comes close to pi. At 0.47 cycles per sample the step is 0.94*pi, past
+        // A step that comes close to pi does fire it. At 0.47 cycles per sample the step is 0.94*pi, past
         // the default 0.9, while the unwrap is still exactly right.
         CycleUnwrapper close;
         close.process(tone(0.47, 1'000UZ), cycles, phase);
@@ -150,7 +150,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(phaseB[0] == 0.f) << "zero starts at exactly zero";
         expect(cyclesA[0] == 0LL && cyclesB[0] == 0LL);
 
-        // Neither changes the differences, which is what a consumer usually wants.
+        // Neither changes the differences, the quantity a consumer usually reads.
         double worst = 0.;
         for (std::size_t k = 1UZ; k < kSamples; ++k) {
             const double a = kTwoPi * static_cast<double>(cyclesA[k] - cyclesA[k - 1UZ]) + static_cast<double>(phaseA[k] - phaseA[k - 1UZ]);
