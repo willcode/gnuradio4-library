@@ -15,8 +15,8 @@
 // The three backends of gr::algorithm::FFT over the receiver's own shape: one long single-precision complex
 // transform of a power-of-two length, repeated at a fixed size, and the short real-input audio transform.
 //
-// Two columns beyond the elapsed time. The cost of one butterfly unit -- the time divided by N log2(N) -- is what
-// compares across lengths and across engines. The error is the relative L2 norm of the whole spectrum against a
+// Two columns beyond the elapsed time. The cost of one butterfly unit -- the time divided by N log2(N) -- compares
+// across lengths and across engines. The error is the relative L2 norm of the whole spectrum against a
 // double-precision reference of the same input, which says how much of a backend's speed is bought from accuracy.
 
 using namespace std::chrono;
@@ -205,8 +205,8 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
         "", threads, twiddleFromTables, simdBatch);
 }
 
-// The same four-step built on SimdFFT instead of PocketFFT, which is what decides whether the vendored header is
-// still earning its place. SimdFFT transforms one contiguous, 64-byte aligned span at a time: it has no batched
+// The same four-step built on SimdFFT instead of PocketFFT. The comparison decides whether the vendored header is
+// still needed. SimdFFT transforms one contiguous, 64-byte aligned span at a time: it has no batched
 // entry point and no strided access, so the columns cannot be transformed where they lie and the result cannot be
 // written transposed. The split on it is therefore five passes over the record -- a transposing copy, the column
 // batch, a transposing pass that carries the twiddles, the row batch, and the transpose the natural bin order
@@ -330,7 +330,7 @@ int main() {
         sweep<float>(N);
     }
 
-    // The four-step split against SimdFFT, which is what Auto runs on one thread at every one of these lengths. The
+    // The four-step split against SimdFFT, the engine Auto runs on one thread at every one of these lengths. The
     // SimdFFT row is the one to read the split against; it is single-threaded by construction, so its own row is
     // printed once per length. Give this section the performance cores rather than one of them -- the point is the
     // thread count, and pinning it to one core would measure the pin.
