@@ -105,7 +105,7 @@ struct Frame {
             std::vector<Complex> useful(gr::lte::kSymbolSamples);
             inverse.compute(bins, useful);
             // 72 unit-power subcarriers through an unnormalized inverse transform put 128*72 of energy
-            // into 128 samples, so this is what makes the scene's mean per-sample power one.
+            // into 128 samples, so this scale sets the scene's mean per-sample power to one.
             const float scale = 1.f / std::sqrt(72.f);
             for (Complex& sample : useful) {
                 sample *= scale;
@@ -278,7 +278,7 @@ const boost::ut::suite<"LteSyncSignals"> _lteSyncSignals = [] {
                     // The two half-symbol correlations are not orthogonal to the ten subcarriers outside the
                     // sequence, which the full-symbol correlation is, so the ten of them leak a deterministic error
                     // into the estimate that no signal-to-noise ratio removes. Its bound is the root's own: 530 Hz
-                    // for root 25, 228 Hz for roots 29 and 34. What is asserted is the 600 Hz the identifier's
+                    // for root 25, 228 Hz for roots 29 and 34. The test asserts the 600 Hz the identifier's
                     // clean-frame criterion allows, and the arm reports the distribution behind it.
                     expect(std::abs(best.frequencyHz) < 600.f) << std::format("cell ({},{}) draw {} reports no offset, got {:.1f} Hz", nId1, nId2, draw, best.frequencyHz);
                     worst[nId2] = std::max(worst[nId2], static_cast<double>(std::abs(best.frequencyHz)));

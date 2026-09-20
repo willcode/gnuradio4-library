@@ -64,7 +64,7 @@ inline constexpr std::uint32_t kCellIdentities = 504U;
 /// Cell-identity groups, the range of `N_ID^(1)`.
 inline constexpr std::uint32_t kCellGroups = 168U;
 
-/// Zadoff-Chu roots for `N_ID^(2) = 0, 1, 2`. Roots 29 and 34 sum to 63, which is what makes their sequences conjugates.
+/// Zadoff-Chu roots for `N_ID^(2) = 0, 1, 2`. Roots 29 and 34 sum to 63, which makes their sequences conjugates.
 inline constexpr std::array<std::uint32_t, 3UZ> kPssRoots{25U, 29U, 34U};
 
 /// Frame structure type 1 (paired spectrum) or type 2 (unpaired), which the two signals' spacing distinguishes.
@@ -374,7 +374,7 @@ struct SssReading {
  * The even subcarriers carry one shift of the s-sequence under the `c0` scrambling and the odd ones the other
  * shift under `c1` and a z-shift the first half names, so the two halves are read in that order. Both half-frame
  * forms are tried and the better one wins; a shift pair outside the table is not a cell and is refused for that
- * form, which is what makes the reading a check as well as a decode.
+ * form, which makes the reading a check as well as a decode.
  */
 [[nodiscard]] inline SssReading decodeSssValues(std::span<const float, kSignalLength> soft, std::uint32_t nId2) {
     if (nId2 >= kPssRoots.size()) {
@@ -444,7 +444,7 @@ struct PssDetection {
  * The correlation is evaluated directly rather than through a transform. The direct form costs `3*K*128` complex
  * multiply-accumulates per input sample against a transform form's `3*K` inverse transforms per window, so it is
  * the dearer of the two for a wide search; it is exact at every position with no transform-length quantization of
- * the hypothesis grid, and a wide search is what `search_interval` on the consuming block is for.
+ * the hypothesis grid, and `search_interval` on the consuming block exists for a wide search.
  *
  * The references are held as split real and imaginary arrays, and the window is split the same way once per
  * search, because a `std::complex<float>` product carries infinity and NaN rules that stop a compiler
@@ -698,10 +698,10 @@ struct ExamineCounts {
  *
  * A window is a run of positions with context on both sides. The first `kMaxSecondaryLookBehind`
  * samples are the context the furthest secondary hypothesis reaches back into and are never
- * themselves candidate positions; the last `kSymbolSamples - 1` are what a primary symbol beginning
- * at the final position occupies. Between them sit exactly `nPositions` candidates, each evaluated
- * once, which is what lets a caller cut a stream into windows that neither miss a symbol nor
- * evaluate one twice.
+ * themselves candidate positions; a primary symbol beginning at the final position occupies the
+ * last `kSymbolSamples - 1`. Between them sit exactly `nPositions` candidates, each evaluated
+ * once, which lets a caller cut a stream into windows that neither miss a symbol nor evaluate one
+ * twice.
  *
  * The thresholds are the caller's per call rather than the detector's, because a consumer that
  * sweeps a band spends them differently from one watching a single carrier.
