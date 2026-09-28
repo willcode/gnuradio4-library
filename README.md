@@ -77,7 +77,9 @@ run on a machine whose CPU placement and clock speed the caller controls: the
 longer measurements run, and a cost test asserts its tight bound. With neither
 variable set, a cost test asserts a loose bound that still catches a change in
 the shape of the cost, or prints its figure where it has no loose bound. When
-both are set, `DISABLE_SENSITIVE_TESTS` decides.
+both are set, `DISABLE_SENSITIVE_TESTS` decides. A test that asserts a tight
+bound under `ENABLE_BENCHMARK_TESTS` builds at the build type's optimization
+level, not at `GR_QA_OPTIMIZATION_LEVEL`.
 
 ## Using the Library
 
