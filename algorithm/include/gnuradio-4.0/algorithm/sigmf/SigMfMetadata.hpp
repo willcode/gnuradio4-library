@@ -17,22 +17,22 @@
 #include <vector>
 
 /**
- * @brief The SigMF metadata document: its three objects, the field mapping, and the validator.
+ * @brief The SigMF metadata document, with its three objects, the field mapping and the validator.
  *
- * Two rules bind the whole type. Every index is a `std::uint64_t` and never passes through a
- * floating-point type, and an absent field is a value distinct from a field written as zero, so the
- * writer's omission rule can tell them apart.
+ * Two rules hold throughout. Every index is a `std::uint64_t` and does not pass through a
+ * floating-point type. An absent field is a value distinct from a field written as zero. The
+ * writer's omission rule can therefore tell the two apart.
  */
 namespace gr::sigmf {
 
-/// The SigMF core specification version this tree writes: the current release, v1.2.6.
+/// The SigMF core specification version the writer states, release v1.2.6.
 inline constexpr std::string_view kWrittenVersion = "1.2.6";
 
-/// The largest array this reader will repair by sorting. Above it an unsorted array is refused:
-/// a few out-of-order entries are hand-edited sloppiness, thousands are a malfunctioning producer.
+/// The largest array this reader repairs by sorting. Above it an unsorted array is refused. A few
+/// out-of-order entries come from careless hand edits. Thousands come from a malfunctioning producer.
 inline constexpr std::size_t kMaxUnsortedEntries = 1024UZ;
 
-/// A refusal: a stable name a test can assert on, plus the offending value in prose.
+/// A refusal, with a stable name and the offending value in prose.
 struct Error {
     std::string code{};
     std::string message{};
@@ -45,7 +45,7 @@ struct Limits {
     std::size_t   maxUnsortedEntries{kMaxUnsortedEntries};
 };
 
-/// Tolerances exercised while reading a document; every tolerance leaves a count behind.
+/// Tolerances applied while reading a document. Each tolerance applied is counted.
 struct ParseCounters {
     std::uint64_t nIntegralFloatIndices{0U};
     std::uint64_t nCapturesSorted{0U};
@@ -113,9 +113,9 @@ inline constexpr std::array<std::string_view, 8>  kAnnotationKnownKeys{"core:sam
 
 [[nodiscard]] inline bool isKnown(std::span<const std::string_view> known, std::string_view key) noexcept { return std::ranges::find(known, key) != known.end(); }
 
-/// Read a schema field the specification types as an unsigned integer, applying the integral-float
-/// tolerance: `4096.0` is read as `4096` from the token's own digits and counted, while a non-zero
-/// fraction or an exponent is refused.
+/// Read a schema field that the specification types as an unsigned integer, with the integral-float
+/// tolerance. `4096.0` is read as `4096` from the token's own digits and counted. A non-zero fraction
+/// or an exponent is refused.
 [[nodiscard]] inline std::expected<std::uint64_t, Error> unsignedField(const json::Value& value, std::string_view field, ParseCounters& counters) {
     if (!value.isNumber()) {
         return std::unexpected(Error{"meta_unparsable", std::format("field '{}' is not a number", field)});
@@ -236,9 +236,9 @@ struct CivilDate {
 /**
  * @brief Read an RFC 3339 UTC timestamp with a mandatory `Z` and any number of fractional digits.
  *
- * The specification's `time-secfrac = "." 1*DIGIT` puts no bound on the fractional part, so every
- * digit is consumed and the first nine are kept; a tenth and beyond are below the resolution of
- * the returned value and are ignored rather than refused.
+ * The specification's `time-secfrac = "." 1*DIGIT` puts no bound on the fractional part. Every
+ * digit is consumed, and the first nine are kept. Digits from the tenth on are below the resolution
+ * of the returned value. They are ignored and not refused.
  *
  * @return nanoseconds since the Unix epoch, or nothing when the text is not of that form or names
  *         an instant before the epoch.
@@ -295,7 +295,7 @@ struct CivilDate {
     return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}Z", date.year, date.month, date.day, timeOfDay / 3600U, (timeOfDay / 60U) % 60U, timeOfDay % 60U, microseconds);
 }
 
-/// Section 1.3's table: `core:version` governs parsing, so a higher major version is refused.
+/// Applies section 1.3's table. `core:version` governs parsing, and a higher major version is refused.
 [[nodiscard]] inline std::optional<Error> checkVersion(std::string_view version) {
     if (version.empty()) {
         return Error{"missing_version", "the document carries no 'core:version'"};
@@ -411,7 +411,7 @@ struct CivilDate {
     return document;
 }
 
-/// Serialize `metadata`. The output is a pure function of the value: equal values give equal bytes.
+/// Serialize `metadata`. The output is a pure function of the value, and equal values give equal bytes.
 [[nodiscard]] inline std::expected<std::string, Error> write(const Metadata& metadata) {
     auto document = toJson(metadata);
     if (!document) {
@@ -422,7 +422,7 @@ struct CivilDate {
 
 namespace detail {
 
-/// Map a JSON refusal onto the source's own vocabulary; the rest become `meta_unparsable`.
+/// Map a JSON refusal onto this reader's refusal names. Unmapped refusals become `meta_unparsable`.
 [[nodiscard]] inline Error fromParseError(const json::ParseError& error) {
     const bool        named = error.message == "duplicate_key" || error.message == "nesting_too_deep" || error.message == "bad_escape" || error.message == "index_overflow";
     const std::string where = error.detail.empty() ? std::format("at line {}, column {}", error.line, error.column) : std::format("at line {}, column {} ('{}')", error.line, error.column, error.detail);
@@ -632,9 +632,9 @@ namespace detail {
 /**
  * @brief Parse a SigMF metadata document, bounding every count before anything is sized from it.
  *
- * An array that arrived unsorted within `limits.maxUnsortedEntries` is sorted, counted and reported;
- * a larger unsorted array is refused, because thousands of out-of-order machine-generated entries
- * mean the producer is malfunctioning and sorting them would launder its output.
+ * An unsorted array of at most `limits.maxUnsortedEntries` entries is sorted, counted and reported.
+ * A larger unsorted array is refused. Thousands of out-of-order machine-generated entries mean the
+ * producer is malfunctioning. Sorting them would hide that fault.
  */
 [[nodiscard]] inline std::expected<Metadata, Error> parse(std::string_view text, const Limits& limits, ParseCounters& counters) {
     auto document = json::parse(text);
@@ -708,22 +708,22 @@ namespace detail {
     }
 
     if (metadata.captures.empty()) {
-        // An empty `captures` array is not an error: the specification gives it a meaning, which is
-        // one capture segment beginning at sample zero. Materializing that segment here lets every
-        // step downstream assume the array holds at least one.
+        // An empty `captures` array is not an error. The specification defines it as one capture
+        // segment beginning at sample zero. The segment is created here. Later steps can then assume
+        // the array holds at least one segment.
         metadata.captures.emplace_back();
     }
     return metadata;
 }
 
 /**
- * @brief The document-level checks a recording must pass before a source streams it.
+ * @brief The document-level checks a recording must pass before it is streamed.
  *
- * Every failure is a named refusal: a recording this tree cannot read faithfully is one it refuses
- * to read at all. `parse` has already materialized the segment an empty `captures` array implies,
- * so the array is non-empty by the time this runs. The bound of every index against `core:offset`
- * is a SHOULD in the specification and a refusal here, which is this tree's own strictness rather
- * than a conformance check.
+ * Every failure is a named refusal. A recording that cannot be read faithfully is not read at all.
+ * `parse` has already created the segment an empty `captures` array implies. The array is therefore
+ * non-empty when this runs. The specification makes the bound of every index against `core:offset`
+ * a SHOULD. This check refuses a violation. That strictness is a choice made here and not a
+ * conformance requirement.
  */
 [[nodiscard]] inline std::optional<Error> validateForStreaming(const Metadata& metadata) {
     if (auto refusal = checkVersion(metadata.global.version); refusal) {

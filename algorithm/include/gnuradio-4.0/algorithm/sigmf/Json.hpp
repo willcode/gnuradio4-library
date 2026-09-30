@@ -17,23 +17,23 @@
 /**
  * @brief A strict, non-throwing RFC 8259 reader and writer for SigMF metadata documents.
  *
- * The document model preserves object member order, because the emitted text has to be a pure
- * function of the value: two equal documents serialize to identical bytes. Numbers record the shape
- * of the token they came from, so an integral token is recovered from its own digits and never
- * routed through a `double`. No exception escapes this header's API; every failure is reported as a
- * `ParseError` carrying the one-based line and column of the offending byte.
+ * The document model preserves object member order. The emitted text must be a pure function of the
+ * value, and two equal documents serialize to identical bytes. Numbers record the shape of the token
+ * they came from. An integral token is recovered from its own digits and does not pass through a
+ * `double`. No exception escapes this header's API. Every failure is reported as a `ParseError` with
+ * the one-based line and column of the offending byte.
  */
 namespace gr::sigmf::json {
 
-/// Maximum nesting depth the parser accepts. SigMF's schema is three levels deep, so the only thing
-/// a deeper document can be is an attempt to exhaust the stack. The limit is fixed rather than
-/// settable: sixty-four is far past any legitimate extension and far short of a thread stack.
+/// Maximum nesting depth the parser accepts. SigMF's schema is three levels deep. A much deeper
+/// document can only be an attempt to exhaust the stack. The limit is fixed and not settable.
+/// Sixty-four is far past any legitimate extension and far short of a thread stack.
 inline constexpr std::size_t kMaxDepth = 64UZ;
 
 struct ParseError {
     std::size_t line{1UZ};
     std::size_t column{1UZ};
-    std::string message{}; ///< stable refusal name a test can assert on
+    std::string message{}; ///< stable refusal name
     std::string detail{};  ///< the offending key or token, empty when the refusal has none
 };
 
@@ -41,8 +41,8 @@ struct ParseError {
  * @brief A JSON number together with the shape of the token that produced it.
  *
  * `magnitude` holds the digits before the decimal point, parsed by `std::from_chars` on the text.
- * A consumer reading an unsigned schema field uses `magnitude` and never `real`, so a token such as
- * `9007199254740993` survives exactly.
+ * An unsigned schema field is read from `magnitude` and not from `real`. A token such as
+ * `9007199254740993` then survives exactly.
  */
 struct Number {
     bool          isInteger{false};         ///< the token carried neither a fractional part nor an exponent
@@ -58,9 +58,9 @@ struct Number {
 /**
  * @brief A JSON value of one of six kinds, with object member order preserved.
  *
- * Objects are held as two parallel vectors rather than a map, so that member order is a property of
- * the document rather than of a container's hashing, and lookup is linear over the few members a
- * SigMF object carries.
+ * Objects are held as two parallel vectors and not as a map. Member order then comes from the
+ * document and not from a container's hashing. Lookup is linear over the few members of a SigMF
+ * object.
  */
 class Value {
 public:
@@ -157,7 +157,7 @@ public:
 
     void push(Value element) { _values.push_back(std::move(element)); }
 
-    /// Append a member without checking for an existing one; the parser rejects duplicates first.
+    /// Append a member without checking for an existing one. The parser rejects duplicates first.
     void append(std::string key, Value member) {
         _keys.push_back(std::move(key));
         _values.push_back(std::move(member));
@@ -545,7 +545,7 @@ private:
         return true;
     }
 
-    /// Consume one escape sequence and append its expansion to `out`; returns the refusal on failure.
+    /// Consume one escape sequence and append its expansion to `out`. Returns the refusal on failure.
     [[nodiscard]] std::optional<ParseError> parseEscape(std::string& out) {
         advance(); // consume the backslash
         const char marker = peek();
@@ -741,8 +741,8 @@ inline void writeNumber(std::string& out, const Number& number) {
         return;
     }
     // The shortest decimal that reads back to the same double, in whichever of fixed and scientific
-    // notation is shorter. This is the precision-free `std::to_chars` overload; the `general` format
-    // argument is a different rule that spells 433921337 as 4.33921337e+08.
+    // notation is shorter. This is the `std::to_chars` overload without a precision. The `general`
+    // format argument follows a different rule and spells 433921337 as 4.33921337e+08.
     const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), number.real);
     out.append(buffer.data(), static_cast<std::size_t>(converted.ptr - buffer.data()));
 }
@@ -798,7 +798,7 @@ inline void writeValue(std::string& out, const Value& value, std::size_t level) 
 
 } // namespace detail
 
-/// Parse one JSON document. No exception escapes; a failure carries the one-based line and column.
+/// Parse one JSON document. No exception escapes. A failure carries the one-based line and column.
 [[nodiscard]] inline std::expected<Value, ParseError> parse(std::string_view text) {
     detail::Parser parser(text);
     return parser.run();

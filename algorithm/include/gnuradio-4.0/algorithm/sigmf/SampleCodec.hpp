@@ -18,15 +18,15 @@
 /**
  * @brief The SigMF datatype grammar and the sample conversions between a dataset and a stream.
  *
- * The tuple (datatype, stream component type, scaling, endianness) is fixed for a whole recording,
- * so it is resolved once into a single monomorphic conversion held as a plain function pointer. The
- * per-component loop then carries no branch on datatype, scaling or endianness.
+ * The datatype, stream component type, scaling and endianness are fixed for a whole recording. The
+ * four are resolved once into a single monomorphic conversion, held as a plain function pointer. The
+ * per-component loop then has no branch on datatype, scaling or endianness.
  */
 namespace gr::sigmf {
 
-// The codec's byte handling assumes a little-endian host: the read path swaps only for a `_be`
-// datatype and the write path emits little-endian only. A big-endian port needs the whole of this
-// header revisited rather than silently mishandled.
+// The codec's byte handling assumes a little-endian host. The read path swaps only for a `_be`
+// datatype, and the write path emits little-endian only. A big-endian port needs a review of this
+// whole header. The assertion stops a build that would mishandle the bytes without a sign.
 static_assert(std::endian::native == std::endian::little, "gr::sigmf's sample codec requires a little-endian host");
 
 enum class Domain : std::uint8_t { Real, Complex };
@@ -51,9 +51,9 @@ struct Datatype {
 /**
  * @brief Parse a `core:datatype` spelling.
  *
- * Returns `datatype_unparsable` on failure, which is the only refusal the grammar has. The
- * 64-bit integers and every 16-bit float spelling are outside the specification's own dataset
- * format production, so they are refused for the reason any unknown spelling is refused.
+ * Returns `datatype_unparsable` on failure. It is the grammar's single refusal. The 64-bit integers
+ * and every 16-bit float spelling are outside the specification's dataset format production. They
+ * are refused like any unknown spelling.
  */
 [[nodiscard]] inline std::expected<Datatype, std::string> parseDatatype(std::string_view spelling) {
     const auto unparsable = [] { return std::unexpected(std::string("datatype_unparsable")); };
@@ -94,8 +94,8 @@ struct Datatype {
         return unparsable();
     }
     // The grammar's own productions are `f32`/`f64` for a float and `i8`/`i16`/`i32`/`u8`/`u16`/
-    // `u32` for an integer. A 16-bit float and a 64-bit integer are not derivable from either, so
-    // neither is a datatype this format defines and both are refused as unknown spellings.
+    // `u32` for an integer. Neither production derives a 16-bit float or a 64-bit integer. Neither
+    // is a datatype this format defines, and both are refused as unknown spellings.
     const bool widthInGrammar = result.kind == SampleKind::Float ? (result.width == 32U || result.width == 64U) : (result.width != 64U);
     if (!widthInGrammar) {
         return unparsable();
@@ -127,7 +127,7 @@ struct Datatype {
     return out;
 }
 
-/// True for the sixteen spellings this tree writes: little-endian, plus the two suffixless 8-bit ones.
+/// True for the sixteen writable spellings, little-endian plus the two suffixless 8-bit ones.
 [[nodiscard]] inline bool isWriteLegal(const Datatype& datatype) {
     if (datatype.kind != SampleKind::Float && datatype.width == 64U) {
         return false;
@@ -143,8 +143,8 @@ namespace detail {
 template<typename T>
 concept StreamComponent = std::same_as<T, std::uint8_t> || std::same_as<T, std::int16_t> || std::same_as<T, std::int32_t> || std::same_as<T, float>;
 
-/// The four conversion cases of the scaling table, closed. An integer pair needs the same width and
-/// signedness; any other integer pair is refused rather than defined.
+/// The four conversion cases of the scaling table, and no others. An integer pair needs the same width
+/// and signedness. Any other integer pair is refused and has no defined conversion.
 template<typename TFile, typename TStream>
 inline constexpr bool kConvertible = (std::floating_point<TFile> && std::floating_point<TStream>) //
                                      || (std::integral<TFile> && std::floating_point<TStream>)    //
@@ -188,13 +188,13 @@ inline constexpr double kFullScale = static_cast<double>(std::uint64_t{1} << (8U
 template<typename TInteger>
 inline constexpr double kZeroOffset = std::is_signed_v<TInteger> ? 0.0 : kFullScale<TInteger>;
 
-/// The saturation limits of the unit path: the signed range of the width, before the offset is added.
+/// The saturation limits of the unit path, the signed range of the width before the offset is added.
 template<typename TInteger>
 inline constexpr double kUnitLow = -kFullScale<TInteger>;
 template<typename TInteger>
 inline constexpr double kUnitHigh = kFullScale<TInteger> - 1.0;
 
-/// The saturation limits of the raw path: the integer type's own range.
+/// The saturation limits of the raw path, the integer type's own range.
 template<typename TInteger>
 inline constexpr double kRawLow = static_cast<double>(std::numeric_limits<TInteger>::lowest());
 template<typename TInteger>
@@ -222,7 +222,7 @@ template<typename TFile, typename TStream, bool Unit, bool Swap>
 inline std::uint64_t decodeComponents(const std::byte* source, TStream* destination, std::size_t count) noexcept {
     std::uint64_t clipped = 0U;
     if constexpr (!kConvertible<TFile, TStream>) {
-        // unreachable: the selection step refuses this pair by name before a pointer to it is taken
+        // unreachable, since the selection step refuses this pair by name before taking a pointer to it
         (void)source;
         (void)destination;
         (void)count;
@@ -275,7 +275,7 @@ template<typename TFile, typename TStream, bool Unit, bool Swap>
 inline std::uint64_t encodeComponents(const TStream* source, std::byte* destination, std::size_t count) noexcept {
     std::uint64_t clipped = 0U;
     if constexpr (!kConvertible<TFile, TStream>) {
-        // unreachable: the selection step refuses this pair by name before a pointer to it is taken
+        // unreachable, since the selection step refuses this pair by name before taking a pointer to it
         (void)source;
         (void)destination;
         (void)count;
@@ -385,8 +385,8 @@ template<detail::StreamComponent TStream>
         }
         break;
     }
-    // unreachable for a value from `parseDatatype`, which admits no other width; a hand-built
-    // value naming one is refused with the grammar's own name
+    // unreachable for a value from `parseDatatype`, which admits only the listed widths. A hand-built
+    // value with another width is refused with the grammar's own name.
     return std::unexpected(std::string("datatype_unparsable"));
 }
 
@@ -428,7 +428,7 @@ template<detail::StreamComponent TStream>
     return std::unexpected(std::string("datatype_unparsable"));
 }
 
-/// The stream sample type's own domain: a complex stream needs a complex datatype and the reverse.
+/// Checks the domain. A complex stream needs a complex datatype, and a real stream a real one.
 template<typename T>
 [[nodiscard]] constexpr Domain domainOf() noexcept {
     if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
