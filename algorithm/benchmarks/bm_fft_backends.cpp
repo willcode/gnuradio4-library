@@ -12,12 +12,13 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 
-// The three backends of gr::algorithm::FFT over the receiver's own shape: one long single-precision complex
-// transform of a power-of-two length, repeated at a fixed size, and the short real-input audio transform.
+// The three backends of gr::algorithm::FFT on two shapes. The first is a long single-precision complex transform of a
+// power-of-two length, repeated at a fixed size. The second is the short real-input audio transform.
 //
-// Two columns beyond the elapsed time. The cost of one butterfly unit -- the time divided by N log2(N) -- compares
-// across lengths and across engines. The error is the relative L2 norm of the whole spectrum against a
-// double-precision reference of the same input, which says how much of a backend's speed is bought from accuracy.
+// Each row has two columns beyond the elapsed time. The first is the cost of one butterfly unit, the time divided by
+// N log2(N). It compares across lengths and across engines. The second is the error, the relative L2 norm of the whole
+// spectrum against a double-precision reference of the same input. It shows how much accuracy a backend gives up for
+// its speed.
 
 using namespace std::chrono;
 
@@ -39,7 +40,7 @@ Aligned<T> broadbandSignal(std::size_t N) {
     return signal;
 }
 
-/// the same transform in double precision, through PocketFFT, which qa_algorithm_fourier pins against a direct DFT
+/// the same transform in double precision through PocketFFT, which qa_algorithm_fourier checks against a direct DFT
 template<typename TIn>
 [[nodiscard]] std::vector<std::complex<double>> doubleReference(const Aligned<TIn>& signal) {
     using WideIn = std::conditional_t<gr::meta::complex_like<TIn>, std::complex<double>, double>;
@@ -67,8 +68,8 @@ template<typename TIn>
     return denominator > 0. ? std::sqrt(numerator / denominator) : std::sqrt(numerator);
 }
 
-// each measurement is given about the same amount of work, so a short length is not timed against the clock's
-// own resolution and a long one does not dominate the run
+// each measurement gets about the same amount of work. A short length is then not timed against the clock's own
+// resolution, and a long one does not dominate the run.
 [[nodiscard]] std::size_t repetitionsFor(std::size_t N) {
     constexpr double  kUnitBudget = 3.e8; // butterfly units per measurement
     const double      units       = static_cast<double>(N) * std::log2(static_cast<double>(N));
@@ -102,10 +103,10 @@ void benchBackend(std::string_view label, const Aligned<TIn>& signal, const std:
         label, N, threads, perTransform * 1.e-3, perTransform / units, relativeL2Error(out, reference), repetitions);
 }
 
-// The four-step's parts, timed on their own. The backend runs the two batches through PocketFFT's multi-dimensional
-// driver and folds the transpose into the second batch's output strides; what that fold is worth, and what the
-// twiddle pass between the batches costs, are the two numbers the shape rests on, so they are measured here rather
-// than argued. The passes are rebuilt against PocketFFT directly, so each one can be timed apart from the others.
+// The parts of the four-step, each timed alone. The backend runs the two batches through PocketFFT's multi-dimensional
+// driver. It folds the transpose into the output strides of the second batch. The design rests on two numbers. They
+// are the saving from that fold and the cost of the twiddle pass between the batches. This function measures both. The
+// passes are rebuilt against PocketFFT directly, and each one is timed apart from the others.
 void benchFourStepParts(std::size_t N, std::size_t threads) {
     using Cplx                 = std::complex<float>;
     const std::size_t exponent = static_cast<std::size_t>(std::countr_zero(N));
@@ -146,7 +147,8 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
     const double secondBatchInPlace    = timed([&] { pocketfft::c2c(shape, rowMajor, rowMajor, pocketfft::shape_t{1UZ}, true, work.data(), work.data(), 1.f, threads); });
     const double secondBatchTransposed = timed([&] { pocketfft::c2c(shape, rowMajor, transposed, pocketfft::shape_t{1UZ}, true, work.data(), out.data(), 1.f, threads); });
 
-    // the pass the fold replaces: a blocked out-of-place transpose of the same record, which reads and writes it again
+    // the pass the fold replaces, a blocked out-of-place transpose of the same record. It reads and writes the record
+    // again.
     constexpr std::size_t kBlock    = 32UZ;
     const double          transpose = timed([&] {
         for (std::size_t r = 0; r < n1; r += kBlock) {
@@ -160,8 +162,8 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
         }
     });
 
-    // the same twiddles read from two small tables rather than one N-entry table: i1*i2 splits as a*N2 + b, so every
-    // entry is W_N1^a * W_N^b and the pass moves two records instead of three
+    // the same twiddles read from two small tables instead of one N-entry table. i1*i2 splits as a*N2 + b, and every
+    // entry is W_N1^a * W_N^b. The pass then moves two records instead of three.
     std::vector<Cplx> coarse(n1);
     std::vector<Cplx> fine(n2);
     for (std::size_t a = 0; a < n1; ++a) {
@@ -181,9 +183,9 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
         }
     });
 
-    // SimdFFT has no batched entry point, so the same batch through it is a loop over one-dimensional transforms of
-    // contiguous, 64-byte aligned rows -- the best case a split built on SimdFFT instead of PocketFFT could have.
-    // Read against "second batch in place", which is that work through PocketFFT's driver.
+    // SimdFFT has no batched entry point. The same batch through it is a loop over one-dimensional transforms of
+    // contiguous, 64-byte aligned rows. That loop is the best case for a split built on SimdFFT instead of PocketFFT.
+    // Compare it with "second batch in place", the same work through PocketFFT's driver.
     std::vector<gr::algorithm::SimdFFT<float, gr::algorithm::Transform::Complex>> engines(threads);
     for (auto& engine : engines) {
         engine.resize(n2);
@@ -206,13 +208,12 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
 }
 
 // The same four-step built on SimdFFT instead of PocketFFT. The comparison decides whether the vendored header is
-// still needed. SimdFFT transforms one contiguous, 64-byte aligned span at a time: it has no batched
-// entry point and no strided access, so the columns cannot be transformed where they lie and the result cannot be
-// written transposed. The split on it is therefore five passes over the record -- a transposing copy, the column
-// batch, a transposing pass that carries the twiddles, the row batch, and the transpose the natural bin order
-// wants -- against PocketFFT's three, and the transposes are not shared between the two shapes. Every pass is
-// spread over the same threads, and each thread holds its own engines because a SimdFFT instance transforms
-// through scratch it owns.
+// still needed. SimdFFT transforms one contiguous, 64-byte aligned span at a time. It has no batched entry point and
+// no strided access. The columns cannot be transformed where they lie in the record, and the result cannot be written
+// transposed. The split on SimdFFT therefore takes five passes over the record against PocketFFT's three. The five
+// passes are a transposing copy, the column batch, a transposing pass that applies the twiddles, the row batch and a
+// transpose into natural bin order. The two shapes share no transpose. Every pass runs on the same threads. Each
+// thread holds its own engines, because a SimdFFT instance transforms through scratch it owns.
 void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::vector<std::complex<double>>& reference, std::size_t threads) {
     using Cplx                 = std::complex<float>;
     const std::size_t N        = signal.size();
@@ -223,7 +224,7 @@ void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::ve
     Aligned<Cplx>     a(N);
     Aligned<Cplx>     b(N);
     Aligned<Cplx>     out(N);
-    std::vector<Cplx> twiddles(N); // W_N^(i2*k1), laid out as the {n2, n1} array the first batch leaves behind
+    std::vector<Cplx> twiddles(N); // W_N^(i2*k1), laid out as the {n2, n1} array the first batch writes
     for (std::size_t i2 = 0; i2 < n2; ++i2) {
         for (std::size_t k1 = 0; k1 < n1; ++k1) {
             twiddles[i2 * n1 + k1] = Cplx(std::polar(1., -2. * std::numbers::pi * static_cast<double>(i2) * static_cast<double>(k1) / static_cast<double>(N)));
@@ -259,7 +260,7 @@ void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::ve
                 columns[id].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>(reading(a.data() + r * n1, n1), writing(b.data() + r * n1, n1));
             }
         });
-        parallel([&](std::size_t id, std::size_t count) { // the twiddles, carried by the transpose back to {n1, n2}
+        parallel([&](std::size_t id, std::size_t count) { // the twiddles, applied in the transpose back to {n1, n2}
             for (std::size_t r = id * kBlock; r < n2; r += count * kBlock) {
                 for (std::size_t c = 0; c < n1; c += kBlock) {
                     for (std::size_t i = r; i < std::min(r + kBlock, n2); ++i) {
@@ -275,7 +276,7 @@ void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::ve
                 rows[id].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>(reading(a.data() + r * n2, n2), writing(b.data() + r * n2, n2));
             }
         });
-        parallel([&](std::size_t id, std::size_t count) { // bin k2*n1 + k1 sits at [k1][k2], so the record is transposed once more
+        parallel([&](std::size_t id, std::size_t count) { // bin k2*n1 + k1 is at [k1][k2], so transpose the record once more
             for (std::size_t r = id * kBlock; r < n1; r += count * kBlock) {
                 for (std::size_t c = 0; c < n2; c += kBlock) {
                     for (std::size_t i = r; i < std::min(r + kBlock, n1); ++i) {
@@ -330,10 +331,10 @@ int main() {
         sweep<float>(N);
     }
 
-    // The four-step split against SimdFFT, the engine Auto runs on one thread at every one of these lengths. The
-    // SimdFFT row is the one to read the split against; it is single-threaded by construction, so its own row is
-    // printed once per length. Give this section the performance cores rather than one of them -- the point is the
-    // thread count, and pinning it to one core would measure the pin.
+    // The four-step split against SimdFFT, the engine Auto runs on one thread at each of these lengths. Read the split
+    // against the SimdFFT row. SimdFFT is single-threaded by construction, and its row is printed once per length. Run
+    // this section on all the performance cores, not on one of them. The section measures the effect of the thread
+    // count, and pinning it to one core would measure the pin.
     std::println("");
     std::println("the four-step split against SimdFFT, complex<float> forward ({} hardware threads)", std::thread::hardware_concurrency());
     for (std::size_t exponent = 14UZ; exponent <= 22UZ; ++exponent) {
@@ -346,8 +347,8 @@ int main() {
         }
     }
 
-    // Which engine the split should be built on (RULINGS_GR4.md section 98): the same decomposition through
-    // PocketFFT's batched driver and through loops over SimdFFT, at the receiver's two long lengths.
+    // The engine to build the split on. The same decomposition runs through PocketFFT's batched driver and through
+    // loops over SimdFFT, at the two long lengths 2^20 and 2^22.
     std::println("");
     std::println("the four-step on PocketFFT's batched driver against the same split built on SimdFFT loops");
     for (const std::size_t N : {1UZ << 20UZ, 1UZ << 22UZ}) {

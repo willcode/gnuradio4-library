@@ -31,7 +31,8 @@ constexpr double      kRolloff = 0.2;
     return out;
 }
 
-/// A pass-shaped delay table: the 8.339 ms a 2500 km slant range costs, falling to 2.5 ms, over ten minutes.
+/// A pass-shaped delay table. The delay falls from 8.339 ms, the delay of a 2500 km slant range, to 2.5 ms over ten
+/// minutes.
 [[nodiscard]] gr::timing::DelaySchedule passDelays(std::size_t nKnots) {
     constexpr std::int64_t kSpanNs = 600'000'000'000LL;
 
@@ -48,8 +49,8 @@ constexpr double      kRolloff = 0.2;
 } // namespace
 
 /// The per-sample cost of the delay line at the three orders and two bank sizes, and separately the cost of
-/// getting a delay to it. The claim the second arm tests is that the schedule walk plus the fixed-point
-/// conversion is a small share of the total: both are O(1) amortized per sample against `(q+1)*(B+1)` taps.
+/// feeding it a delay. The second arm tests that the schedule walk and the fixed-point conversion are a small
+/// share of the total. Both are O(1) amortized per sample, against `(q+1)*(B+1)` taps.
 void benchFractionalDelay() {
     using namespace benchmark;
     using boost::ut::operator""_test;

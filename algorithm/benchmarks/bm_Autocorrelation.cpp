@@ -45,9 +45,9 @@ constexpr std::array<double, 2>   kOverlaps{0., 0.5};
  * @brief Nanoseconds per input sample over the estimator's own grid, and the transform's share of it.
  *
  * One window costs one transform pair of length `M = acfTransformLength(N, L)` plus `O(M)` for the taper, the
- * magnitude squaring and the accumulation, so an input sample costs `2 * 5 M log2(M) / H` real operations. The last
- * rows time the transform pair alone at each `M`, the baseline the estimator's cost is measured against: the
- * difference between a grid row and its transform row covers everything this code does beyond the transform.
+ * magnitude squaring and the accumulation. An input sample therefore costs `2 * 5 M log2(M) / H` real operations.
+ * The last rows time the transform pair alone at each `M`. They are the baseline for the estimator's cost. The
+ * difference between a grid row and its transform row is the work this code does beyond the transform.
  */
 void benchAutocorrelation() {
     using namespace benchmark;
@@ -113,9 +113,9 @@ void benchAutocorrelation() {
                 const auto name = std::format("transform pair alone     M={:>5} hop={:>5} overlap={:.1f}", transformLength, hop, overlap);
 
                 ::benchmark::benchmark<kRepeats>(std::string_view(name), windows * hop) = [&] {
-                    // the backward transform lands in its own buffer, so every iteration transforms the same window
-                    // rather than the previous iteration's correlation, whose scale grows by a factor of the
-                    // transform length each time around
+                    // the backward transform writes to its own buffer. Every iteration therefore transforms the
+                    // same window. A correlation fed back as input would grow in scale by a factor of the transform
+                    // length on each iteration.
                     for (std::size_t window = 0UZ; window < windows; ++window) {
                         forward.compute(work, spectrum);
                         for (std::complex<double>& bin : spectrum) {

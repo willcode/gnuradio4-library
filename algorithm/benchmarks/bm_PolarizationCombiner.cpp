@@ -19,9 +19,9 @@ constexpr std::size_t kRepeats = 200UZ;
 
 } // namespace
 
-/// Per output sample the combination is two complex multiply-accumulates, the orthogonal output two more, and
-/// the covariance four real multiply-adds. The eigen solve is once per window -- one square root, one `atan2`
-/// and a handful of multiplies -- so it does not appear per sample at all and is not timed here.
+/// Per output sample the combination is two complex multiply-accumulates. The orthogonal output adds two more, and
+/// the covariance adds four real multiply-adds. The eigen solve runs once per window. It is one square root, one
+/// `atan2` and a few multiplies. It adds nothing per sample and is not timed here.
 void benchPolarizationCombiner() {
     using namespace benchmark;
     using boost::ut::operator""_test;

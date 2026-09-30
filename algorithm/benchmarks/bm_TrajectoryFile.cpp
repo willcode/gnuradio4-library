@@ -11,13 +11,13 @@
 
 namespace {
 
-/// The table's own ceiling, the only size worth measuring: the loader runs once at staging, so a caller needs the
-/// cost of the worst file rather than the cost of a typical one.
+/// The table's size ceiling, the one size measured. The loader runs once at staging. The cost that matters is the
+/// cost of the largest file, not of a typical one.
 constexpr std::size_t kKnots   = std::size_t{1} << 20;
 constexpr std::size_t kRepeats = 3UZ;
 
-/// A two-column pass table in one of the two time scales. The unix_ns arm is the cheap one by construction --
-/// one `from_chars` against a fixed-width calendar parse -- so the difference between the arms gives the calendar's cost.
+/// A two-column pass table in one of the two time scales. The unix_ns arm parses each time with one `from_chars`.
+/// The other arm parses a fixed-width calendar time. The difference between the arms is the cost of the calendar.
 [[nodiscard]] std::string passFile(bool iso) {
     constexpr std::int64_t kEpochSeconds = 1'788'000'000LL;
 
@@ -41,8 +41,8 @@ constexpr std::size_t kRepeats = 3UZ;
 
 } // namespace
 
-/// The loader is the one component of this group that is off the sample path, so what it owes is a bound rather
-/// than a rate: one pass over the text with no backtracking, at a cost the file's own size sets.
+/// The loader runs off the sample path. Its cost is a bound, not a rate. It makes one pass over the text with no
+/// backtracking, and the size of the file sets the cost.
 void benchTrajectoryLoader() {
     using namespace benchmark;
     using boost::ut::operator""_test;

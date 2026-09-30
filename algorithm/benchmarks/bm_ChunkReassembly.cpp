@@ -94,8 +94,8 @@ void putBigEndian(std::vector<std::uint8_t>& record, std::size_t at, std::size_t
 void runOnce(const gr::packet::ChunkReassembler::Config& config, const std::vector<std::vector<std::uint8_t>>& records, bool alternating) {
     gr::packet::ChunkReassembler engine{config};
     if (alternating) {
-        // Every other chunk first, so the interval set grows to one interval per pair before the
-        // second pass merges them away. This is the worst fragmentation a chunked delivery produces.
+        // The even chunks first, then the odd ones. The interval set grows to one interval per pair,
+        // and the second pass merges them. This order is the worst fragmentation a chunked delivery produces.
         for (std::size_t i = 0UZ; i < records.size(); i += 2UZ) {
             engine.push(records[i]);
         }
@@ -111,13 +111,13 @@ void runOnce(const gr::packet::ChunkReassembler::Config& config, const std::vect
 
 } // namespace
 
-/// Every row is one chunk's worth of work: one format parse of a handful of shift-and-mask reads, one hash
-/// lookup, one coverage update, and one memcpy of the payload. The memcpy is the floor, and the rows differ
-/// only in what the coverage update costs. The bitmap path sets one bit and compares one running count; the
-/// interval path binary-searches a sorted vector and merges, which is free while the file arrives in order —
-/// every chunk extends the single interval — and is paid for only when the file arrives fragmented, which is
-/// what the third row measures. The file is copied exactly once end to end in every row, because the storage
-/// is reserved from the declared size and never reallocated.
+/// Every row is one chunk's worth of work. The work is one format parse of a few shift-and-mask reads, one hash
+/// lookup, one coverage update and one memcpy of the payload. The memcpy is the floor. The rows differ only in the
+/// cost of the coverage update. The bitmap path sets one bit and compares one running count. The interval path
+/// binary-searches a sorted vector and merges. The merge is free while the file arrives in order, because every
+/// chunk extends the single interval. It costs more when the file arrives fragmented, and the third row measures
+/// that case. Every row copies the file exactly once end to end. The storage is reserved from the declared size
+/// and is not reallocated.
 void benchChunkReassembly() {
     using namespace benchmark;
     using boost::ut::operator""_test;

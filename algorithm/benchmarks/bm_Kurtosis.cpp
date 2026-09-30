@@ -19,9 +19,9 @@ constexpr std::size_t kRepeats = 200UZ;
 
 } // namespace
 
-/// Per sample the accumulator does one `|x|^2` -- two multiplies and an add for complex, one multiply for
-/// real -- one square and two adds. No transcendental, no branch, no allocation, so the two rows below are the
-/// whole cost of the measurement and the difference between them is the cost of the second component.
+/// Per sample the accumulator does one `|x|^2`, one square and two adds. The `|x|^2` is two multiplies and an add
+/// for complex input and one multiply for real input. The loop has no transcendental, no branch and no allocation.
+/// The two rows below are the whole cost of the measurement. Their difference is the cost of the second component.
 void benchKurtosis() {
     using namespace benchmark;
     using boost::ut::operator""_test;

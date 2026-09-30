@@ -13,7 +13,7 @@
 
 namespace {
 
-/// A pass-shaped table spread over ten minutes, the way a LEO Doppler profile is handed to the schedule.
+/// A pass-shaped table over ten minutes, in the form a LEO Doppler profile takes as schedule input.
 struct Profile {
     std::vector<std::int64_t> times;
     std::vector<double>       offsets;
@@ -38,10 +38,10 @@ constexpr std::size_t kRepeats = 200UZ;
 
 } // namespace
 
-/// The claim under test is that the per-sample cost does not depend on the size of the table. The segment walk is
-/// a cursor over times that only increase, so it advances at most once per knot over a whole span; a per-sample
-/// binary search would instead cost log2(knots) per sample, and 100 against 10000 knots would read as a clear
-/// step. Each row is one sample's worth of work, so the three rows are directly comparable.
+/// The benchmark tests that the per-sample cost does not depend on the size of the table. The segment walk is a
+/// cursor over times that only increase. It advances at most once per knot over a whole span. A per-sample binary
+/// search would cost log2(knots) per sample, and the rows for 100 and 10000 knots would differ by a clear step. Each
+/// row is one sample's worth of work, and the three rows are directly comparable.
 void benchPhaseIncrements() {
     using namespace benchmark;
     using boost::ut::operator""_test;
@@ -60,8 +60,8 @@ void benchPhaseIncrements() {
         ::benchmark::results::add_separator();
     };
 
-    // The same span read one sample per call: the cursor is rebuilt by a search every time, which is the cost the
-    // walk avoids and the closest thing to a per-sample search this kernel can be made to do.
+    // The same span read one sample per call. Each call rebuilds the cursor by a search. The walk avoids this cost.
+    // This row is the closest this kernel comes to a per-sample search.
     "phaseIncrementsFor: one sample per call"_test = [] {
         const gr::timing::SampleClock clock(0ULL, 0LL, 48'000ULL, 1ULL);
         std::vector<double>           increments(kSamples);
