@@ -8,37 +8,37 @@
 /**
  * @brief The three CCSDS transfer-frame headers, the CLCW and the M_PDU header, as value types over spans.
  *
- * A transfer frame is a fixed-or-declared-length container whose header names a spacecraft, a virtual
- * channel and a frame count. Three standards define three of them and they are close enough to be
- * confused and far enough apart that confusing them is silent: CCSDS 132.0-B-3 (TM), 732.0-B-4 (AOS) and
- * 232.0-B-4 (TC). Each gets its own type here rather than one parameterized header, because the three
- * a shared parser gets the three differences below wrong.
+ * A transfer frame is a container of fixed or declared length. Its header names a spacecraft, a
+ * virtual channel and a frame count. Three standards define three kinds, CCSDS 132.0-B-3 (TM),
+ * 732.0-B-4 (AOS) and 232.0-B-4 (TC). The three are easy to confuse, and a confusion raises no error.
+ * Each has its own type here. A single parameterized parser would get the three differences below
+ * wrong.
  *
  *   - The version number is `'00'` for TM and TC and `'01'` for AOS (132.0-B-3 4.1.2.2.2.2,
- *     732.0-B-4 4.1.2.2.2.2). This field says which of the three these octets are, so a
- *     mismatch is fatal and every other status here is not.
- *   - TM's spacecraft identifier is ten bits and its virtual channel identifier three; AOS's are eight
- *     and six. The boundary between the two fields therefore sits two bits apart in the two headers,
- *     and one spacecraft identifier of 42 writes `02 A3` in TM and `4A BF` in AOS.
- *   - TM signals the operational control field's presence with a header bit (4.1.2.4.2); AOS has no such
- *     bit anywhere and establishes presence by management (732.0-B-4 4.1.1.1). So for TM the field's
- *     presence is a read and for AOS it is a setting, and no amount of parsing recovers it.
+ *     732.0-B-4 4.1.2.2.2.2). This field identifies which of the three the octets are. A mismatch
+ *     is fatal. Every other status here is not fatal.
+ *   - TM's spacecraft identifier is ten bits and its virtual channel identifier is three bits. AOS
+ *     uses eight and six. The boundary between the two fields sits two bits apart in the two
+ *     headers. A spacecraft identifier of 42 writes `02 A3` in TM and `4A BF` in AOS.
+ *   - TM signals the presence of the operational control field with a header bit (4.1.2.4.2). AOS
+ *     has no such bit and sets presence by management (732.0-B-4 4.1.1.1). For TM the presence is
+ *     read from the header. For AOS it is a setting, and parsing cannot recover it.
  *
- * Bit numbering is the standards' own (132.0-B-3 1.6.2, and the identical convention in the other
- * three): bit 0 is the first bit transmitted and is the most significant bit of the field it starts.
- * Every multi-bit field is big-endian in that sense and nothing anywhere is reflected.
+ * Bit numbering follows the standards (132.0-B-3 1.6.2, with the same convention in the other three).
+ * Bit 0 is the first bit transmitted and the most significant bit of the field it starts. Every
+ * multi-bit field is big-endian in this sense. No field is bit-reflected.
  *
- * Two conventions govern the status values. `bad_version` is fatal because the version is the field
- * that identifies the frame. `reserved_violation` never is: it reports a reserved-spare field holding
- * something other than the value the standard mandates, the parsed header is complete and usable
- * beside it, and a caller counts it and carries on — a reserved bit set wrong is a transmitter's
- * business and refusing the frame would discard data over a bit that names nothing.
+ * Two conventions govern the status values. `bad_version` is fatal, because the version identifies the
+ * frame. `reserved_violation` is not fatal. It reports a reserved or spare field that holds a value
+ * other than the mandated one. The parsed header is complete and usable. A caller counts the status
+ * and continues. A wrong reserved bit is the transmitter's fault. Refusing the frame would discard data
+ * over a bit that carries no meaning.
  *
- * Nothing here allocates, nothing throws, and no parse indexes a span before its length is checked.
+ * No function here allocates or throws. No parse indexes a span before its length is checked.
  */
 namespace gr::ccsds {
 
-/// @brief What a header parse reports. `reserved_violation` is informational; only `bad_version` is fatal.
+/// @brief What a header parse reports. `reserved_violation` is informational. `bad_version` is fatal.
 enum class ParseStatus { ok, short_span, bad_version, reserved_violation };
 
 /// @brief What a header build reports.
@@ -73,8 +73,8 @@ namespace detail {
 
 /// @brief The `width` bits starting at `bitOffset`, bit 0 being the most significant bit of octet 0.
 ///
-/// The caller has already established that the span holds those bits; every parse below checks its
-/// span's length once, against the header size, before it reads a field.
+/// The caller has already checked that the span holds those bits. Every parse below checks its span's
+/// length once against the header size before it reads a field.
 [[nodiscard]] inline constexpr std::uint32_t readField(std::span<const std::uint8_t> octets, std::size_t bitOffset, std::size_t width) noexcept {
     std::uint32_t value = 0U;
     for (std::size_t i = 0UZ; i < width; ++i) {
@@ -108,9 +108,9 @@ struct TmPrimaryHeader {
     std::uint8_t  master_frame_count   = 0U;    //!< bits 16-23, modulo 256 (4.1.2.5.2)
     std::uint8_t  vc_frame_count       = 0U;    //!< bits 24-31, modulo 256 (4.1.2.6.2)
     bool          secondary_header     = false; //!< bit 32 (4.1.2.7.2.2)
-    bool          sync_flag            = false; //!< bit 33; `0` packets or idle data, `1` a VCA_SDU (4.1.2.7.3.2)
-    bool          packet_order         = false; //!< bit 34; reserved `0` when the sync flag is `0` (4.1.2.7.4)
-    std::uint8_t  segment_length_id    = 0U;    //!< bits 35-36; `'11'` when the sync flag is `0` (4.1.2.7.5.2)
+    bool          sync_flag            = false; //!< bit 33, `0` packets or idle data and `1` a VCA_SDU (4.1.2.7.3.2)
+    bool          packet_order         = false; //!< bit 34, reserved `0` when the sync flag is `0` (4.1.2.7.4)
+    std::uint8_t  segment_length_id    = 0U;    //!< bits 35-36, `'11'` when the sync flag is `0` (4.1.2.7.5.2)
     std::uint16_t first_header_pointer = 0U;    //!< bits 37-47, eleven bits (4.1.2.7.6)
 
     [[nodiscard]] bool operator==(const TmPrimaryHeader&) const noexcept = default;
@@ -119,12 +119,12 @@ struct TmPrimaryHeader {
 /**
  * @brief Parse a TM primary header.
  *
- * The segment length identifier is read and reported and refuses nothing. 4.1.2.7.5.2 requires `'11'`
- * whenever the synchronization flag is `0`, and NOTE 1 says why: the identifier existed for Source
- * Packet Segments, those are no longer defined, and `'11'` is the value that denoted non-use of them.
- * So it is not a length and it selects nothing — a constant with a historical name — and any other
- * value under a zero synchronization flag is `reserved_violation` and nothing more. Under a set
- * synchronization flag it is undefined (NOTE 2) and is not tested at all.
+ * The segment length identifier is read and reported. It causes no refusal. 4.1.2.7.5.2 requires
+ * `'11'` whenever the synchronization flag is `0`. NOTE 1 gives the reason. The identifier served
+ * Source Packet Segments, which 132.0-B-3 does not define. `'11'` denoted that they were not
+ * used. The field is therefore not a length and selects nothing. Under a zero synchronization flag,
+ * any other value is a `reserved_violation` and no more. Under a set synchronization flag the field
+ * is undefined (NOTE 2) and is not tested.
  */
 [[nodiscard]] inline constexpr ParseStatus parseTmPrimaryHeader(std::span<const std::uint8_t> octets, TmPrimaryHeader& out) noexcept {
     if (octets.size() < kTmPrimaryHeaderSize) {
@@ -175,7 +175,7 @@ struct TmPrimaryHeader {
 /// @brief The TM transfer frame secondary header identification octet, 132.0-B-3 4.1.3.2.
 struct TmSecondaryHeaderId {
     std::uint8_t version = 0U; //!< bits 0-1, `'00'` (4.1.3.2.2)
-    std::uint8_t length  = 0U; //!< bits 2-7, AS TRANSMITTED: one fewer than the header's total octets (4.1.3.2.3.2)
+    std::uint8_t length  = 0U; //!< bits 2-7 as transmitted, one fewer than the header's total octets (4.1.3.2.3.2)
 
     [[nodiscard]] bool operator==(const TmSecondaryHeaderId&) const noexcept = default;
 };
@@ -183,19 +183,19 @@ struct TmSecondaryHeaderId {
 /**
  * @brief The secondary header's total length in octets, 132.0-B-3 4.1.3.2.3.2's minus-one.
  *
- * `length` holds the wire value and the `+ 1` lives here and nowhere else, which is the same rule
- * `totalPacketOctets` states for the space packet and `totalTcFrameOctets` for the TC frame. The three
- * are one convention and getting any of them wrong slips a boundary by one octet on every frame.
+ * `length` holds the wire value. This function adds the `+ 1`. `totalPacketOctets` applies the same
+ * rule to the space packet and `totalTcFrameOctets` to the TC frame. The three follow one convention.
+ * An error in any of them moves a boundary by one octet on every frame.
  */
 [[nodiscard]] inline constexpr std::size_t tmSecondaryHeaderOctets(const TmSecondaryHeaderId& header) noexcept { return std::size_t{header.length} + 1UZ; }
 
 /**
  * @brief Whether the identification octet describes a secondary header that can exist.
  *
- * 4.1.3.1.3 makes the data field 1 to 63 octets, so the total is 2 to 64 and the field value is 1 to
- * 63. A field value of 0 would describe a one-octet secondary header with no data field, which the
- * standard does not admit; it is a refusal for the caller to count rather than a parse status, because
- * the octets themselves parsed cleanly and it is the described geometry that is impossible.
+ * 4.1.3.1.3 makes the data field 1 to 63 octets. The total is then 2 to 64 octets, and the field
+ * value is 1 to 63. A field value of 0 would describe a one-octet secondary header with no data
+ * field. The standard does not admit that. The caller counts this refusal. It is not a parse status,
+ * because the octets parsed cleanly. The geometry they describe is impossible.
  */
 [[nodiscard]] inline constexpr bool tmSecondaryHeaderUsable(const TmSecondaryHeaderId& header) noexcept { return header.length != 0U; }
 
@@ -224,13 +224,13 @@ struct TmSecondaryHeaderId {
 struct AosPrimaryHeader {
     std::uint8_t  version                    = 1U;    //!< bits 0-1, `'01'` for AOS (4.1.2.2.2.2)
     std::uint8_t  spacecraft_id              = 0U;    //!< bits 2-9, eight bits, not TM's ten (4.1.2.2.3)
-    std::uint8_t  virtual_channel            = 0U;    //!< bits 10-15, six bits; all ones is the OID channel (4.1.2.3.2)
+    std::uint8_t  virtual_channel            = 0U;    //!< bits 10-15, six bits, all ones for the OID channel (4.1.2.3.2)
     std::uint32_t vc_frame_count             = 0U;    //!< bits 16-39, modulo 16 777 216 (4.1.2.4.2)
     bool          replay                     = false; //!< bit 40 (4.1.2.5.2.3)
     bool          vc_count_cycle_used        = false; //!< bit 41 (4.1.2.5.3.2)
     std::uint8_t  reserved                   = 0U;    //!< bits 42-43, `'00'` (4.1.2.5.4)
     std::uint8_t  vc_count_cycle             = 0U;    //!< bits 44-47, four bits (4.1.2.5.5)
-    bool          has_fhec                   = false; //!< whether bits 48-63 are present; by management (4.1.2.6.2)
+    bool          has_fhec                   = false; //!< whether bits 48-63 are present, set by management (4.1.2.6.2)
     std::uint16_t frame_header_error_control = 0U;    //!< bits 48-63, when present (4.1.2.6)
 
     [[nodiscard]] bool operator==(const AosPrimaryHeader&) const noexcept = default;
@@ -242,13 +242,13 @@ struct AosPrimaryHeader {
 /**
  * @brief The virtual channel frame count widened by the cycle field, 732.0-B-4 4.1.2.5.5.2 NOTE.
  *
- * `24 + 4 = 28` bits, so the extended modulus is `2^28`. When the use flag is clear the cycle field is
- * `'0000'` (4.1.2.5.5.3) and shall be ignored by the receiver (4.1.2.5.3.2 a), so the count stays
- * twenty-four bits and gap detection uses the smaller modulus.
+ * The widened count has `24 + 4 = 28` bits, and the extended modulus is `2^28`. When the use flag is
+ * clear, the cycle field is `'0000'` (4.1.2.5.5.3) and the receiver shall ignore it (4.1.2.5.3.2 a).
+ * The count then stays twenty-four bits, and gap detection uses the smaller modulus.
  */
 [[nodiscard]] inline constexpr std::uint32_t aosWidenedFrameCount(const AosPrimaryHeader& header) noexcept { return header.vc_count_cycle_used ? ((std::uint32_t{header.vc_count_cycle} << 24U) | header.vc_frame_count) : header.vc_frame_count; }
 
-/// @brief The modulus the widened count runs at, which is the one `frameGap` must be given.
+/// @brief The modulus of the widened count, the modulus to pass to `frameGap`.
 [[nodiscard]] inline constexpr std::uint32_t aosCountModulus(const AosPrimaryHeader& header) noexcept { return header.vc_count_cycle_used ? kAosCycleCountModulus : kAosCountModulus; }
 
 [[nodiscard]] inline constexpr ParseStatus parseAosPrimaryHeader(std::span<const std::uint8_t> octets, bool hasFhec, AosPrimaryHeader& out) noexcept {
@@ -307,10 +307,10 @@ struct MpduHeader {
 /**
  * @brief Parse an M_PDU header.
  *
- * The pointer is the same field as TM's with the same width and the same two reserved values, over a
- * different zone: 4.1.4.2.3.3 numbers the packet zone's octets from 0, and the packet zone is the data
- * field less this two-octet header. That off-by-two is the whole difference between AOS extraction and
- * TM extraction, which is why `PacketExtractor` takes a zone and a pointer rather than a frame.
+ * The pointer is the same field as TM's, with the same width and the same two reserved values. It
+ * points into a different zone. 4.1.4.2.3.3 numbers the octets of the packet zone from 0. The packet
+ * zone is the data field less this two-octet header. AOS extraction differs from TM extraction by
+ * that offset of two. `PacketExtractor` therefore takes a zone and a pointer in place of a frame.
  */
 [[nodiscard]] inline constexpr ParseStatus parseMpduHeader(std::span<const std::uint8_t> octets, MpduHeader& out) noexcept {
     if (octets.size() < kMpduHeaderSize) {
@@ -339,12 +339,12 @@ enum class TcFrameType { type_ad, reserved, type_bd, type_bc };
 /// @brief The TC transfer frame primary header, 232.0-B-4 4.1.2.1, five octets.
 struct TcPrimaryHeader {
     std::uint8_t  version         = 0U;    //!< bits 0-1, `'00'` (4.1.2.2.2)
-    bool          bypass          = false; //!< bit 2; `0` Type-A, `1` Type-B (4.1.2.3.1.2)
-    bool          control_command = false; //!< bit 3; `0` data, `1` control commands (4.1.2.3.2.2)
+    bool          bypass          = false; //!< bit 2, `0` Type-A and `1` Type-B (4.1.2.3.1.2)
+    bool          control_command = false; //!< bit 3, `0` data and `1` control commands (4.1.2.3.2.2)
     std::uint8_t  reserved        = 0U;    //!< bits 4-5, `'00'` (4.1.2.4)
     std::uint16_t spacecraft_id   = 0U;    //!< bits 6-15, ten bits (4.1.2.5)
     std::uint8_t  virtual_channel = 0U;    //!< bits 16-21, six bits (4.1.2.6)
-    std::uint16_t frame_length    = 0U;    //!< bits 22-31, AS TRANSMITTED: one fewer than the frame's octets (4.1.2.7.2)
+    std::uint16_t frame_length    = 0U;    //!< bits 22-31 as transmitted, one fewer than the frame's octets (4.1.2.7.2)
     std::uint8_t  sequence_number = 0U;    //!< bits 32-39, N(S) (4.1.2.8)
 
     [[nodiscard]] bool operator==(const TcPrimaryHeader&) const noexcept = default;
@@ -353,19 +353,19 @@ struct TcPrimaryHeader {
 /**
  * @brief The frame's total length in octets, 232.0-B-4 4.1.2.7.2's minus-one.
  *
- * `C = (total octets) - 1` is the standard's own expression, measured from the first bit of the primary
- * header to the last bit of the frame error control field where one is present and to the last bit of
- * the data field otherwise (4.1.2.7.3). The field is ten bits, so the frame is bounded at `2^10 = 1024`
- * octets, which leaves `1024 - 5 = 1019` octets of data field with no error control field and
- * `1024 - 5 - 2 = 1017` with one — exactly what 4.1.1.1 b) states.
+ * `C = (total octets) - 1` is the standard's own expression. The length runs from the first bit of the
+ * primary header to the last bit of the frame error control field when one is present. Without one it
+ * runs to the last bit of the data field (4.1.2.7.3). The field is ten bits. The frame is therefore at
+ * most `2^10 = 1024` octets. That leaves `1024 - 5 = 1019` octets of data field without an error
+ * control field and `1024 - 5 - 2 = 1017` octets with one. 4.1.1.1 b) states the same limits.
  */
 [[nodiscard]] inline constexpr std::size_t totalTcFrameOctets(const TcPrimaryHeader& header) noexcept { return std::size_t{header.frame_length} + 1UZ; }
 
 /**
  * @brief The frame type the two flags name together, 232.0-B-4 table 4-1.
  *
- * `01` is reserved for future application. It is reported rather than refused: an unknown combination
- * is still a frame, and a caller that does not know what to do with one can say so with a counter.
+ * `01` is reserved for future application. It is reported and not refused. An unknown combination is
+ * still a frame. A caller with no use for it can count it.
  */
 [[nodiscard]] inline constexpr TcFrameType tcFrameType(const TcPrimaryHeader& header) noexcept {
     if (!header.bypass) {
@@ -425,12 +425,12 @@ enum class OcfReportType { type_1_clcw, type_2_project, type_2_sdls };
 /**
  * @brief The Communications Link Control Word, 232.0-B-4 4.2.1.1.2, thirty-two bits.
  *
- * The five flags of 4.2.1.8.1 are five booleans and not a packed integer, because each one names an
- * operational condition an operator reads independently: packed, "no bit lock" is invisible unless
- * somebody knows which bit it is.
+ * The five flags of 4.2.1.8.1 are five booleans and not a packed integer. Each flag names an
+ * operational condition that an operator reads on its own. In a packed integer, "no bit lock" is
+ * visible only to a reader who knows its bit.
  */
 struct Clcw {
-    bool         control_word_type = false; //!< bit 0, always `'0'` for a CLCW (4.2.1.2)
+    bool         control_word_type = false; //!< bit 0, `'0'` for a CLCW (4.2.1.2)
     std::uint8_t version           = 0U;    //!< bits 1-2, `'00'` (4.2.1.3)
     std::uint8_t status            = 0U;    //!< bits 3-5 (4.2.1.4)
     std::uint8_t cop_in_effect     = 0U;    //!< bits 6-7 (4.2.1.5)
@@ -451,11 +451,10 @@ struct Clcw {
 /**
  * @brief Parse a CLCW.
  *
- * The control word type and the CLCW version number together identify these four octets as a
- * CLCW: 4.2.1.2 fixes the type at `'0'` and 4.2.1.3 the version at `'00'`, and a field carrying
- * anything else is a Type-2 report or a control word of another kind. Both are therefore
- * `bad_version`, which is the one fatal status here, and the caller reads `ocfReportType` first if it
- * wants to know which of the two it has.
+ * The control word type and the CLCW version number together identify the four octets as a CLCW.
+ * 4.2.1.2 fixes the type at `'0'`, and 4.2.1.3 fixes the version at `'00'`. A field with other values
+ * is a Type-2 report or a control word of another kind. Both cases return `bad_version`, the fatal
+ * status. A caller reads `ocfReportType` first to tell the two apart.
  */
 [[nodiscard]] inline constexpr ParseStatus parseClcw(std::span<const std::uint8_t> octets, Clcw& out) noexcept {
     if (octets.size() < kClcwSize) {
@@ -509,8 +508,8 @@ struct Clcw {
 /// @brief What one step of a frame count says about the frames between it and the last one.
 struct SequenceGap {
     std::uint32_t lost       = 0U;    //!< `gap - 1`, the number of frames that did not arrive
-    bool          duplicate  = false; //!< `gap == 0`: this frame repeats the last one
-    bool          continuous = false; //!< `gap == 1`: nothing was lost
+    bool          duplicate  = false; //!< `gap == 0`, this frame repeats the last one
+    bool          continuous = false; //!< `gap == 1`, no frame lost
 
     [[nodiscard]] bool operator==(const SequenceGap&) const noexcept = default;
 };
@@ -518,11 +517,11 @@ struct SequenceGap {
 /**
  * @brief The gap between two frame counts, with the wrap.
  *
- * `gap = (count - last) mod modulus` in unsigned arithmetic is the whole of the wrap handling — there
- * is no branch on it anywhere. At TM's modulus a count of 3 after a count of 254 gives
- * `(3 - 254) mod 256 = 5`, so four frames were lost across the wrap and the arithmetic never noticed
- * the wrap happened. The modulus is the field's: 256 for TM's two counts, `2^24` for AOS's, and
- * `2^28` for AOS's count extended by its cycle field.
+ * `gap = (count - last) mod modulus` in unsigned arithmetic handles the wrap. No branch tests for the
+ * wrap. At TM's modulus a count of 3 after a count of 254 gives `(3 - 254) mod 256 = 5`. Four frames
+ * were lost across the wrap, and the arithmetic needs no wrap test to find them. The modulus is the
+ * field's. It is 256 for TM's two counts and `2^24` for AOS's count. It is `2^28` for the AOS count
+ * extended by its cycle field.
  */
 [[nodiscard]] inline constexpr SequenceGap frameGap(std::uint32_t count, std::uint32_t last, std::uint32_t modulus) noexcept {
     const std::uint32_t gap = ((count % modulus) + modulus - (last % modulus)) % modulus;
@@ -532,21 +531,21 @@ struct SequenceGap {
 /**
  * @brief The Only Idle Data fill sequence, 132.0-B-3 4.1.4.6.2 and 732.0-B-4 4.1.4.1.5.2.
  *
- * The standard specifies the 32-cell shift register with `h(x) = x^32 + x^22 + x^2 + x + 1`, the
- * Fibonacci form seeded all ones and never restarted (4.1.4.6.2.1), and publishes the first ten octets
- * of the result in the NOTE to 4.1.4.6.2.2: `FF FF FF FF 6D B6 D8 61 45 1F`. Those ten octets are
- * reproduced by the register below and by nothing else. They are therefore the test.
+ * The standard specifies a 32-cell shift register with `h(x) = x^32 + x^22 + x^2 + x + 1`. It is the
+ * Fibonacci form, seeded all ones and not restarted (4.1.4.6.2.1). The NOTE to 4.1.4.6.2.2 publishes
+ * the first ten octets of the output, `FF FF FF FF 6D B6 D8 61 45 1F`. The register below reproduces
+ * those ten octets. They are the reference the register is checked against.
  *
  * The register holds stage 1 in the most significant bit and stage 32 in the least. The output is
- * stage 32 and the feedback is the exclusive-or of stages 1, 2, 22 and 32, most significant bit first,
- * which is the standard's `D0 + D1 + D2 + D22 + D32` read in the transmission direction. Written as a
- * recurrence over the output sequence that is `x^32 + x^31 + x^30 + x^10 + 1`, the reciprocal of the
- * stated polynomial, and the standard's own anchor selects that reciprocal.
+ * stage 32. The feedback is the exclusive-or of stages 1, 2, 22 and 32, most significant bit first.
+ * That is the standard's `D0 + D1 + D2 + D22 + D32` read in the transmission direction. As a
+ * recurrence over the output sequence it is `x^32 + x^31 + x^30 + x^10 + 1`. That polynomial is the
+ * reciprocal of the stated one. The standard's published octets select the reciprocal.
  *
- * 4.1.4.6.2.1's "shall not be restarted" is a transmitter property: the generator runs across frames
- * rather than resetting per frame, which is why the state lives in the object and `next` is not pure.
- * A receiver never needs the sequence at all — an OID frame is identified by its pointer, not by its
- * contents — so this is a transmit-side type only.
+ * "Shall not be restarted" in 4.1.4.6.2.1 applies to the transmitter. The generator runs across
+ * frames and does not reset per frame. The state is therefore held in the object, and `next` is not
+ * pure. A receiver does not need the sequence. It identifies an OID frame by its pointer and not by
+ * its contents. This type is for the transmit side only.
  */
 class OidFill {
 public:

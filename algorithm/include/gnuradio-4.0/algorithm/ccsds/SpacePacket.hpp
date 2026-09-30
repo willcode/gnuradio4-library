@@ -10,27 +10,27 @@
 /**
  * @brief The CCSDS space packet primary header, CCSDS 133.0-B-2 4.1.3.1, six octets.
  *
- * The header carries a length count that is **one fewer** than the packet data field's octets
- * (4.1.3.5.2, and 4.1.3.5.3 writes it out as `C = (Total Number of Octets in the Packet Data Field)
- * - 1`). That convention is the one thing this header is easy to get wrong. The code holds the wire
- * value in the struct and puts the `+ 1` in exactly one function:
+ * The header carries a length count that is **one fewer** than the octets of the packet data field
+ * (4.1.3.5.2). 4.1.3.5.3 writes it as `C = (Total Number of Octets in the Packet Data Field) - 1`.
+ * This convention is the easy part of the header to get wrong. The struct holds the wire value. One
+ * function adds the `+ 1`.
  *
  *     packet_data_field_octets = data_length + 1
  *     total_packet_octets      = 6 + data_length + 1 = data_length + 7
  *
- * The `+ 7`, not `+ 6`. A field named `data_length` holding a payload length would be a second
- * convention with the same name, and a builder written against the wrong one produces a packet one
- * octet longer than it claims on every packet — after which the receiver's next packet starts one
- * octet early and every packet in the stream is misparsed with nothing to say so. `headerForPayload`
- * is the other direction and is a separate function for the same reason: a caller cannot pick up the
+ * The total is `+ 7`, not `+ 6`. A field named `data_length` that held a payload length would be a
+ * second convention under the same name. A builder written to the wrong convention makes every packet
+ * one octet longer than its header states. The receiver's next packet then starts one octet early.
+ * Every later packet in the stream is misparsed, with no error to show it. `headerForPayload` converts
+ * in the other direction. It is a separate function for the same reason. A caller cannot apply the
  * convention from the wrong end.
  *
- * Derived bounds, from the sixteen-bit field: the data field is 1 to 65 536 octets, which is the range
- * 133.0-B-2 figure 4-1 gives, and the total packet is 7 to 65 542 octets. 4.1.4.1.2 makes the data
- * field at least one octet, so a length field of 0 means a one-octet data field and is legal; there is
- * no encoding for an empty data field, which is why the minus-one exists at all.
+ * The sixteen-bit field gives these bounds. The data field is 1 to 65 536 octets, the range in
+ * 133.0-B-2 figure 4-1. The total packet is 7 to 65 542 octets. 4.1.4.1.2 makes the data field at
+ * least one octet. A length field of 0 therefore means a one-octet data field and is legal. No value
+ * encodes an empty data field. That is the reason for the minus one.
  *
- * Bit numbering and the status enumerations are `TransferFrame.hpp`'s, unchanged.
+ * Bit numbering and the status enumerations are the same as in `TransferFrame.hpp`.
  */
 namespace gr::ccsds {
 
@@ -51,12 +51,12 @@ enum class SequenceFlags : std::uint8_t { continuation = 0U, first = 1U, last = 
 
 struct SpacePacketHeader {
     std::uint8_t  version          = 0U;    //!< bits 0-2, `'000'` (4.1.3.2.2)
-    bool          type             = false; //!< bit 3; `0` telemetry, `1` telecommand (4.1.3.3.2.3)
-    bool          secondary_header = false; //!< bit 4; `0` for idle packets (4.1.3.3.3.4)
+    bool          type             = false; //!< bit 3, `0` telemetry and `1` telecommand (4.1.3.3.2.3)
+    bool          secondary_header = false; //!< bit 4, `0` for idle packets (4.1.3.3.3.4)
     std::uint16_t apid             = 0U;    //!< bits 5-15, eleven bits (4.1.3.3.4)
     std::uint8_t  sequence_flags   = 0U;    //!< bits 16-17 (4.1.3.4.2.2)
     std::uint16_t sequence_count   = 0U;    //!< bits 18-31, modulo 16384 (4.1.3.4.3.4)
-    std::uint16_t data_length      = 0U;    //!< bits 32-47, AS TRANSMITTED: one fewer than the data field (4.1.3.5.2)
+    std::uint16_t data_length      = 0U;    //!< bits 32-47 as transmitted, one fewer than the data field octets (4.1.3.5.2)
 
     [[nodiscard]] bool operator==(const SpacePacketHeader&) const noexcept = default;
 };
@@ -103,12 +103,11 @@ struct SpacePacketHeader {
 }
 
 /**
- * @brief Build a header from a payload length rather than from a wire value.
+ * @brief Build a header from a payload length instead of a wire value.
  *
- * The one place in the tree that turns a payload length into the field, and the inverse of the one
- * place that turns the field into a length. A payload of zero octets is refused because 4.1.4.1.2
- * makes the data field at least one octet, and a payload above 65 536 octets is refused because the
- * field cannot describe it.
+ * The data length field for a payload of `n` octets is `n - 1`. This function is the inverse of
+ * `packetDataOctets`. A payload of zero octets is refused, because 4.1.4.1.2 makes the data field at
+ * least one octet. A payload above 65 536 octets is refused, because the field cannot describe it.
  */
 [[nodiscard]] inline constexpr WriteStatus headerForPayload(std::uint16_t apid, bool type, bool secondaryHeader, std::uint8_t sequenceFlags, std::uint16_t sequenceCount, std::size_t payloadOctets, SpacePacketHeader& out) noexcept {
     if (payloadOctets == 0UZ || payloadOctets > kMaxPacketDataOctets) {
