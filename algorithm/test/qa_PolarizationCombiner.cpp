@@ -31,13 +31,13 @@ namespace {
 
 using Complex = std::complex<float>;
 
-/// A two-branch scene: one signal through two channels, plus independent branch noise.
+/// A two-branch scene. One signal passes through two channels, and each branch adds independent noise.
 struct Scene {
     std::vector<Complex> signal0; ///< the signal component on branch 0, alone
     std::vector<Complex> signal1;
     std::vector<Complex> noise0; ///< the noise component on branch 0, alone
     std::vector<Complex> noise1;
-    std::vector<Complex> branch0; ///< their sum, which is what the estimator sees
+    std::vector<Complex> branch0; ///< their sum, the estimator's input
     std::vector<Complex> branch1;
 };
 
@@ -75,8 +75,8 @@ struct Scene {
     return sum / static_cast<double>(in.size());
 }
 
-/// The realized output ratio: the signal-only and noise-only streams put through the same weights, so the
-/// measurement is of the combination and not of one particular draw of the sum.
+/// The realized output ratio. The signal-only and noise-only streams go through the same weights. The figure then
+/// measures the combination, not one particular draw of the sum.
 [[nodiscard]] double realizedSnr(const Scene& scene, const PolarizationEstimate& estimate) {
     std::vector<Complex> signal(scene.signal0.size());
     std::vector<Complex> noise(scene.noise0.size());
@@ -100,9 +100,9 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
     };
 
     "the estimator's own identity holds whatever the data is"_test = [] {
-        // No assumed model: arbitrary seeded pairs. `a - lambda_-` and `b - lambda_-` sum to
-        // `lambda_+ - lambda_-` by construction, so the two branch ratios sum to the combined one as algebra
-        // rather than as an approximation. This is the criterion that catches a sign or an eigenvalue swap.
+        // No assumed model, only arbitrary seeded pairs. `a - lambda_-` and `b - lambda_-` sum to `lambda_+ - lambda_-`
+        // by construction. The two branch ratios therefore sum to the combined one as algebra, not as an approximation.
+        // This criterion catches a sign error or an eigenvalue swap.
         gr::rng::Xoshiro256pp         rng(0xDECAFULL);
         gr::rng::GaussianNoise<float> noise(rng);
 
@@ -140,8 +140,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         expect(std::abs(estimate.relativePhase + 2.) < tolerance) << "arg(h0) - arg(h1) is -2 rad";
         expect(std::abs(estimate.amplitudeRatio - 2.) < tolerance) << "|h0|/|h1| is 2";
 
-        // The naive ratio is biased toward 1 by the noise, which is the whole reason the estimator does not use
-        // it. Measured here so the difference is a number rather than a claim.
+        // The noise biases the naive ratio toward 1. That bias is the reason the estimator does not use it. The test
+        // measures the difference as a number.
         const double naive = std::sqrt(covariance.a() / covariance.b());
         std::println("the naive sqrt(a/b) reads {:.5f}, biased toward 1 by the branch noise", naive);
         expect(lt(naive, 2.)) << "and it really is biased low";
@@ -150,8 +150,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
     "maximal-ratio combining adds the two ratios, to within an envelope of two named terms"_test = [] {
         constexpr std::size_t kWindow = 262'144UZ;
         constexpr double      kNoise  = 0.1;
-        // 4.343/sqrt(N) dB is the spread of one power measurement; the weight-estimation loss is the other term
-        // and is far smaller at this window. Four of the first is 0.034 dB, so the envelope is 0.05.
+        // 4.343/sqrt(N) dB is the spread of one power measurement. The weight-estimation loss is the other term and is
+        // far smaller at this window. Four of the first is 0.034 dB, and the envelope is 0.05.
         constexpr double kEnvelopeDb = 0.05;
 
         struct Arm {
@@ -165,8 +165,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
             gr::rng::Xoshiro256pp         rng(0xF00DULL);
             gr::rng::GaussianNoise<float> noise(rng);
 
-            // The weights are estimated on one window and applied to an independent one, so the figure carries
-            // the estimation loss rather than hiding it by fitting the same samples it is measured on.
+            // The weights are estimated on one window and applied to an independent one. The figure therefore carries
+            // the estimation loss. Fitting the same samples it is measured on would hide that loss.
             const Scene training = makeScene(noise, {1., 0.}, arm.h1, kNoise, kNoise, kWindow);
             const Scene applied  = makeScene(noise, {1., 0.}, arm.h1, kNoise, kNoise, kWindow);
 
@@ -200,8 +200,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
             covariance.add(scene.branch0, scene.branch1);
             const PolarizationEstimate estimate = covariance.solve();
 
-            // An eigenvector is defined up to a unit-modulus scalar; a solver that did not pin one would put a
-            // random phase on the combined output at every one of these boundaries.
+            // An eigenvector is defined up to a unit-modulus scalar. A solver that did not pin one would put a random
+            // phase on the combined output at each of these boundaries.
             expect(estimate.weight0.imag() == 0.) << "arg(weight 0) is zero exactly, window" << window;
             expect(estimate.weight0.real() > 0.) << "and it is the positive real axis, not the negative one";
 
@@ -227,7 +227,7 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         covariance.add(scene.branch0, scene.branch1);
         const PolarizationEstimate estimate = covariance.solve();
 
-        // The algebraic identity first: `u = [-conj(w_1), conj(w_0)]` is orthogonal to `w` by construction.
+        // The algebraic identity first. `u = [-conj(w_1), conj(w_0)]` is orthogonal to `w` by construction.
         const std::complex<double> inner = std::conj(estimate.weight0) * estimate.ortho0 + std::conj(estimate.weight1) * estimate.ortho1;
         expect(lt(std::abs(inner), 1e-15)) << "w^H v_perp is zero to rounding, got" << std::abs(inner);
 
@@ -278,8 +278,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
     "saturation is counted, never silent"_test = [] {
         constexpr std::size_t kWindow = 4'096UZ;
 
-        // No noise in either branch: the two branches carry the same deterministic sequence, so `a`, `b` and
-        // `|c|` are the same sums and `lambda_-` is exactly zero rather than a rounding of it.
+        // No noise in either branch. The two branches carry the same deterministic sequence. `a`, `b` and `|c|` are
+        // then the same sums. `lambda_-` is exactly zero, not a rounded value near zero.
         BranchCovariance noiseless;
         for (std::size_t k = 0UZ; k < kWindow; ++k) {
             const Complex sample{static_cast<float>(std::cos(0.31 * static_cast<double>(k))), static_cast<float>(std::sin(0.31 * static_cast<double>(k)))};
@@ -291,8 +291,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         expect(hot.combinedSnr == kPolarizationSaturation);
         expect(approx(hot.combinedSnrDb(), 60., 1e-9));
 
-        // Branch 1 carries nothing correlated at all: `lambda_+ - a` is exactly zero, the amplitude ratio is
-        // unbounded, and the weights degenerate to branch 0 alone -- which is the right answer, not an error.
+        // Branch 1 carries nothing correlated. `lambda_+ - a` is exactly zero, and the amplitude ratio is unbounded.
+        // The weights degenerate to branch 0 alone. That is the right answer, not an error.
         gr::rng::Xoshiro256pp         rng(0x9999ULL);
         gr::rng::GaussianNoise<float> noise(rng);
         std::vector<Complex>          only0(kWindow);
@@ -407,9 +407,9 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         expect(unitNoise.scale == 1.);
         expect(approx(std::norm(unitNoise.weight0) + std::norm(unitNoise.weight1), 1., 1e-12)) << "unit_noise keeps a unit weight vector, so the output noise power is one branch's";
 
-        // The signal's own amplitude is not identifiable from the covariance -- only `P|h|^2 = lambda_+ -
-        // lambda_-` is -- so unit_signal is the scale that makes the combined output's signal power one, and
-        // it reports that scale.
+        // The covariance does not identify the signal's own amplitude. Only `P|h|^2 = lambda_+ - lambda_-` is
+        // identifiable. unit_signal is the scale that makes the combined output's signal power one, and it reports that
+        // scale.
         std::vector<Complex> signal(kWindow);
         polarizationCombine(scene.signal0, scene.signal1, unitSignal, signal);
         std::println("unit_signal scale {:.6f}, realized output signal power {:.6f}", unitSignal.scale, meanPower(signal));

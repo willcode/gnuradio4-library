@@ -19,10 +19,10 @@
 #include <gnuradio-4.0/algorithm/sigmf/SampleCodec.hpp>
 #include <gnuradio-4.0/algorithm/sigmf/SigMfMetadata.hpp>
 
-// SigMF is an interchange format, so the assertions below are byte assertions wherever another program would see
-// bytes: the canonical recording's metadata derived by hand and compared in full, the scaling tables compared as
-// dataset bytes, every refusal the document layer can express, and the datatype alphabet generated from the grammar
-// rather than listed. Nothing here opens a file or instantiates a block — Part I is testable on its own.
+// SigMF is an interchange format. The assertions below check bytes wherever another program would see bytes. The
+// canonical recording's metadata is derived by hand and compared in full. The scaling tables are compared as dataset
+// bytes. The tests cover every refusal the document layer can express. The datatype alphabet is generated from the
+// grammar, not listed. Nothing here opens a file or instantiates a block. Part I is testable on its own.
 
 namespace {
 
@@ -33,7 +33,7 @@ using namespace std::string_view_literals;
 namespace sigmf = gr::sigmf;
 namespace json  = gr::sigmf::json;
 
-/// Anchor A: eight complex samples at 48 kHz, one capture segment, one annotation.
+/// Anchor A. Eight complex samples at 48 kHz, one capture segment and one annotation.
 constexpr std::array<std::complex<float>, 8> kAnchorSamples{
     std::complex<float>{0.0f, 0.0f},   //
     std::complex<float>{1.0f, 0.0f},   //
@@ -464,8 +464,8 @@ const suite<"SigMF sample codec"> _codec = [] {
             expect(eq(sigmf::spellDatatype(*parsed), std::string(tolerated.substr(0UZ, 3UZ)))) << tolerated;
         }
 
-        // The 64-bit integers and the 16-bit float are not productions of the dataset-format grammar,
-        // so they are refused for the reason any unknown spelling is, and not by a name of their own.
+        // The 64-bit integers and the 16-bit float are not productions of the dataset-format grammar. They are refused
+        // for the same reason as any unknown spelling, not by a name of their own.
         for (const std::string_view outside : {"ri64_le"sv, "ri64_be"sv, "ci64_le"sv, "cu64_le"sv, "ru64_be"sv, "cu64_be"sv, "rf16_le"sv, "cf16_be"sv, "rf16"sv}) {
             const auto parsed = sigmf::parseDatatype(outside);
             expect(!parsed.has_value()) << outside;
@@ -524,7 +524,7 @@ const suite<"SigMF sample codec"> _codec = [] {
         expect(eq(fromU8[7].real(), 0.25f));
         expect(eq(fromU8[7].imag(), -0.75f));
 
-        // round half away from zero, pinned so a later change to std::lrint breaks the test rather than the data
+        // round half away from zero. The pin makes a later change to std::lrint break the test instead of the data.
         const auto               datatype = sigmf::parseDatatype("ri16_le");
         const auto               encode   = sigmf::selectEncoder<float>(*datatype, sigmf::Scaling::Unit);
         std::array<float, 2>     half{0.5f / 32768.0f, -0.5f / 32768.0f};

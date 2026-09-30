@@ -28,9 +28,9 @@ namespace {
 
 constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 
-/// The schedule's contract restated independently: clamped outside the table, and between two knots the
-/// straight line written the other way round, so a shared slope cannot make both this and the kernel wrong
-/// together.
+/// The schedule's contract, restated independently. The value is clamped outside the table. Between two knots it is the
+/// straight line written the other way round. A shared slope error therefore cannot make both this and the kernel
+/// wrong.
 [[nodiscard]] double oracleOffset(std::span<const std::int64_t> times, std::span<const double> offsets, std::int64_t t_ns) {
     if (t_ns <= times.front()) {
         return offsets.front();
@@ -43,8 +43,8 @@ constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
     return offsets[index] * (1. - w) + offsets[index + 1UZ] * w;
 }
 
-/// The closed-form integral of that offset from `a` to `b`, in cycles: a trapezoid between consecutive
-/// breakpoints, located by a search per breakpoint rather than by a cursor.
+/// The closed-form integral of that offset from `a` to `b`, in cycles. It sums a trapezoid between consecutive
+/// breakpoints. A search per breakpoint locates each one, without a cursor.
 [[nodiscard]] double oracleCycles(std::span<const std::int64_t> times, std::span<const double> offsets, std::int64_t a, std::int64_t b) {
     double       cycles = 0.;
     std::int64_t x      = a;
@@ -57,8 +57,8 @@ constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
     return cycles;
 }
 
-/// Kahan summation, because the test measures the increments and not how well a naive loop adds 48000 of
-/// them: a plain sum of a 3e4 rad total loses more than the 1e-9 the increments themselves are held to.
+/// Kahan summation. The test measures the increments, not how well a naive loop adds 48000 of them. A plain sum of a
+/// 3e4 rad total loses more than the 1e-9 the increments themselves are held to.
 [[nodiscard]] double compensatedSum(std::span<const double> values) {
     double sum          = 0.;
     double compensation = 0.;
@@ -71,8 +71,8 @@ constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
     return sum;
 }
 
-/// A pass-shaped table: `nKnots` knots evenly spread over `spanNs`, following the S-curve a LEO Doppler profile
-/// has — high on approach, through zero at closest approach, low going away.
+/// A pass-shaped table of `nKnots` knots spread evenly over `spanNs`. It follows the S-curve of a LEO Doppler profile.
+/// The offset is high on approach, passes through zero at closest approach and is low going away.
 struct Profile {
     std::vector<std::int64_t> times;
     std::vector<double>       offsets;
@@ -93,9 +93,9 @@ struct Profile {
 } // namespace
 
 const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
-    // Criterion 1. A ramp from -5 kHz to +5 kHz over ten seconds: the knots read their own values, the midpoint
-    // and the quarter points read the interpolant exactly — the numbers are chosen so "exactly" is a fair word —
-    // and outside the table the ends hold rather than continuing the line.
+    // Criterion 1. A ramp from -5 kHz to +5 kHz over ten seconds. The knots read their own values. The midpoint and the
+    // quarter points read the interpolant exactly, and the numbers are chosen to make "exactly" a fair word. Outside
+    // the table the end values hold and the line does not continue.
     "a ramp reads its knots, its interpolant and its held ends"_test = [] {
         const std::vector<std::int64_t> times{0LL, 10'000'000'000LL};
         const std::vector<double>       offsets{-5'000., 5'000.};
@@ -119,9 +119,9 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         }
     };
 
-    // Criterion 2. The span deliberately starts before the table and ends after it, so it covers the held value,
-    // both segments and the held value again, and every knot falls inside a sample interval rather than on its
-    // boundary — which is the case the trapezoid split exists for.
+    // Criterion 2. The span starts before the table and ends after it. It covers the held value, both segments and the
+    // held value again. Every knot falls inside a sample interval, not on its boundary. The trapezoid split exists for
+    // that case.
     "the accumulated phase is the schedule's integral, however it is chunked"_test = [] {
         constexpr std::size_t kSamples = 48'000UZ;
 
@@ -138,8 +138,8 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         std::println("qa_FrequencySchedule: accumulated phase {:.6f} rad over {} samples, {:.3e} rad from the closed-form integral", compensatedSum(whole), kSamples, achieved);
         expect(lt(achieved, 1e-9)) << "the accumulated phase is not the schedule's integral";
 
-        // Same schedule, same clock, different call boundaries: the increments must be the same numbers, not
-        // merely close ones, because a graph that changes its buffer size must not change its output.
+        // The same schedule and clock with different call boundaries. The increments must be the same numbers, not
+        // merely close ones. A change of buffer size must not change the output.
         for (const std::size_t chunk : {1UZ, 7UZ, 1'000UZ, 12'345UZ}) {
             std::vector<double> pieced(kSamples);
             for (std::size_t produced = 0UZ; produced < kSamples; produced += chunk) {
@@ -151,10 +151,10 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         }
     };
 
-    // The cursor is an optimization, and an optimization has to give the same answer as the thing it replaces.
-    // A thousand knots 20820 ns apart against a sample period of 20833 ns puts a knot inside very nearly every
-    // sample interval, which is the case a cursor that moved only once per call would get wrong; the span runs
-    // past the last knot as well, so the held tail is walked too.
+    // The cursor is an optimization. It must give the same answer as the computation it replaces. A thousand knots
+    // 20820 ns apart against a sample period of 20833 ns put a knot inside very nearly every sample interval. A cursor
+    // that moved only once per call would get that case wrong. The span also runs past the last knot, and the walk
+    // covers the held tail too.
     "the cursor walk agrees with a search per sample"_test = [] {
         constexpr std::size_t   kSamples = 1'200UZ;
         constexpr std::uint64_t kFirst   = 0ULL;
@@ -183,9 +183,9 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         expect(that % std::ranges::equal(oneAtATime, increments)) << "a dense table read one sample at a time";
     };
 
-    // Criterion 3's sign anchor. The spec quotes +10.207 kHz for this case; worked out it is
-    // 437e6 * 7000 / 299792458 = 10203.7257 Hz, so the spec's figure is 3.3 Hz high and the correct one is
-    // pinned here. Beyond the digits the sign matters: closing reads high.
+    // Criterion 3's sign anchor. The spec quotes +10.207 kHz for this case. Worked out, it is
+    // 437e6 * 7000 / 299792458 = 10203.7257 Hz. The spec's figure is 3.3 Hz high, and the test pins the correct one.
+    // The sign matters beyond the digits. A closing range reads high.
     "a closing pass reads high, to the hertz"_test = [] {
         const double closing = offsetFor(-7'000., 437e6);
 
@@ -249,13 +249,13 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         expect(throws<std::invalid_argument>([&] { (void)FrequencySchedule(tooMany, tooManyOffsets); }));
     };
 
-    // A constant schedule is the degenerate case the arithmetic must still get right: every increment is the
-    // plain 2*pi*f/fs, and the trapezoid must not introduce a difference where the integral has none.
+    // A constant schedule is the degenerate case, and the arithmetic must still get it right. Every increment is the
+    // plain 2*pi*f/fs. The trapezoid must not introduce a difference where the integral has none.
     "a flat schedule gives the plain increment"_test = [] {
         const std::vector<std::int64_t> times{0LL, 10'000'000'000LL};
         const std::vector<double>       offsets{1'000., 1'000.};
         const FrequencySchedule         schedule(times, offsets);
-        const SampleClock               clock(0ULL, 0LL, 1'000'000ULL, 1ULL); // 1 MS/s: a sample is exactly 1000 ns
+        const SampleClock               clock(0ULL, 0LL, 1'000'000ULL, 1ULL); // 1 MS/s, a sample of exactly 1000 ns
 
         std::vector<double> increments(64UZ);
         schedule.phaseIncrementsFor(clock, 5'000ULL, increments);
@@ -265,21 +265,20 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         }
     };
 
-    // The composition a Doppler-correcting block is: a schedule's increments straight into the phasor that
-    // rides them. Neither kernel is interesting alone — the schedule produces numbers nobody reads and the
-    // phasor takes increments from anywhere — so the pair has to be shown working, at kernel level,
-    // before a block puts a name on it.
+    // A Doppler-correcting block is this composition. A schedule's increments go straight into the phasor that applies
+    // them. Neither kernel is useful alone. The schedule produces numbers that nothing reads, and the phasor takes
+    // increments from any source. The test shows the pair working at kernel level before a block is built on it.
     //
-    // A two-knot ramp from -5 kHz to +15 kHz across two seconds at 48 kS/s. The mixed tone's angle is unwrapped
-    // against the schedule's own closed-form integral and the residual is asserted at every sample
-    // rather than at the end: an error that grew with the run would show as a residual that grew, and an error
-    // that did not grow is the property a coherent demodulator downstream depends on.
+    // A two-knot ramp from -5 kHz to +15 kHz across two seconds at 48 kS/s. The mixed tone's angle is unwrapped against
+    // the schedule's own closed-form integral. The residual is asserted at every sample, not only at the end. An error
+    // that grew with the run would show as a growing residual. A coherent demodulator needs an error that does not
+    // grow.
     //
-    // The tolerance is float32's, and it is the output's, not the phasor's. The phase is accumulated in double
-    // and reduced every step, so its own error over 96000 samples is a few times 1e-11 rad. What the test reads
-    // is `atan2` of a `std::complex<float>` that came out of a complex multiply: four products and two sums,
-    // each rounded at 2^-24 = 5.96e-8 relative, which bounds the angle of the result at roughly 8 * 2^-24 =
-    // 4.8e-7 rad. The criterion is 1e-6 rad, twice that, and the achieved figure is printed.
+    // The tolerance is float32's. It belongs to the output, not to the phasor. The phase is accumulated in double and
+    // reduced every step. Its own error over 96000 samples is a few times 1e-11 rad. The test reads `atan2` of a
+    // `std::complex<float>` from a complex multiply. The multiply has four products and two sums, each rounded at
+    // 2^-24 = 5.96e-8 relative. That bounds the angle of the result at roughly 8 * 2^-24 = 4.8e-7 rad. The criterion is
+    // 1e-6 rad, twice that bound. The test prints the achieved figure.
     "a schedule's increments drive the phasor to the schedule's own integral"_test = [] {
         constexpr std::size_t kSamples   = 96'000UZ;
         constexpr double      kTolerance = 1e-6;
@@ -292,10 +291,9 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         std::vector<double> increments(kSamples);
         schedule.phaseIncrementsFor(clock, 0ULL, increments);
 
-        // A constant unit-magnitude input, so that what comes out is the input's own angle plus the phasor's and
-        // the multiply is exercised rather than stepped around. 0.6 and 0.8 are a unit vector to within their
-        // own float rounding, and the reference takes the angle from the stored floats rather than from the
-        // decimal that produced them.
+        // A constant unit-magnitude input. The output is the input's own angle plus the phasor's, and the test
+        // exercises the multiply. 0.6 and 0.8 are a unit vector to within their own float rounding. The reference takes
+        // the angle from the stored floats, not from the decimals that produced them.
         const std::complex<float>              carrier{0.6f, 0.8f};
         const std::vector<std::complex<float>> in(kSamples, carrier);
         std::vector<std::complex<float>>       out(kSamples);
@@ -321,8 +319,8 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         expect(lt(worst, kTolerance)) << "the composition's phase left the schedule's integral";
         expect(gt(std::abs(last), 60'000.)) << "a run short enough that drift could hide is not a test of drift";
 
-        // The increments carry the schedule and nothing else: the same phasor fed a flat increment must not
-        // reproduce them, or the assertion above would pass on a kernel that ignored its input.
+        // The increments carry the schedule alone. The same phasor fed a flat increment must not reproduce them.
+        // Otherwise the assertion above would pass on a kernel that ignored its input.
         std::vector<double>              flat(kSamples, kTwoPi * 5'000. / 48'000.);
         std::vector<std::complex<float>> flatOut(kSamples);
         Phasor<float>                    other;
@@ -351,8 +349,8 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         std::vector<double>   walked(kSamples);
         schedule.valuesFor(clock, 0ULL, walked);
 
-        // Against the independently written oracle the agreement is numerical: the oracle weights the two knots
-        // and the kernel adds a slope, which are the same line reached two ways and differ in the last bits.
+        // Against the independently written oracle the agreement is numerical. The oracle weights the two knots, and
+        // the kernel adds a slope. Both reach the same line and differ in the last bits.
         double worst  = 0.;
         bool   sameAs = true;
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
@@ -383,8 +381,8 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         expect(schedule.maxValue() == delays.front());
         expect(schedule.minValue() == delays.back());
 
-        // The slope is the segment's, clamped to a real segment at both ends: a delay table's consumer wants
-        // the rate the table is running at, and the derivative does not exist at a knot or outside the table.
+        // The slope is the segment's, clamped to a real segment at both ends. The result is the rate of the segment in
+        // force. The derivative does not exist at a knot or outside the table.
         expect(std::abs(schedule.segmentSlopePerSecond(500'000'000LL) - (delays[1] - delays[0])) < 1e-18) << "the first segment falls 2.339 ms in one second";
         expect(schedule.segmentSlopePerSecond(9'000'000'000LL) == schedule.segmentSlopePerSecond(2'000'000'000LL)) << "past the table the last segment's slope stands";
 

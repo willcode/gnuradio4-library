@@ -20,17 +20,18 @@
 
 #include <gnuradio-4.0/algorithm/network/PacketEnvelope.hpp>
 
-// The envelope is a format, and a format is only worth the bytes it pins. So the assertions below are byte
-// assertions wherever a peer would see bytes: one fully specified message derived by hand, every refusal a header
-// alone can express, and the item-type table checked against the framework enumeration it borrows at compile time.
-// Nothing here opens a socket — the format is testable with the transport that carries it switched off.
+// The envelope is a byte format. The assertions below check bytes wherever a peer would see bytes. They cover one fully
+// specified message derived by hand and every refusal a header alone can express. They also check the item-type table
+// against the framework enumeration it borrows at compile time. Nothing here opens a socket. The format is testable
+// with its transport switched off.
 
 namespace {
 
 using namespace gr::network;
 
-/// @brief The metadata map of the golden message: four keys, deliberately no floating-point value, so the pinned
-/// bytes survive any later change to how the emitter prints a float.
+/// @brief The metadata map of the golden message, four keys and no floating-point value.
+///
+/// The pinned bytes then survive any later change to how the emitter prints a float.
 [[nodiscard]] gr::property_map goldenMap() {
     gr::property_map map;
     map.insert_or_assign(gr::property_map::key_type("crc_ok"), gr::pmt::Value(true));
@@ -57,8 +58,9 @@ constexpr std::string_view kGoldenMetadata = "\ncrc_ok: !!bool true\nprotocol:  
     return header;
 }
 
-/// @brief A header whose CRC is recomputed after @p corrupt has edited the covered bytes, so a field-value refusal is
-/// reached rather than the CRC catching the edit first.
+/// @brief A header whose CRC is recomputed after @p corrupt has edited the covered bytes.
+///
+/// The test then reaches the field-value refusal before the CRC can catch the edit.
 template<typename F>
 [[nodiscard]] std::array<std::uint8_t, 32> resealed(F&& corrupt) {
     std::array<std::uint8_t, 32> bytes = kGoldenHeader;
@@ -119,7 +121,7 @@ template<typename T>
         std::memcpy(items.data(), message.payload.data(), message.payload.size());
     }
     gr::property_map map;
-    if (header->meta_bytes != 0U) { // the empty map short-circuits, so the reader never asks what deserialize("") does
+    if (header->meta_bytes != 0U) { // the empty map short-circuits, and the reader does not call deserialize("")
         const auto parsed = gr::pmt::yaml::deserialize(message.metadata);
         boost::ut::expect(parsed.has_value()) << "the metadata frame did not parse";
         if (parsed.has_value()) {
@@ -185,7 +187,7 @@ static_assert(kItemTypeCode<float>                == static_cast<std::uint16_t>(
 static_assert(kItemTypeCode<double>               == static_cast<std::uint16_t>(gr::pmt::Value::ValueType::Float64));
 static_assert(kItemTypeCode<std::complex<float>>  == static_cast<std::uint16_t>(gr::pmt::Value::ValueType::ComplexFloat32));
 static_assert(kItemTypeCode<std::complex<double>> == static_cast<std::uint16_t>(gr::pmt::Value::ValueType::ComplexFloat64));
-// a framework renumbering therefore breaks this build rather than a peer at run time
+// a framework renumbering therefore breaks this build, not a peer at run time
 // clang-format on
 
 const boost::ut::suite<"packet envelope"> envelopeTests = [] {
@@ -217,8 +219,8 @@ const boost::ut::suite<"packet envelope"> envelopeTests = [] {
         expect(eq(static_cast<std::uint32_t>(kHeaderCrc.compute(kGoldenHeader)), kHeaderCrcResidue));
     };
 
-    // an emitter pin, not an interop contract: a deliberate change to how gr::pmt::yaml writes a map is a deliberate
-    // change to this assertion, and the name says so
+    // an emitter pin, not an interop contract. A deliberate change to how gr::pmt::yaml writes a map changes this
+    // assertion too. The test's name states this.
     "the golden metadata, byte for byte (emitter pin)"_test = [] {
         const std::string serialized = gr::pmt::yaml::serialize(goldenMap());
         expect(eq(serialized.size(), kGoldenMetadata.size()));
@@ -256,9 +258,9 @@ const boost::ut::suite<"packet envelope"> envelopeTests = [] {
         expect(eq(static_cast<std::size_t>(kLastItemTypeCode - kFirstItemTypeCode + 1U), 12UZ));
     };
 
-    // The emitter writes the shortest representation that parses back to the same value, so the round trip is exact
-    // rather than bounded. The bound is asserted too, because a regression to a fixed precision would still satisfy
-    // it and the two assertions then say which of the two happened.
+    // The emitter writes the shortest representation that parses back to the same value. The round trip is therefore
+    // exact, not merely bounded. The test asserts the bound too. A regression to a fixed precision would still pass the
+    // bound, and the two assertions together show which of the two happened.
     "float fidelity"_test = [] {
         for (const double hz : {100'000'000.0, 145'825'000.0, 433'920'000.0, 433'921'337.0, 1'090'000'000.0, 2'400'000'001.0}) {
             gr::property_map map;
@@ -363,8 +365,8 @@ const boost::ut::suite<"packet envelope"> envelopeTests = [] {
     };
 
     "the empty map and the empty payload"_test = [] {
-        // meta_bytes == 0 is the empty map, and a reader short-circuits it rather than asking deserialize what an
-        // empty document means
+        // meta_bytes == 0 is the empty map. A reader short-circuits it and does not ask deserialize what an empty
+        // document means.
         expect(eq(gr::pmt::yaml::serialize(gr::property_map{}).size(), 0UZ));
 
         const std::vector<std::uint8_t> none{};

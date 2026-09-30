@@ -10,15 +10,14 @@
 #include <gnuradio-4.0/algorithm/ccsds/PacketExtractor.hpp>
 
 /*
- * The packet extraction function is one sentence of the standard turned into a state machine, and the
- * sentence is 132.0-B-3 4.3.2.4: when the held fragment's own length disagrees with the first header
- * pointer, the pointer is correct. Everything here tests the consequence of that rule rather than the
- * rule, and the criterion the group exists for is the third test below -- one zone lost between two
- * fragments of a spanning packet costs exactly one packet, not the rest of the pass.
+ * The packet extraction function is a state machine built on one sentence of the standard, 132.0-B-3 4.3.2.4. When the
+ * held fragment's own length disagrees with the first header pointer, the pointer is correct. The tests here check the
+ * consequence of that rule, not the rule itself. The criterion this group exists for is the third test below. One zone
+ * lost between two fragments of a spanning packet costs exactly one packet, not the rest of the pass.
  *
- * The negative control sits in the same file: a reassembler that ignores the pointer and simply
- * concatenates, fed the same three zones, is asserted to produce a *wrong* second packet. The
- * difference between the two arms states the pointer rule's effect rather than warning about it.
+ * The negative control is in the same file. A reassembler that ignores the pointer and simply concatenates gets the
+ * same three zones. The test asserts that it produces a *wrong* second packet. The difference between the two arms
+ * shows the effect of the pointer rule.
  */
 namespace {
 
@@ -44,9 +43,9 @@ std::vector<std::uint8_t> makePacket(std::uint16_t apid, std::uint16_t sequenceC
     return packet;
 }
 
-/// One virtual channel's packet zones, as a transmitter would lay them: packets end to end, one
-/// pointer per zone naming the first packet that starts in it, idle packets padding the tail so no
-/// zone is short and no octet of fill is ever walked as a header.
+/// One virtual channel's packet zones, laid out as a transmitter would lay them. Packets run end to end. Each zone has
+/// one pointer that names the first packet starting in it. Idle packets pad the tail. No zone is short, and no fill
+/// octet is walked as a header.
 struct Segmented {
     std::vector<std::vector<std::uint8_t>> zones;
     std::vector<std::uint16_t>             pointers;
@@ -89,8 +88,8 @@ Segmented segment(const std::vector<std::vector<std::uint8_t>>& packets, std::si
     return out;
 }
 
-/// Compared through a function rather than in the assertion, because the unit-test framework's own
-/// equality expression wants to print what it compared and a vector of vectors is not streamable.
+/// Compared through a function, not in the assertion. The unit-test framework's equality expression prints what it
+/// compared, and a vector of vectors is not streamable.
 bool same(const std::vector<std::vector<std::uint8_t>>& a, const std::vector<std::vector<std::uint8_t>>& b) { return a == b; }
 
 } // namespace
@@ -99,9 +98,8 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
     using namespace boost::ut;
 
     "5. segment then extract is the identity, at every zone length the pointer can address"_test = [] {
-        // 2046 rather than 2048: eleven bits with two reserved values name positions 0 to 2045, so a
-        // zone longer than 2046 octets has positions no first header pointer can express. That bound is
-        // asserted on its own in the test below.
+        // 2046, not 2048. Eleven bits with two reserved values name positions 0 to 2045. A zone longer than 2046 octets
+        // has positions no first header pointer can express. The test below asserts that bound on its own.
         for (const std::size_t zoneLength : {223UZ, 1115UZ, 2046UZ}) {
             for (const std::size_t packetOctets : {7UZ, 8UZ, 100UZ, 1000UZ, 2047UZ, 4096UZ}) {
                 std::vector<std::vector<std::uint8_t>> packets;
@@ -152,7 +150,7 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
     };
 
     "6. idle frames and idle packets, counted and silent"_test = [] {
-        // A hundred only-idle-data zones yield nothing, and nothing else moves.
+        // A hundred only-idle-data zones yield no packet and change only the idle count.
         {
             PacketExtractor           extractor;
             OidFill                   fill;
@@ -169,7 +167,7 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(eq(extractor.counters().orphan_octets, 0ULL));
         }
 
-        // Three real packets and two idle packets in one zone: three out, two counted.
+        // Three real packets and two idle packets in one zone. Three come out, and two are counted.
         {
             const std::vector<std::vector<std::uint8_t>> packets{makePacket(10U, 0U, 20UZ, 0x01U), makePacket(kIdleApid, 0U, 15UZ, 0x02U), makePacket(11U, 1U, 30UZ, 0x03U), makePacket(kIdleApid, 0U, 9UZ, 0x04U), makePacket(12U, 2U, 25UZ, 0x05U)};
             std::vector<std::uint8_t>                    zone;
@@ -187,8 +185,8 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(got[2] == packets[4]);
         }
 
-        // An only-idle-data zone in the middle of a spanning packet drops the fragment once, per
-        // 4.1.4.6.3 NOTE 3, and the packet that starts in the next real zone comes out whole.
+        // An only-idle-data zone in the middle of a spanning packet drops the fragment once (4.1.4.6.3 NOTE 3). The
+        // packet that starts in the next real zone comes out whole.
         {
             const std::vector<std::uint8_t> spanning = makePacket(20U, 0U, 500UZ, 0x10U);
             const std::vector<std::uint8_t> follower = makePacket(21U, 1U, 60UZ, 0x20U);
@@ -239,9 +237,9 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(same(got, tail)) << "the spanning packet is lost and every packet behind it is not";
         }
 
-        // The count continuous but the octets wrong: the zone that arrives in the gap's slot carries
-        // the following zone's octets. The fragment then disagrees with the pointer, and 4.3.2.4 says
-        // the pointer is correct.
+        // The count is continuous but the octets are wrong. The zone that arrives in the gap's slot carries the
+        // following zone's octets. The fragment then disagrees with the pointer, and 4.3.2.4 says the pointer is
+        // correct.
         {
             PacketExtractor                        extractor;
             std::vector<std::vector<std::uint8_t>> got;
@@ -255,9 +253,9 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(same(got, tail));
         }
 
-        // The negative control: a reassembler that concatenates the surviving zones and cuts by the
-        // first packet's own length puts its next packet boundary 60 octets away from where the second
-        // packet actually starts, and never recovers.
+        // The negative control. A reassembler concatenates the surviving zones and cuts by the first packet's own
+        // length. Its next packet boundary lands 60 octets away from where the second packet starts. It does not
+        // recover.
         {
             std::vector<std::uint8_t> concatenated;
             for (const std::size_t z : {0UZ, 2UZ, 3UZ}) {
@@ -273,9 +271,9 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
     };
 
     "a zone longer than 2046 octets has positions the pointer cannot name"_test = [] {
-        // Derived in 132.0-B-3 4.1.2.7.6 from the eleven-bit width and its two reserved values: the
-        // addressable positions are 0 to 2045. A packet starting at 2046 or 2047 of a 2048-octet zone
-        // cannot be pointed at, and a pointer at or beyond the zone is the refusal that covers it.
+        // Derived in 132.0-B-3 4.1.2.7.6 from the eleven-bit width and its two reserved values. The addressable
+        // positions are 0 to 2045. A packet starting at 2046 or 2047 of a 2048-octet zone cannot be pointed at. The
+        // refusal of a pointer at or beyond the zone covers that case.
         expect(eq(static_cast<unsigned>(kFhpOnlyIdleData), 2046U));
         expect(eq(static_cast<unsigned>(kFhpNoPacketStart), 2047U));
 
@@ -287,7 +285,7 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
         std::vector<std::vector<std::uint8_t>> got;
         const auto                             emit = [&got](std::span<const std::uint8_t> p) { got.emplace_back(p.begin(), p.end()); };
 
-        // 2046 is the only-idle-data value and 2047 says no packet starts here; neither can mean 2046.
+        // 2046 is the only-idle-data value, and 2047 says no packet starts here. Neither can mean position 2046.
         extractor.feed(zone, 2046U, 0U, emit);
         expect(eq(extractor.counters().idle_frames, 1ULL));
         expect(got.empty()) << "the position is unreachable, not misread";
@@ -355,8 +353,8 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(got[0] == packet);
         }
 
-        // A nonzero pointer arriving first, with no prior state: the residue is orphaned and counted,
-        // and the packet at the pointer comes out.
+        // A nonzero pointer arriving first, with no prior state. The residue is orphaned and counted, and the packet at
+        // the pointer comes out.
         {
             std::vector<std::uint8_t> leading(37UZ + packet.size(), 0xCCU);
             std::copy(packet.begin(), packet.end(), leading.begin() + 37);
@@ -393,8 +391,8 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(got[0] == largest);
         }
 
-        // The same input at max_packet_length = 1024: refused once, the rest of the zone discarded,
-        // and the next zone's pointer recovering normally.
+        // The same input at max_packet_length = 1024. The packet is refused once, and the rest of the zone is
+        // discarded. The next zone's pointer recovers normally.
         {
             PacketExtractor                        extractor{PacketExtractor::Config{.max_packet_length = 1024UZ, .count_modulus = kTmCountModulus}};
             std::vector<std::vector<std::uint8_t>> got;
@@ -411,7 +409,7 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             expect(got[0] == small);
         }
 
-        // The bound can be tightened and never loosened.
+        // The bound can be tightened but not loosened.
         const PacketExtractor loose{PacketExtractor::Config{.max_packet_length = kMaxPacketOctets * 4UZ, .count_modulus = kTmCountModulus}};
         expect(eq(loose.config().max_packet_length, kMaxPacketOctets));
     };
@@ -428,8 +426,7 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
         expect(extractor.fragment().empty());
         expect(extractor.counters() == PacketExtractor::Counters{});
 
-        // After a reset the first zone is the machine's first zone: no gap is reported against a count
-        // it never saw.
+        // After a reset the first zone is the machine's first zone. No gap is reported against a count it did not see.
         extractor.feed(packet, 0U, 200U, emit);
         expect(eq(emitted, 1UZ));
         expect(eq(extractor.counters().frames_lost, 0ULL));

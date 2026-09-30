@@ -23,7 +23,7 @@ using CF = std::complex<float>;
 
 constexpr float kSampleRate = 48000.f;
 
-/// The windows the calibration is proven against, one per family the landed vocabulary carries.
+/// The windows the calibration is proven against, one per window family of the vocabulary.
 constexpr std::array<std::pair<std::string_view, gr::algorithm::window::Type>, 5UZ> kWindows{{
     {"Rectangular", gr::algorithm::window::Type::Rectangular},
     {"Hann", gr::algorithm::window::Type::Hann},
@@ -104,8 +104,8 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
             const float peak      = *std::ranges::max_element(density);
             const float tonePower = peak * scale.enbwHz();
             const float db        = 10.f * std::log10(tonePower);
-            // exact only for a window whose main lobe the peak bin captures whole; the spread of the wider
-            // windows costs a fraction of a decibel, which is the bound this records rather than hides
+            // exact only for a window whose main lobe the peak bin captures whole. The spread of the wider windows
+            // costs a fraction of a decibel, and this bound records that cost.
             expect(std::abs(db) < 0.6f) << name << " reads " << db << " dBFS from its peak bin";
         }
     };
@@ -113,8 +113,8 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
     "criterion 2: seeded noise of known power integrates to that power"_test = [] {
         constexpr std::size_t n         = 1024UZ;
         constexpr std::size_t nAverages = 64UZ;
-        // both parts are uniform on [-0.5, 0.5), so E[|x|^2] = 2 * (1/12): the fixture's own power, checked
-        // below so a generator change cannot quietly move what the criterion is measured against
+        // both parts are uniform on [-0.5, 0.5), so E[|x|^2] = 2 * (1/12). That is the fixture's own power. The test
+        // checks it below, and a generator change cannot quietly move the reference of the criterion.
         constexpr float kPower = 1.f / 6.f;
 
         const auto         window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n);
@@ -155,8 +155,8 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
         const auto            window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n);
         const auto            scale  = spectralScale(std::span<const float>(window), kSampleRate);
 
-        // a real input, presented as complex with a zero quadrature: its spectrum is conjugate-symmetric,
-        // which is the case the fold exists for
+        // a real input, presented as complex with a zero quadrature. Its spectrum is conjugate-symmetric, the case the
+        // fold exists for.
         std::vector<CF> real(n);
         for (std::size_t k = 0UZ; k < n; ++k) {
             real[k] = CF(std::cos(2.f * std::numbers::pi_v<float> * 128.f * static_cast<float>(k) / static_cast<float>(n)), 0.f);

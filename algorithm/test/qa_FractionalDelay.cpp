@@ -35,8 +35,8 @@ constexpr double kRolloff = 0.2;
 
 using Complex = std::complex<float>;
 
-/// A unit tone at @p f0 cycles per sample, the signal a fractional delay's contract is written against: a
-/// delay of `d` samples is a phase rotation of `-2*pi*f0*d` and nothing else.
+/// A unit tone at @p f0 cycles per sample. A fractional delay's contract is written against this signal. A delay of `d`
+/// samples is a phase rotation of `-2*pi*f0*d` alone.
 [[nodiscard]] std::vector<Complex> tone(double f0, std::size_t n) {
     std::vector<Complex> out(n);
     for (std::size_t k = 0UZ; k < n; ++k) {
@@ -49,8 +49,8 @@ using Complex = std::complex<float>;
 /// The prototype's delivered passband ripple as a linear amplitude.
 [[nodiscard]] double rippleFloor(double rippleDb) { return std::pow(10., rippleDb / 20.) - 1.; }
 
-/// The prototype's delivered stopband as a linear amplitude: the tone's own images land there, so it is the
-/// third term of the envelope beside the interpolation bound and the ripple, and not a fourth thing.
+/// The prototype's delivered stopband as a linear amplitude. The tone's own images land there. It is the third term of
+/// the envelope, beside the interpolation bound and the ripple, and not a fourth term.
 [[nodiscard]] double stopbandFloor(double stopbandDb) { return std::pow(10., stopbandDb / 20.); }
 
 /// The slope of a linear fit through @p y against its own index, least squares, closed form.
@@ -77,8 +77,8 @@ using Complex = std::complex<float>;
 
 const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     "the error bound is the resampler's, at the sizes the table states"_test = [] {
-        // The five rows of the closed form, so a change to it is caught here rather than in a delay measurement
-        // whose envelope it silently widened.
+        // The five rows of the closed form. A change to it fails here, before it silently widens the envelope of a
+        // delay measurement.
         struct Row {
             std::size_t bank;
             double      order0;
@@ -121,8 +121,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
                     line.reset();
                     line.process(in, delays, out);
 
-                    // The first `history + tapsPerArm` outputs are the filter's transient over the zeroed
-                    // history, the same convention every filtering block in this tree states.
+                    // The first `history + tapsPerArm` outputs are the filter's transient over the zeroed history.
                     const std::size_t skip = line.historySamples() + line.tapsPerArm();
                     for (std::size_t k = skip; k < kSamples; ++k) {
                         const double  phase = kTwoPi * f0 * (static_cast<double>(k) - latency - delay);
@@ -137,11 +136,10 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     };
 
     "the consistency identity: a range rate is a frequency shift, at the ratio of the two carriers"_test = [] {
-        // spec-doppler-trajectory-io criterion 6, at the kernel. A range rate `v` delays the envelope by
-        // `tau(t) = tau0 + v*t/c`, so a baseband tone at `f_b` emerges at `f_b*(1 - v/c)` -- the derivation is
-        // exact, not first order -- while the same `v` moves a carrier at `f_c` by `offsetFor(v, f_c)`. The two
-        // shifts are therefore in the ratio `f_b/f_c`, which is the assertion that fails if either sign is wrong
-        // and says which.
+        // Criterion 6, at the kernel. A range rate `v` delays the envelope by `tau(t) = tau0 + v*t/c`. A baseband tone
+        // at `f_b` then emerges at `f_b*(1 - v/c)`, and the derivation is exact, not first order. The same `v` moves a
+        // carrier at `f_c` by `offsetFor(v, f_c)`. The two shifts are therefore in the ratio `f_b/f_c`. The ratio
+        // assertion fails if either sign is wrong and shows which.
         constexpr double      kSampleRate = 48'000.;
         constexpr double      kToneHz     = 12'000.;
         constexpr double      kCarrierHz  = 437e6;
@@ -191,8 +189,8 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     };
 
     "a delay schedule drives the line through one span call"_test = [] {
-        // The path a block takes: the schedule's own cursor walk writes seconds, one conversion makes them Q32
-        // samples, and the line never sees a `double` delay at all.
+        // The path a block takes. The schedule's own cursor walk writes seconds. One conversion makes them Q32 samples.
+        // The line sees no `double` delay.
         constexpr double      kSampleRate = 48'000.;
         constexpr std::size_t kSamples    = 8'192UZ;
 
@@ -229,8 +227,8 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         const std::vector<Complex> in = tone(0.17, kSamples);
         std::vector<std::uint64_t> delays(kSamples);
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
-            // A delay that moves within a chunk and across chunk boundaries, so that a per-call reset of the
-            // read position would show up rather than canceling.
+            // A delay that moves within a chunk and across chunk boundaries. A per-call reset of the read position
+            // would show up and would not cancel.
             delays[k] = fractionalDelayQ32(30. + 12. * std::sin(kTwoPi * static_cast<double>(k) / 7'000.));
         }
 
@@ -299,8 +297,8 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         expect(fractionalDelayQ32(0.5) == kArbitraryOne / 2ULL);
         expect(fractionalDelayQ32(7.125) == 7ULL * kArbitraryOne + kArbitraryOne / 8ULL) << "an eighth is a whole number of Q32 steps";
 
-        // The claim in the header: a `double`'s spacing is seven orders below what the representation keeps, so
-        // two delays a `2^-32` sample apart land on adjacent fixed-point values rather than the same one.
+        // The claim in the header. A `double`'s spacing is seven orders below what the representation keeps. Two delays
+        // a `2^-32` sample apart land on adjacent fixed-point values, not on the same one.
         constexpr double kStep = 1. / 4'294'967'296.;
         expect(fractionalDelayQ32(3. + kStep) - fractionalDelayQ32(3.) == 1ULL);
     };

@@ -25,8 +25,8 @@ namespace {
 constexpr std::uint64_t kTagIndex  = 12'345ULL;
 constexpr std::uint64_t kTagTimeNs = 1'788'000'000'123'456'789ULL;
 
-/// A pass table on the same axis the anchor places, so that a wrong anchor shows up as different samples
-/// rather than as a different number in a getter.
+/// A pass table on the same axis the anchor places. A wrong anchor then shows as different samples, not as a different
+/// number in a getter.
 [[nodiscard]] FrequencySchedule passSchedule() {
     std::vector<std::int64_t> times(31UZ);
     std::vector<double>       offsets(31UZ);
@@ -80,8 +80,8 @@ const boost::ut::suite<"ScheduleAnchor"> _schedule_anchor = [] {
     };
 
     "trigger_offset moves the anchor forward, at the resolution a float has there"_test = [] {
-        // The sign is the tree's own: `blocks/basic/Trigger.hpp` publishes `trigger_time = now - relOffset`
-        // beside `trigger_offset = relOffset`, so the tagged sample's time is the sum of the two.
+        // The sign follows the trigger tags. A trigger publishes `trigger_time = now - relOffset` beside
+        // `trigger_offset = relOffset`. The tagged sample's time is the sum of the two.
         ScheduleAnchor milli(AnchorSource::first_trigger, 0ULL, 0LL);
         expect(milli.onTrigger(0ULL, 1'000'000'000ULL, 1e-3f) == ScheduleAnchor::Response::armed);
         expect(milli.anchorNs() == 1'001'000'000LL) << "1 ms is exact: a float's spacing at 1 ms is 0.116 ns";
@@ -123,8 +123,8 @@ const boost::ut::suite<"ScheduleAnchor"> _schedule_anchor = [] {
         expect(anchor.nIgnoredAnchors() == 2ULL);
         expect(anchor.nReanchors() == 0ULL);
 
-        // The reason it does not move, as a number: re-anchoring 1 s later on a schedule reading 10 kHz would
-        // step the accumulated phase by 2*pi*10^4 rad, the phase a coherent demodulator downstream rides.
+        // The reason it does not move, as a number. Re-anchoring 1 s later on a schedule reading 10 kHz would step the
+        // accumulated phase by 2*pi*10^4 rad. A coherent demodulator tracks that phase.
         const FrequencySchedule schedule = passSchedule();
         const SampleClock       held     = anchor.clock(48'000ULL, 1ULL);
         const SampleClock       moved(kTagIndex + 1'000ULL, static_cast<std::int64_t>(kTagTimeNs) + 1'000'000'000LL, 48'000ULL, 1ULL);
@@ -161,8 +161,8 @@ const boost::ut::suite<"ScheduleAnchor"> _schedule_anchor = [] {
             expect(anchor.armed() == (source == AnchorSource::setting)) << anchorSourceName(source);
         }
 
-        // The bound itself is admitted: 2^63 - 1 ns is 2262-04-11T23:47:16.854775807Z, which no honest producer
-        // reaches and a producer with something other than a nanosecond count in the field does.
+        // The bound itself is admitted. 2^63 - 1 ns is 2262-04-11T23:47:16.854775807Z. No honest producer reaches it. A
+        // producer that puts something other than a nanosecond count in the field does.
         ScheduleAnchor edge(AnchorSource::first_trigger, 0ULL, 0LL);
         expect(edge.onTrigger(1ULL, ScheduleAnchor::kMaxTriggerTimeNs) == ScheduleAnchor::Response::armed);
         expect(edge.anchorNs() == std::numeric_limits<std::int64_t>::max());

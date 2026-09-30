@@ -36,7 +36,7 @@ namespace {
 using Complex           = std::complex<float>;
 constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 
-/// One published record, copied out of the spans the kernel lends its sink.
+/// One published record, copied out of the spans the kernel passes to its sink.
 struct Record {
     std::vector<float> magnitude{};
     std::vector<float> phase{};
@@ -67,7 +67,7 @@ struct Record {
     };
 }
 
-/// @brief Drive a prepared kernel over one span, presenting the undecided remainder again as a caller must.
+/// @brief Drive a prepared kernel over one span, passing the undecided remainder again as the caller contract requires.
 template<typename T>
 [[nodiscard]] std::vector<Record> drive(gr::analysis::Autocorrelation<T>& kernel, std::span<const T> in, bool flushTail = true) {
     std::vector<Record> records;
@@ -86,9 +86,10 @@ template<typename T>
     return records;
 }
 
-/// @brief The whole estimate of one window by the direct `O(N L)` sum, in double, against which the transform path
-/// is checked. It states the estimator's definition once more in the plainest possible form: taper the mean-removed
-/// sequence, sum the products at each lag, divide by the taper's own autocorrelation or by its value at zero.
+/// @brief The whole estimate of one window by the direct `O(N L)` sum in double, the reference for the transform path.
+///
+/// It restates the estimator's definition in its plainest form. It tapers the mean-removed sequence and sums the
+/// products at each lag. It divides by the taper's own autocorrelation or by its value at zero.
 template<typename T>
 [[nodiscard]] std::vector<double> directRatios(const AcfConfig& config, std::span<const T> window) {
     const std::size_t        n     = config.windowLength;
@@ -161,7 +162,7 @@ template<typename T>
     return out;
 }
 
-/// @brief The largest published ratio over lags `[first, last]`, and where it sits.
+/// @brief The largest published ratio over lags `[first, last]`, and its lag.
 [[nodiscard]] std::pair<std::size_t, double> peakOver(std::span<const float> magnitude, std::size_t first, std::size_t last) {
     std::size_t at   = first;
     double      best = -1.;
@@ -225,7 +226,7 @@ const suite<"autocorrelation free functions"> _acfFunctions = [] {
     };
 
     "a real estimate has a heavier tail and needs a higher threshold"_test = [] {
-        // erfc(t/sqrt2) = tail: the two-sided normal deviate, checked against values that are common knowledge
+        // the two-sided normal deviate t solves erfc(t/sqrt2) = tail. The checks use its well-known values.
         expect(std::abs(acfNormalDeviate(0.05) - 1.959964) < 1e-5) << std::format("{:.6f}", acfNormalDeviate(0.05));
         expect(std::abs(acfNormalDeviate(0.01) - 2.575829) < 1e-5) << std::format("{:.6f}", acfNormalDeviate(0.01));
         expect(std::abs(acfNormalDeviate(0.002699796) - 3.) < 1e-5) << std::format("{:.6f}", acfNormalDeviate(0.002699796));
@@ -320,7 +321,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         kernel.prepare(config);
 
         const double derived      = acfThreshold(n - lags, lags, pFa);
-        const double naive        = acfThreshold(n, lags, pFa); // the same multiple against 1/sqrt(N) rather than 1/sqrt(N-L)
+        const double naive        = acfThreshold(n, lags, pFa); // the same multiple against 1/sqrt(N) instead of 1/sqrt(N-L)
         std::size_t  firedDerived = 0UZ;
         std::size_t  firedNaive   = 0UZ;
         for (std::size_t trial = 0UZ; trial < windows; ++trial) {
@@ -339,8 +340,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         expect(rateDerived <= pFa + spread) << std::format("derived rate {:.4f} against design {:.4f} + spread {:.4f}", rateDerived, pFa, spread);
         expect(rateNaive > rateDerived) << "the lag dependence is not a refinement";
 
-        // a negative result needs the instrument verified positive: the same geometry with a sinusoidal envelope
-        // modulation at a known period, which the envelope kind must find
+        // a negative result holds only if the instrument finds a known positive. The positive is the same geometry
+        // with a sinusoidal envelope modulation at a known period. The envelope kind must find it.
         constexpr std::size_t period    = 64UZ;
         constexpr double      depth     = 0.9;
         std::vector<Complex>  modulated = complexNoise(n, 0x9005ULL);
@@ -352,11 +353,11 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         gr::analysis::Autocorrelation<Complex> envelopeKernel;
         envelopeKernel.prepare(envelopeConfig);
         const std::vector<Record> found = drive(envelopeKernel, std::span<const Complex>(modulated));
-        // The autocorrelation of a cosine is a cosine and the record is its magnitude, so the anti-nodes at the odd
-        // half-periods stand exactly as high as the period itself; the band searched is therefore the one period
-        // centered on the expected lag, inside which the magnitude has a single maximum. That maximum is quadratically
-        // flat: one lag either side of it the cosine falls by 5e-3 of its height, far under the scatter, so the
-        // located lag is asserted to a fraction of a period and no amount of averaging would make it exact.
+        // The autocorrelation of a cosine is a cosine, and the record is its magnitude. The anti-nodes at the odd
+        // half-periods are therefore exactly as high as the peak at the period. The search band is centered on the
+        // expected lag of one period. Inside it the magnitude has a single maximum. That maximum is quadratically
+        // flat. One lag to either side of it, the cosine falls by 5e-3 of its height, far under the scatter. The
+        // located lag is therefore asserted to a fraction of a period. No amount of averaging would make it exact.
         const std::size_t tolerance = period / 8UZ;
         const auto [at, best]       = peakOver(found[0UZ].magnitude, period - period / 4UZ, period + period / 4UZ);
         std::println("criterion 3 positive arm: envelope modulation at {} samples found at lag {} reading {:.4f} against the record's threshold {:.4f}", period, at, best, found[0UZ].threshold);
@@ -412,7 +413,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             disjoint.nAverages   = averages;
             AcfConfig overlapped = disjoint;
             overlapped.overlap   = 0.5;
-            overlapped.nAverages = 2UZ * averages - 1UZ; // the same distinct samples: N + (K'-1)H == K N at H = N/2
+            overlapped.nAverages = 2UZ * averages - 1UZ; // the same distinct samples, N + (K'-1)H == K N at H = N/2
 
             gr::analysis::Autocorrelation<Complex> disjointKernel;
             disjointKernel.prepare(disjoint);
@@ -481,8 +482,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         std::println("criterion 6: with the mean removed the largest lag reads {:.4f} against a scatter of {:.4f}", best, withoutPedestal[0UZ].scatter);
         expect(best < 6. * withoutPedestal[0UZ].scatter) << "the pedestal is gone and what is left is scatter";
 
-        // a constant-modulus input has no envelope autocorrelation at all, and the estimator says so rather than
-        // publishing whatever it does with 0/0
+        // a constant-modulus input has no envelope autocorrelation. The estimator counts the window degenerate and
+        // publishes no result of 0/0.
         std::vector<Complex>  constant(n);
         gr::rng::Xoshiro256pp rng(0x1234ULL);
         for (std::size_t k = 0UZ; k < n; ++k) {

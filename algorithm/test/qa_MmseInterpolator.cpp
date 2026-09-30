@@ -536,9 +536,9 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
     };
 
     "the bank is regenerated from the normal equations at construction"_test = [] {
-        // Solving the bank rather than tabulating it keeps its parameters free. With ENABLE_BENCHMARK_TESTS set and
-        // DISABLE_SENSITIVE_TESTS unset the test asserts a build under 5000 us, and otherwise it prints the figure and
-        // asserts nothing: the cost is a setup-path figure and belongs to the machine that read it.
+        // Solving the bank instead of tabulating it keeps its parameters free. With ENABLE_BENCHMARK_TESTS set and
+        // DISABLE_SENSITIVE_TESTS unset, the test asserts a build under 5000 us. Otherwise it prints the figure and
+        // asserts nothing. The cost is a setup-path figure and holds only for the machine that measured it.
         double best = 1e30;
         for (int repeat = 0; repeat < 20; ++repeat) {
             const auto                 start = Clock::now();

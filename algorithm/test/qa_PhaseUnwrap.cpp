@@ -28,8 +28,8 @@ using Complex           = std::complex<float>;
 
 [[nodiscard]] bool longRun() { return std::getenv("ENABLE_LONG_TESTS") != nullptr; }
 
-/// A tone at @p f0 cycles per sample. The phase of sample `k` is computed from `k` itself rather than
-/// accumulated, so the stream the unwrapper is judged on carries no accumulation error of its own.
+/// A tone at @p f0 cycles per sample. The phase of sample `k` is computed from `k` itself, not accumulated. The stream
+/// the unwrapper is judged on therefore carries no accumulation error of its own.
 [[nodiscard]] std::vector<Complex> tone(double f0, std::size_t n, std::size_t first = 0UZ) {
     std::vector<Complex> out(n);
     for (std::size_t k = 0UZ; k < n; ++k) {
@@ -39,8 +39,9 @@ using Complex           = std::complex<float>;
     return out;
 }
 
-/// What a `float` accumulator of total radians would read on the same stream, and what a `double` one would:
-/// the two designs this one exists instead of, run side by side so the reason is demonstrated and not asserted.
+/// What a `float` accumulator of total radians would read on the same stream, and what a `double` one would read. They
+/// are the two alternatives to this design. They run side by side, and the test demonstrates the reason instead of
+/// asserting it.
 struct FloatComparison {
     float  asFloat{0.f};
     double asDouble{0.};
@@ -112,10 +113,10 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(forward.cycles() == kTurns) << "0.4 cycles per sample unwraps exactly";
         expect(forward.nSuspectSteps() == 0ULL);
 
-        // 0.6 cycles per sample advances 1.2*pi per sample, which the wrapped difference reports as -0.8*pi.
-        // Two turn counts produce the same samples and nothing operating on the samples alone can choose
-        // between them: this is Nyquist restated for phase, and the aliased answer is the correct output of a
-        // correct algorithm on an input that does not determine the question.
+        // 0.6 cycles per sample advances 1.2*pi per sample, which the wrapped difference reports as -0.8*pi. Two turn
+        // counts produce the same samples. Nothing that operates on the samples alone can choose between them. This is
+        // Nyquist restated for phase. The aliased answer is the correct output of a correct algorithm on an input that
+        // does not determine the question.
         CycleUnwrapper aliased;
         aliased.process(tone(0.6, samples), cycles, phase);
         expect(aliased.cycles() == -kTurns) << "0.6 cycles per sample reads the alias at -0.4, exactly";
@@ -150,7 +151,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(phaseB[0] == 0.f) << "zero starts at exactly zero";
         expect(cyclesA[0] == 0LL && cyclesB[0] == 0LL);
 
-        // Neither changes the differences, the quantity a consumer usually reads.
+        // Neither changes the differences between samples.
         double worst = 0.;
         for (std::size_t k = 1UZ; k < kSamples; ++k) {
             const double a = kTwoPi * static_cast<double>(cyclesA[k] - cyclesA[k - 1UZ]) + static_cast<double>(phaseA[k] - phaseA[k - 1UZ]);
@@ -181,7 +182,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(unwrapper.cycles() == before) << "and the second stretch counts its own turns";
         expect(unwrapper.nResets() == 1ULL);
 
-        // A caller who would rather keep the count through a gap simply does not call it, and gets exactly that.
+        // A caller that keeps the count through a gap does not call it. The count then runs on unchanged.
         CycleUnwrapper carried;
         carried.process(tone(0.1, kSamples), cycles, phase);
         carried.process(tone(0.1, kSamples, kSamples), cycles, phase);
@@ -235,9 +236,9 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(unwrapper.nResets() == 0ULL) << "reset clears the counters where markDiscontinuity keeps them";
         expect(!unwrapper.started());
 
-        // Saturation is a claim about arithmetic and not about a run: at the fastest a stream can turn and
-        // still be unwrappable, `2^63 - 1` cycles takes 584.55 years at 10^9 S/s, so no test reaches it. What
-        // is asserted is that nothing on the way there trips the counter.
+        // Saturation is a claim about arithmetic, not about a run. At the fastest rate a stream can turn and still be
+        // unwrappable, `2^63 - 1` cycles take 584.55 years at 10^9 S/s. No test reaches it. The test asserts that
+        // nothing on the way there trips the counter.
         expect(unwrapper.nSaturations() == 0ULL);
     };
 };

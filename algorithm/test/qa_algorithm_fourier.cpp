@@ -73,7 +73,7 @@ std::vector<T> deterministicComplexSignal(std::size_t n) {
     return signal;
 }
 
-// the same broadband signal for a real-valued input: two tones and no symmetry, so every bin is occupied
+// the same broadband signal for a real-valued input. Two tones and no symmetry leave every bin occupied.
 template<typename T>
 std::vector<T> deterministicSignal(std::size_t n) {
     if constexpr (gr::meta::complex_like<T>) {
@@ -372,15 +372,15 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // the PocketFFT backend keeps the native path's result, not only its convention. The two engines factor a
-    // length differently, so they agree to rounding and not bit for bit; the bound is on the relative L2 norm of
-    // the difference over the whole spectrum.
+    // the PocketFFT backend keeps the native path's result, not only its convention. The two engines factor a length
+    // differently. They agree to rounding and not bit for bit. The bound is on the relative L2 norm of the difference
+    // over the whole spectrum.
     //
-    // The bound is not the precision's own epsilon, and the length it grows with is the native path's, not
-    // PocketFFT's: precomputeTwiddleFactors() builds each stage's table by repeated multiplication, so its error
-    // walks with the table's length, while PocketFFT computes every twiddle from an exact trigonometric call in
-    // double and rounds once. The test below, "backend accuracy against a double reference", separates the two;
-    // the numbers here are measured, at 5.1e-13 for double and 1.5e-4 for float at n = 65536.
+    // The bound is not the precision's own epsilon. It grows with length because of the native path, not because of
+    // PocketFFT. precomputeTwiddleFactors() builds each stage's table by repeated multiplication, and its error grows
+    // with the table's length. PocketFFT computes every twiddle from an exact trigonometric call in double and rounds
+    // once. The test below, "backend accuracy against a double reference", separates the two. The numbers here are
+    // measured, 5.1e-13 for double and 1.5e-4 for float at n = 65536.
     "PocketFFT matches the native backend"_test = []<typename T>() {
         using InType           = typename T::InType;
         using ValueType        = typename T::OutType::value_type;
@@ -402,8 +402,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     } | AllTypesToTest{};
 
-    // the receiver's own case: one long single-precision transform at the display lengths. Kept to the one type
-    // that runs it, because a 2^22 transform costs about as much as the rest of this suite.
+    // one long single-precision transform at the display lengths. Kept to single precision, because a 2^22 transform
+    // costs about as much as the rest of this suite.
     "PocketFFT matches the native backend at the display lengths"_test = [] {
         using Cplx = std::complex<float>;
         gr::algorithm::FFT<Cplx, Cplx> native{};
@@ -420,9 +420,9 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
     };
 
     // which of the two the disagreement above belongs to. Both float backends are measured against the same input
-    // transformed in double precision, which the "non-power-of-two forward DFT" case above pins against a direct
-    // DFT; PocketFFT stays near the precision's own epsilon while the native path's twiddle recurrence walks with
-    // the transform length.
+    // transformed in double precision. The "non-power-of-two forward DFT" case above checks that transform against a
+    // direct DFT. PocketFFT stays near the precision's own epsilon. The error of the native path's twiddle recurrence
+    // grows with the transform length.
     "backend accuracy against a double reference"_test = [] {
         using Cplx = std::complex<float>;
         using gr::algorithm::FftBackend;
@@ -527,10 +527,10 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         expect(eq(fft.pocketPlanBuilds, 2UZ)) << "alternating two known lengths plans neither again";
     };
 
-    // The four-step split factors the transform exactly, so it is held to the agreement two float engines of the
-    // same accuracy owe each other, not to the loose bound the native path's twiddle recurrence forces. SimdFFT is
-    // the reference because Auto runs it at these lengths on one thread, and the thread count must not
-    // change the answer: the split is the same arithmetic in the same order however the batches are shared out.
+    // The four-step split factors the transform exactly. It is held to the agreement expected of two float engines of
+    // the same accuracy, not to the loose bound the native path's twiddle recurrence forces. SimdFFT is the reference
+    // because Auto runs it at these lengths on one thread. The thread count must not change the answer. The split does
+    // the same arithmetic in the same order however the batches are shared out.
     "the four-step split matches SimdFFT"_test = [] {
         using Cplx = std::complex<float>;
         gr::algorithm::FFT<Cplx, Cplx> simd{};
@@ -550,8 +550,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // the receiver's own length, which is the one the split was added for. Kept to one thread count, because a
-    // 2^22 transform costs about as much as the rest of this suite.
+    // 2^22, the length the split is built for. Kept to one thread count, because a 2^22 transform costs about as much
+    // as the rest of this suite.
     "the four-step split matches SimdFFT at 2^22"_test = [] {
         using Cplx = std::complex<float>;
         gr::algorithm::FFT<Cplx, Cplx> simd{};
@@ -594,8 +594,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // the split's per-length state is parked and restored with the rest, so alternating two lengths rebuilds
-    // neither table, and a length that comes back gives the same spectrum it gave the first time
+    // the split's per-length state is parked and restored with the rest. Alternating two lengths rebuilds neither
+    // table. A length that comes back gives the same spectrum it gave the first time.
     "the four-step split parks its tables"_test = [] {
         using Cplx = std::complex<float>;
         gr::algorithm::FFT<Cplx, Cplx> split{};
@@ -613,8 +613,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // useSimdFFT predates the backend enum and keeps its meaning: it vetoes anything but the native path, and
-    // only while the backend is left at Auto
+    // useSimdFFT vetoes every backend except the native path, and only while the backend is left at Auto
     "backend selection"_test = [] {
         using Cplx = std::complex<float>;
         using gr::algorithm::FftBackend;
@@ -639,8 +638,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         expect(fft.resolveBackend(1009UZ) == FftBackend::Native) << "a size SimdFFT cannot take falls back to the native path";
     };
 
-    // `threads` moves Auto off SimdFFT, and only at a length the split pays for. The clamp is against the
-    // machine, so a caller may ask for more threads than it has without oversubscribing it.
+    // `threads` moves Auto off SimdFFT, and only at a length where the split is faster. The clamp is against the
+    // machine. A caller may ask for more threads than the machine has without oversubscribing it.
     "thread count and the four-step's selection"_test = [] {
         using Cplx = std::complex<float>;
         using gr::algorithm::FftBackend;

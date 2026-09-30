@@ -49,7 +49,7 @@ using CF = std::complex<float>;
     return static_cast<double>(best) / static_cast<double>(size);
 }
 
-/// A complex tone's amplitude IS its RMS, so level survives measurement without window calibration.
+/// A complex tone's amplitude equals its RMS. The level is measured without window calibration.
 [[nodiscard]] double rmsDb(std::span<const CF> x) {
     double power = 0.0;
     for (const CF v : x) {
@@ -83,9 +83,9 @@ const boost::ut::suite<"PhaseVocoder"> phaseVocoderTests = [] {
             const double cycles = 0.21; // well inside the band at every divisor
             const auto   out    = run(engine, tone(64UZ * kFrame, cycles));
 
-            // The output stream is declared at 1/divisor of the input rate, so the divided
-            // frequency in output samples is the input frequency unchanged: transposition
-            // shows up as the same normalized frequency over 1/divisor as many samples.
+            // The output stream is declared at 1/divisor of the input rate. The divided frequency in output samples is
+            // therefore the input frequency unchanged. Transposition shows as the same normalized frequency over
+            // 1/divisor as many samples.
             const std::span<const CF> tail{std::span<const CF>(out).subspan(out.size() / 2UZ)};
             const double              peak = strongestBin(tail);
             const auto                bins = static_cast<double>(kFrame);

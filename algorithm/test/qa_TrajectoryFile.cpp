@@ -32,12 +32,12 @@ namespace {
 
 constexpr double kCarrierHz = 437e6;
 
-/// The header block every fixture below opens with, so that a fixture testing one refusal cannot fail on a
-/// second one it did not mean to exercise. Its four lines put the first knot on line 5.
+/// The header block every fixture below opens with. A fixture that tests one refusal then cannot fail on a second
+/// refusal it did not mean to exercise. Its four lines put the first knot on line 5.
 [[nodiscard]] std::string wellFormed(std::string_view columns, std::string_view timeScale, std::string_view knots) { return std::format("#!gr4-trajectory 1\ncolumns {}\ntime_scale {}\ncarrier_hz 437000000\n{}", columns, timeScale, knots); }
 
-/// The exception's type, and the line number in its message. Every refusal names a line, and the line number
-/// is the only part of a parse failure an operator can act on, so the test reads it.
+/// The exception's type, and the line number in its message. Every refusal names a line. The line number is the part of
+/// a parse failure an operator can act on, and the test reads it.
 void refuses(std::string_view text, std::size_t line, std::string_view label) {
     bool        threw = false;
     std::string message;
@@ -62,8 +62,8 @@ void refuses(std::string_view text, std::size_t line, std::string_view label) {
     return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}Z", static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()), static_cast<unsigned>(ymd.day()), hms.hours().count(), hms.minutes().count(), hms.seconds().count(), fraction);
 }
 
-/// A pass table: a quadratic range and the range rate that is its exact derivative, so that the two columns
-/// are consistent by construction and the consistency check's residual is the discretization and nothing else.
+/// A pass table of a quadratic range and the range rate that is its exact derivative. The two columns are consistent by
+/// construction. The residual of the consistency check is then the discretization alone.
 struct Pass {
     std::int64_t t0Seconds   = 1'788'000'000LL;
     std::int64_t stepSeconds = 20LL;
@@ -246,8 +246,8 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
     };
 
     "a refusal leaves nothing partial behind"_test = [] {
-        // The schedules are constructed only after the whole file has parsed, so a file that refuses on its
-        // last line cannot have handed a caller a table of everything before it.
+        // The schedules are constructed only after the whole file has parsed. A file that refuses on its last line
+        // therefore gives a caller no table of the lines before it.
         expect(throws<std::invalid_argument>([] { (void)loadTrajectory(wellFormed("time offset_hz", "unix_ns", "0 1.0\n10 2.0\n20 3.0\n5 4.0\n")); }));
     };
 
@@ -292,15 +292,15 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
         const Trajectory t = loadTrajectory(text);
         expect(t.frequency.has_value() && t.delay.has_value());
 
-        // For a quadratic range sampled every h seconds the secant slope differs from the true derivative by
-        // exactly a*h/2, so the figure is arithmetic rather than a tolerance.
+        // For a quadratic range sampled every h seconds, the secant slope differs from the true derivative by exactly
+        // a*h/2. The figure is therefore arithmetic, not a tolerance.
         const double bound = pass.accel * static_cast<double>(pass.stepSeconds) / 2.;
         const double worst = worstRangeRateMismatch(*t.delay, *t.frequency, kCarrierHz);
         std::println("worstRangeRateMismatch on a consistent quadratic pass: {:.9f} m/s against the a*h/2 figure of {:.9f}", worst, bound);
         expect(std::abs(worst - bound) <= bound * 1e-9) << "a consistent pair reads a*h/2 and no more";
 
-        // Perturbing one knot away from the residual's own sign raises the figure by exactly the perturbation,
-        // which shows the function measures rather than returning a constant.
+        // Perturbing one knot away from the residual's own sign raises the figure by exactly the perturbation. That
+        // shows the function measures and does not return a constant.
         std::vector<double> rates(t.frequency->offsets().begin(), t.frequency->offsets().end());
         rates[pass.knots / 2UZ] -= offsetFor(1., kCarrierHz);
         const FrequencySchedule perturbed(t.frequency->times(), rates);

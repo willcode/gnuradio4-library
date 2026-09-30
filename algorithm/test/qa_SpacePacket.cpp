@@ -9,18 +9,17 @@
 #include <gnuradio-4.0/algorithm/ccsds/SpacePacket.hpp>
 
 /*
- * The space packet primary header is six octets and one arithmetic convention, and that convention is
- * the subject of this file. 133.0-B-2 4.1.3.5.3 states it as an equation --
- * C = (octets in the packet data field) - 1 -- so these tests assert the numbers it produces and the
- * numbers the other reading produces, rather than restating the rule:
+ * The space packet primary header is six octets and one arithmetic convention. That convention is the subject of this
+ * file. 133.0-B-2 4.1.3.5.3 states it as an equation, C = (octets in the packet data field) - 1. These tests assert the
+ * numbers it produces and the numbers the other reading produces. They do not restate the rule.
  *
  *     data field 1 octet      -> field 0      -> total 7
  *     data field 256 octets   -> field 255    -> total 262
  *     data field 65 536       -> field 65535  -> total 65 542
  *
- * A builder that wrote the payload length into the field instead would produce a packet one octet
- * longer than it claims on every packet. The consequence is asserted here at the octet level: the
- * next packet's header is then read one octet early, and what comes back is not a version 0 header.
+ * A builder that wrote the payload length into the field would produce a packet one octet longer than it claims, on
+ * every packet. The test asserts the consequence at the octet level. The next packet's header is then read one octet
+ * early, and it does not parse as a version 0 header.
  */
 namespace {
 
@@ -33,7 +32,7 @@ std::uint32_t next() {
     return static_cast<std::uint32_t>(rng >> 32U);
 }
 
-/// A whole packet: the primary header written from a payload length, then the payload itself.
+/// A whole packet. The primary header is written from a payload length and followed by the payload.
 std::vector<std::uint8_t> makePacket(std::uint16_t apid, std::uint16_t sequenceCount, std::size_t payloadOctets, std::uint8_t firstByte) {
     SpacePacketHeader header{};
     const WriteStatus built = headerForPayload(apid, false, false, static_cast<std::uint8_t>(SequenceFlags::unsegmented), sequenceCount, payloadOctets, header);
@@ -53,7 +52,7 @@ const boost::ut::suite<"ccsds space packets"> spacePacketTests = [] {
     using namespace boost::ut;
 
     "2. the primary header octets, assembled by hand from 133.0-B-2 4.1.3.1"_test = [] {
-        // APID 100, sequence flags '11', sequence count 5, data length field 0 -- a seven-octet packet.
+        // APID 100, sequence flags '11', sequence count 5 and data length field 0 make a seven-octet packet.
         SpacePacketHeader header{};
         header.apid           = 100U;
         header.sequence_flags = static_cast<std::uint8_t>(SequenceFlags::unsegmented);
@@ -92,9 +91,9 @@ const boost::ut::suite<"ccsds space packets"> spacePacketTests = [] {
         expect(eq(kMaxPacketOctets, 65542UZ)) << "6 + 65535 + 1, derived from a sixteen-bit field";
         expect(eq(kSpacePacketHeaderSize + kMaxPacketDataOctets, kMaxPacketOctets));
 
-        // The failure of the other reading, at the octet level. Two 100-octet-payload packets laid end
-        // to end: read with the correct convention the second header parses; read with a header whose
-        // field was set to the payload length the second header starts one octet early.
+        // The failure of the other reading, at the octet level. Two packets with 100-octet payloads are laid end to
+        // end. Read with the correct convention, the second header parses. Read with a header whose field holds the
+        // payload length, the second header starts one octet early.
         const std::vector<std::uint8_t> first  = makePacket(100U, 0U, 100UZ, 0x10U);
         const std::vector<std::uint8_t> second = makePacket(101U, 1U, 100UZ, 0x40U);
         std::vector<std::uint8_t>       stream = first;
@@ -109,8 +108,8 @@ const boost::ut::suite<"ccsds space packets"> spacePacketTests = [] {
         expect(parseSpacePacketHeader(std::span{stream}.subspan(totalPacketOctets(head)), nextHeader) == ParseStatus::ok);
         expect(eq(static_cast<unsigned>(nextHeader.apid), 101U));
 
-        // The surveyed convention: the field written as the payload length makes the total 107, so the
-        // walk lands one octet past the second header and reads the payload as a header.
+        // The other convention writes the payload length into the field and makes the total 107. The walk then lands
+        // one octet past the second header and reads the payload as a header.
         SpacePacketHeader wrong = head;
         wrong.data_length       = 100U;
         expect(eq(totalPacketOctets(wrong), 107UZ)) << "one octet too many, every packet, silently";
@@ -120,8 +119,8 @@ const boost::ut::suite<"ccsds space packets"> spacePacketTests = [] {
     };
 
     "4. a legal data length field of zero, and the payload builder's refusals"_test = [] {
-        // 4.1.4.1.2 makes the data field at least one octet, so a field of 0 is legal and describes a
-        // one-octet data field; there is no encoding for an empty one, which is why the minus-one exists.
+        // 4.1.4.1.2 makes the data field at least one octet long. A field of 0 is therefore legal and describes a
+        // one-octet data field. No encoding exists for an empty data field, and that is why the minus-one exists.
         SpacePacketHeader header{};
         expect(headerForPayload(1U, false, false, 3U, 0U, 1UZ, header) == WriteStatus::ok);
         expect(eq(static_cast<unsigned>(header.data_length), 0U));
@@ -175,7 +174,7 @@ const boost::ut::suite<"ccsds space packets"> spacePacketTests = [] {
         expect(writeSpacePacketHeader(maxima, shortSpan) == WriteStatus::short_span);
         expect(parseSpacePacketHeader(shortSpan, back) == ParseStatus::short_span);
 
-        // A non-zero version number is fatal: 4.1.3.2.2 fixes it at '000'.
+        // A non-zero version number is fatal. 4.1.3.2.2 fixes it at '000'.
         std::array<std::uint8_t, kSpacePacketHeaderSize> versioned{0x20U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
         expect(parseSpacePacketHeader(versioned, back) == ParseStatus::bad_version);
     };

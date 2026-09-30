@@ -36,8 +36,8 @@ namespace {
 constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 using Complex           = std::complex<float>;
 
-/// The mean and the sample standard deviation of a run of readings. Every band below is applied to this pair:
-/// the criteria assert a distribution, not a value.
+/// The mean and the sample standard deviation of a run of readings. Every band below applies to this pair. The criteria
+/// assert a distribution, not a value.
 struct Spread {
     double mean{0.};
     double sigma{0.};
@@ -58,9 +58,9 @@ struct Spread {
     return out;
 }
 
-/// The excess kurtosis of a real stream of unit Gaussian plus a Bernoulli impulse of amplitude `A`, in closed
-/// form: `E[x^2] = 1 + p A^2` and `E[x^4] = 3 + 6 p A^2 + p A^4`, the cross terms vanishing with `E[g]` and
-/// `E[g^3]`. This is the discriminant's positive side and it is written here so the test asserts a derivation.
+/// The excess kurtosis of a real stream of unit Gaussian plus a Bernoulli impulse of amplitude `A`, in closed form.
+/// `E[x^2] = 1 + p A^2` and `E[x^4] = 3 + 6 p A^2 + p A^4`. The cross terms vanish with `E[g]` and `E[g^3]`. This is
+/// the discriminant's positive side. It is written out here, and the test asserts a derivation.
 [[nodiscard]] constexpr double impulsiveExcess(double p, double amplitude) noexcept {
     const double a2 = amplitude * amplitude;
     const double m2 = 1. + p * a2;
@@ -131,12 +131,12 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
 
     "the four closed values, and the sign that separates them"_test = [] {
         constexpr std::size_t kSamples = 262'144UZ;
-        // An increment that is not a simple fraction of a turn, so the window averages the phase rather than
-        // sampling a short cycle of it.
+        // An increment that is not a simple fraction of a turn. The window then averages the phase and does not sample
+        // a short cycle of it.
         constexpr double kIncrement = 0.30901699437494745;
 
-        // Constant modulus: `E|z|^4 = A^4` and `(E|z|^2)^2 = A^4`, so `K = 1`. This is the `ka = 1` the tree's
-        // m2m4 signal-to-noise estimator already leans on, reached from the same line.
+        // Constant modulus. `E|z|^4 = A^4` and `(E|z|^2)^2 = A^4`, so `K = 1`. This is the `ka = 1` of the m2m4
+        // signal-to-noise estimator, reached by the same derivation.
         KurtosisAccumulator<Complex> constantModulus;
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
             const double phase = kTwoPi * kIncrement * static_cast<double>(k);
@@ -145,8 +145,8 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         expect(approx(constantModulus.normalized(), 1., 1e-6)) << "a constant-modulus stream reads K = 1 to float rounding, got" << constantModulus.normalized();
         expect(approx(constantModulus.excess(), -1., 1e-6));
 
-        // Two equal complex tones: `|z|^2 = 2 + 2 cos(D)` with `D` uniform, so `E|z|^2 = 2`, `E|z|^4 = 6` and
-        // `K = 3/2` exactly.
+        // Two equal complex tones. `|z|^2 = 2 + 2 cos(D)` with `D` uniform, so `E|z|^2 = 2`, `E|z|^4 = 6` and `K = 3/2`
+        // exactly.
         KurtosisAccumulator<Complex> twoTones;
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
             const double a = kTwoPi * 0.1 * static_cast<double>(k);
@@ -156,7 +156,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         expect(approx(twoTones.normalized(), 1.5, 1e-4)) << "two equal complex tones read K = 3/2, got" << twoTones.normalized();
         expect(approx(twoTones.excess(), -0.5, 1e-4)) << "an excess of exactly -0.5";
 
-        // A real sinusoid: `m4 = 3A^4/8` and `m2 = A^2/2`, so `K = 3/2` and the excess is -1.5.
+        // A real sinusoid. `m4 = 3A^4/8` and `m2 = A^2/2`, so `K = 3/2` and the excess is -1.5.
         KurtosisAccumulator<float> sinusoid;
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
             sinusoid.add(static_cast<float>(std::cos(kTwoPi * kIncrement * static_cast<double>(k))));
@@ -298,8 +298,8 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
             std::vector<double> sk(kBins);
             (void)accumulator.evaluate(1., sk);
             for (const double value : sk) {
-                // Identical bin powers give `M*S2/S1^2 = 1` algebraically, so this is an exact comparison and
-                // not a tolerance: a tolerance here would hide the identity it exists to check.
+                // Identical bin powers give `M*S2/S1^2 = 1` algebraically. The comparison is therefore exact and not a
+                // tolerance. A tolerance here would hide the identity the test checks.
                 expect(value == 0.) << "a noiseless tone reads SK = 0 identically at M =" << spectra;
             }
         }
@@ -333,15 +333,14 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
             expect(lt(measured.mean, 1.)) << "steady structure reads below 1";
         }
 
-        // A pulsed interferer present a fraction `p` of the time at bin power `S` over noise `N0`:
-        // `E[u] = pS + N0` and `E[u^2] = p S^2 + 4 p S N0 + 2 N0^2`, so the **large-M limit** is their ratio
-        // less one. At S/N0 = 100 that is 7.6116, 2.8491 and 1.0000 at p = 0.1, 0.25 and 0.5.
+        // A pulsed interferer present a fraction `p` of the time at bin power `S` over noise `N0`. `E[u] = pS + N0` and
+        // `E[u^2] = p S^2 + 4 p S N0 + 2 N0^2`. The **large-M limit** is their ratio less one. At S/N0 = 100 that is
+        // 7.6116, 2.8491 and 1.0000 at p = 0.1, 0.25 and 0.5.
         //
-        // Unlike the carrier arm this one has a finite-M correction that is not derived anywhere, and it is
-        // largest where the interferer is rarest: at p = 0.1 only about a tenth of the M estimates carry it. So
-        // the criterion is convergence rather than a pinned tolerance -- the deviation is measured at two values
-        // of M and asserted to fall, which shows the closed form to be the limit and the gap the
-        // correction.
+        // Unlike the carrier arm, this arm has a finite-M correction that is not derived anywhere. The correction is
+        // largest where the interferer is rarest. At p = 0.1 only about a tenth of the M estimates carry it. The
+        // criterion is therefore convergence, not a pinned tolerance. The deviation is measured at two values of M and
+        // asserted to fall. That shows the closed form to be the limit and the gap to be the correction.
         for (const double p : {0.1, 0.25, 0.5}) {
             constexpr double kSignal = 100.;
             const double     mean    = p * kSignal + 1.;

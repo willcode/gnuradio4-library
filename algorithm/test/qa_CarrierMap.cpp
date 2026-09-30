@@ -23,8 +23,8 @@ namespace {
 
 using Cplx = std::complex<float>;
 
-/// The QA numerology the OFDM spec names: 64 carriers, 52 occupied, 4 pilots — the 802.11a shape, used here as
-/// a test numerology and explicitly not as an interoperability claim.
+/// The QA numerology the OFDM spec names. It has 64 carriers, 52 occupied and 4 pilots. That is the 802.11a shape. The
+/// test uses it as a numerology and makes no interoperability claim.
 struct Numerology {
     std::vector<int> data;
     std::vector<int> pilot{-21, -7, 7, 21};
@@ -44,9 +44,9 @@ struct Numerology {
 } // namespace
 
 const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
-    // The one conversion point, checked at both ends of the range and at the asymmetry in the middle of it.
-    // `-fft_len/2` is the Nyquist bin and a real carrier; `+fft_len/2` is not a carrier at all, and folding it
-    // rather than refusing it would move a carrier to the other side of the band without saying so.
+    // The conversion between a carrier and its bin, checked at both ends of the range and at the asymmetry in the
+    // middle of it. `-fft_len/2` is the Nyquist bin and a real carrier. `+fft_len/2` is not a carrier, and the
+    // conversion refuses it. Folding it would move a carrier to the other side of the band without an error.
     "a signed carrier and its bin are the same thing said twice"_test = [] {
         expect(eq(CarrierMap::binOf(64UZ, 0), 0UZ)) << "DC is bin zero";
         expect(eq(CarrierMap::binOf(64UZ, 1), 1UZ));
@@ -73,7 +73,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         }
     };
 
-    // The spec's QA numerology, and the property that makes it one: the three sets partition the transform.
+    // The spec's QA numerology. Its three sets partition the transform, and that property makes it a numerology.
     "the QA numerology's three sets are disjoint and complete"_test = [] {
         const Numerology numerology = qaNumerology();
         const CarrierMap map(64UZ, numerology.data, numerology.pilot);
@@ -97,8 +97,8 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         }
         expect(that % std::ranges::all_of(claimed, [](int n) { return n == 1; })) << "every bin is claimed exactly once by exactly one set";
 
-        // The bins are in the order the carriers were named, because a symbol assembler walks that order:
-        // the n-th data symbol goes to the n-th data carrier.
+        // The bins are in the order in which the carriers are listed. A symbol assembler walks that order. The n-th
+        // data symbol goes to the n-th data carrier.
         for (std::size_t i = 0UZ; i < map.nData(); ++i) {
             expect(eq(map.dataBins()[i], CarrierMap::binOf(64UZ, numerology.data[i])));
         }
@@ -110,7 +110,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         expect(that % (map.occupancyOf(-27) == Occupancy::Guard));
         expect(that % (map.occupancyOf(-32) == Occupancy::Guard)) << "the Nyquist carrier is guard here";
 
-        // A numerology may use DC, and the map says so rather than leaving a consumer to infer it.
+        // A numerology may use DC. The map reports it in `dcOccupied()`.
         std::vector<int> withDc = numerology.data;
         withDc.push_back(0);
         const CarrierMap dcMap(64UZ, withDc, numerology.pilot);
@@ -119,9 +119,9 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         expect(eq(dcMap.guardCarriers().size(), 11UZ));
     };
 
-    // Two levels of one cycle: the slots of a symbol take consecutive entries and the next symbol carries on
-    // where the last stopped. A cycle whose length is a multiple of n_pilots repeats per symbol; one that is
-    // not rotates, which is the behavior the rule exists to state.
+    // Two levels of one cycle. The slots of a symbol take consecutive entries. The next symbol continues where the last
+    // one stopped. A cycle whose length is a multiple of n_pilots repeats per symbol. Any other cycle rotates, and the
+    // rule exists to state that rotation.
     "the pilot cycle is read at two levels"_test = [] {
         for (const std::size_t nPilots : {1UZ, 4UZ, 7UZ}) {
             for (const std::size_t cycleLength : {1UZ, 4UZ, 6UZ, 13UZ}) {
@@ -133,13 +133,13 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
             }
         }
 
-        // A cycle of 4 over 4 pilots gives every symbol the same four; a cycle of 6 rotates by two each symbol.
+        // A cycle of 4 over 4 pilots gives every symbol the same four. A cycle of 6 rotates by two each symbol.
         expect(eq(CarrierMap::pilotSymbolIndex(0UZ, 2UZ, 4UZ, 4UZ), CarrierMap::pilotSymbolIndex(99UZ, 2UZ, 4UZ, 4UZ)));
         expect(eq(CarrierMap::pilotSymbolIndex(1UZ, 0UZ, 4UZ, 6UZ), 4UZ));
         expect(eq(CarrierMap::pilotSymbolIndex(2UZ, 0UZ, 4UZ, 6UZ), 2UZ));
 
-        // The reduction before the multiply keeps a stream-absolute symbol index from overflowing, and
-        // it is congruent to the unreduced form rather than merely close to it.
+        // The reduction before the multiply keeps a stream-absolute symbol index from overflowing. The reduced form is
+        // congruent to the unreduced form, not merely close to it.
         constexpr std::size_t kHuge = std::size_t{1} << 62;
         for (const std::size_t cycleLength : {3UZ, 6UZ, 13UZ}) {
             for (std::size_t slot = 0UZ; slot < 4UZ; ++slot) {
@@ -196,9 +196,9 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         expect(throws<std::invalid_argument>([&] { (void)map.occupancyOf(32); }));
     };
 
-    // The construction's claim is exact and has nothing to do with the values: `exp(j*pi*k)` is +1 on every even
-    // bin, so a symbol whose odd bins are all zero has x[n + N/2] = x[n] for every n. The transform is in the
-    // test only — a kernel that states a preamble needs no FFT to state it.
+    // The construction's claim is exact and independent of the values. `exp(j*pi*k)` is +1 on every even bin. A symbol
+    // whose odd bins are all zero therefore has x[n + N/2] = x[n] for every n. Only the test uses the transform. A
+    // kernel that states a preamble needs no FFT to state it.
     "the preamble's odd bins are empty and its time-domain halves match"_test = [] {
         constexpr std::size_t kFftLength = 64UZ;
         constexpr std::size_t kOccupied  = 52UZ;
@@ -240,7 +240,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         std::println("qa_CarrierMap: the two time-domain halves differ by at most {:.3e} against a peak of {:.3f}", worst, scale);
         expect(lt(worst, 1e-5 * scale)) << "the upper half must repeat the lower half";
 
-        // The property is the empty odd bins and nothing else, so putting anything on one must break it.
+        // The property rests on the empty odd bins alone. A value on any odd bin must break it.
         std::vector<Cplx> spoiled            = preamble;
         spoiled[3UZ]                         = Cplx{1.f, 0.f};
         const std::vector<Cplx> spoiledTime  = inverse.compute(spoiled);
@@ -250,8 +250,8 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         }
         expect(gt(spoiledWorst, 1.)) << "one occupied odd bin is enough to destroy the repeat";
 
-        // A different seed is a different preamble, and the repeat holds regardless — it is the addressing that
-        // guarantees it, not the values.
+        // A different seed gives a different preamble, and the repeat still holds. The addressing guarantees the
+        // repeat, not the values.
         for (const std::size_t fftLength : {32UZ, 64UZ, 256UZ}) {
             const std::vector<Cplx> other      = schmidlCoxPreamble(fftLength, fftLength - 12UZ, 7ULL);
             const std::vector<Cplx> otherTime  = inverse.compute(other);

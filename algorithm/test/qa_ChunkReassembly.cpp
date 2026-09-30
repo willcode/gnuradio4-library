@@ -11,19 +11,17 @@
 #include <gnuradio-4.0/algorithm/packet/ChunkReassembly.hpp>
 
 /*
- * The headline scene is one known file and twelve arrival orders. 8192 bytes at a chunk size of 224
- * is 36 full chunks and one final chunk of 128, thirty-seven in all -- 8192 = 36 * 224 + 128 -- and
- * those three numbers are asserted, because a scene whose last chunk happens to be full never
- * exercises the short-last-chunk arithmetic at all. Pushed in order, in reverse, and in ten seeded
- * permutations, the twelve completed files are byte-identical.
+ * The main scene is one known file in twelve arrival orders. 8192 bytes at a chunk size of 224 make 36 full chunks and
+ * one final chunk of 128, thirty-seven in all (8192 = 36 * 224 + 128). The test asserts those three numbers. A scene
+ * whose last chunk is full would not exercise the short-last-chunk arithmetic. The file is pushed in order, in reverse
+ * and in ten seeded permutations. The twelve completed files are byte-identical.
  *
- * The criterion that separates this engine from the one the survey found is criterion 9: a file whose
- * declared size is reached by its last chunk while an earlier chunk is missing publishes nothing.
- * Completion is coverage, and a write pointer is not coverage.
+ * Criterion 9 covers a file whose last chunk reaches the declared size while an earlier chunk is missing. That file
+ * publishes nothing. Completion is coverage, and a write pointer is not coverage.
  *
- * Two numbers the engine exposes as arithmetic rather than as documentation: the coverage bitmap for
- * a 1 MiB file at 224-byte chunks is 586 bytes, and the peak for eight files of 1 MiB at 1024 gaps is
- * 8 520 832 bytes, exactly 8.125 MiB. The per-chunk cost of both coverage paths is bm_ChunkReassembly's.
+ * The engine computes two of its figures as arithmetic. The coverage bitmap for a 1 MiB file at 224-byte chunks is 586
+ * bytes. The peak for eight files of 1 MiB at 1024 gaps is 8 520 832 bytes, exactly 8.125 MiB. bm_ChunkReassembly
+ * measures the per-chunk cost of both coverage paths.
  */
 namespace {
 
@@ -89,7 +87,7 @@ std::vector<std::uint8_t> offsetChunk(std::uint64_t id, std::uint64_t offset, st
     return record;
 }
 
-/// A known file: byte i is a cheap mixing of i, so a chunk written at the wrong offset is visible.
+/// A known file whose byte i is a simple mix of i. A chunk written at the wrong offset shows as wrong bytes.
 std::vector<std::uint8_t> knownFile(std::size_t bytes, std::uint8_t seed) {
     std::vector<std::uint8_t> file(bytes);
     for (std::size_t i = 0UZ; i < bytes; ++i) {
@@ -197,8 +195,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         expect(eq(engine.counters().duplicate_chunks, 36ULL));
         expect(eq(engine.counters().conflicting_chunks, 0ULL));
 
-        // A retransmission that arrives after the file has been published has nothing to attach to,
-        // because the file left the engine when it completed. It opens a new one, and says so.
+        // A retransmission that arrives after the file is published has no file to join. The file left the engine when
+        // it completed. The retransmission opens a new file, and `files_opened` counts it.
         engine.release(1ULL);
         expect(engine.push(records.back()).status == ChunkReassembler::Status::accepted);
         expect(eq(engine.counters().files_opened, 2ULL));
@@ -339,9 +337,9 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             return record;
         };
 
-        // An index whose product with the chunk size really wraps a 64-bit register: 224 * ((2^64 - 1)/224 + 1)
-        // is 96 modulo 2^64, and 96 is inside both the declared size and the cap, so an engine that multiplied
-        // first would place this chunk at byte 96 and accept it. The guard divides instead.
+        // An index whose product with the chunk size wraps a 64-bit register. 224 * ((2^64 - 1)/224 + 1) is 96 modulo
+        // 2^64. 96 is inside both the declared size and the cap. An engine that multiplied first would place this chunk
+        // at byte 96 and accept it. The guard divides instead.
         constexpr std::uint64_t kWrappingIndex = (0xFFFFFFFFFFFFFFFFULL / kChunkSize) + 1ULL;
         static_assert(kWrappingIndex * kChunkSize == 96ULL, "the scene only tests the guard if the product wraps");
         static_assert(kWrappingIndex > 65536ULL / kChunkSize);
@@ -391,7 +389,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         const std::vector<std::uint8_t> file = knownFile(2000UZ, 55U);
         const auto                      at   = [&file](std::uint64_t offset, std::size_t length) { return offsetChunk(5ULL, offset, file.size(), false, std::span{file}.subspan(static_cast<std::size_t>(offset), length)); };
 
-        // Alternating 100-byte chunks: each one opens a new interval until the cap.
+        // Alternating 100-byte chunks. Each one opens a new interval until the cap.
         for (std::uint64_t i = 0ULL; i < 5ULL; ++i) {
             const ChunkReassembler::ChunkResult result = engine.push(at(i * 200ULL, 100UZ));
             expect(result.status == ChunkReassembler::Status::accepted) << "interval " << i;
@@ -474,7 +472,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             expect(eq(*engine.facts(1ULL).declared_chunks, 3ULL)) << "the flag on chunk 2 declared three chunks";
         }
 
-        // (d) a second, differing declaration is counted and the first stands -- in both orders.
+        // (d) a second, differing declaration is counted and the first stands, in both orders.
         for (const bool bigFirst : {true, false}) {
             ChunkReassembler    engine{indexedConfig()};
             const std::uint64_t honest = file.size();
@@ -487,9 +485,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
     };
 
     "11. a new file on index regression, both ways"_test = [] {
-        // No identifier: the format carries none, so the engine keeps one current file. The declared
-        // size names three chunks and only two are sent, so the file never completes and the current
-        // file is still current when the index regresses.
+        // No identifier. The format carries none, and the engine keeps one current file. The declared size names three
+        // chunks and only two are sent. The file does not complete, and it is still current when the index regresses.
         IndexedChunkFormat format       = indexedFormat();
         format.identifier               = FieldSpec{};
         ChunkReassembler::Config config = indexedConfig();
@@ -529,8 +526,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         expect(ge(payload.size(), 1UZ)) << "a zero-item payload is not admissible at either carrier boundary";
         expect(le(payload.size(), kMaxFileBytes));
 
-        // The bound holds by construction from the setting, which is asserted as the setting's own
-        // refusal rather than by building a two-gigabyte file.
+        // The bound holds by construction from the setting. The test asserts it as the setting's own refusal. It builds
+        // no two-gigabyte file.
         ChunkReassembler::Config oversize = indexedConfig();
         oversize.max_file_bytes           = kMaxFileBytes + 1ULL;
         expect(ChunkReassembler::validate(oversize) == FormatError::file_bytes_too_large);
@@ -548,8 +545,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
     };
 
     "13. the degenerate descriptor's strict continuity, and what it costs"_test = [] {
-        // Neither an index nor an offset: a running write pointer, which is meaningful only when
-        // nothing has been lost. The failure is made visible rather than set as a broken flag.
+        // Neither an index nor an offset. The position is a running write pointer, meaningful only when nothing has
+        // been lost. The failure shows in the result and is not set as a broken flag.
         ChunkReassembler::Config config{};
         config.format         = offsetFormat();
         config.max_open_files = 2UZ;
@@ -572,7 +569,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         expect(feed(200UZ, 200UZ, true).status == ChunkReassembler::Status::accepted);
         expect(eq(engine.facts(1ULL).covered_bytes, 400ULL)) << "contiguous chunks assemble exactly";
 
-        // Now withhold one and offer the next: the pointer can no longer say where anything goes.
+        // Now withhold one and offer the next. From there the pointer cannot say where anything goes.
         ChunkReassembler::Config other = config;
         ChunkReassembler         second{other};
         ChunkDescriptor          descriptor{};
@@ -661,7 +658,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             ChunkReassembler engine{config};
             expect(engine.push(record(0ULL, 3ULL, cell(0UZ, kCell))).status == ChunkReassembler::Status::accepted);
 
-            // Half a cell at index 1, which the count on this very record says is not the last index.
+            // Half a cell at index 1. The count on this same record says index 1 is not the last index.
             const ChunkReassembler::ChunkResult shortMiddle = engine.push(record(1ULL, 3ULL, cell(1UZ, kCell / 2UZ)));
             expect(shortMiddle.status == ChunkReassembler::Status::refused);
             expect(shortMiddle.reason == ChunkReassembler::RefusalReason::bad_payload_span);
@@ -675,8 +672,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             expect(sameBytes(engine.file(1ULL), file)) << "and the file is the one that was sent, with no zero-filled hole";
         }
 
-        // The same short chunk where nothing has yet said where the file ends: it is admitted, and the
-        // declaration that arrives later decides that this file can no longer complete.
+        // The same short chunk before any declaration of where the file ends. It is admitted. The declaration that
+        // arrives later decides that this file cannot complete.
         {
             IndexedChunkFormat flagged{};
             flagged.identifier     = FieldSpec{0UZ, 2UZ};
@@ -703,14 +700,14 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             expect(engine.push(flaggedRecord(2ULL, true, cell(2UZ, kCell))).status == ChunkReassembler::Status::accepted);
             expect(eq(engine.counters().files_completed, 0ULL)) << "the flag names index 2 as the last, so the short index 1 is a hole";
 
-            // The cell cannot be repaired either: its first write stands and the full chunk disagrees with it.
+            // The cell cannot be repaired either. Its first write stands, and the full chunk disagrees with it.
             const ChunkReassembler::ChunkResult repair = engine.push(flaggedRecord(1ULL, false, cell(1UZ, kCell)));
             expect(repair.status == ChunkReassembler::Status::refused);
             expect(repair.reason == ChunkReassembler::RefusalReason::content_conflict);
             expect(eq(engine.counters().files_completed, 0ULL)) << "a file that took a short chunk at a non-final index stays open until it is evicted";
 
-            // A second short chunk at another index, while nothing has yet declared an extent, is refused:
-            // only one index can turn out to be the last one.
+            // A second short chunk at another index is refused while nothing has declared an extent. Only one index can
+            // be the last one.
             ChunkReassembler second{held};
             expect(second.push(flaggedRecord(1ULL, false, cell(1UZ, kCell / 2UZ))).status == ChunkReassembler::Status::accepted);
             const ChunkReassembler::ChunkResult twoShort = second.push(flaggedRecord(2ULL, false, cell(2UZ, kCell / 2UZ)));
@@ -819,7 +816,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         countOnly.chunk_size        = kChunkSize;
         expect(validateChunkFormat(countOnly) == FormatError::cannot_complete) << "a count names cells an offset-addressed file does not have, so only a declared size completes one";
 
-        // A record shorter than the header cannot be read, and says so rather than throwing.
+        // A record shorter than the header cannot be read. The engine refuses it as unparsable and does not throw.
         const std::vector<std::uint8_t>     tiny(4UZ, 0U);
         ChunkReassembler                    engine{indexedConfig()};
         const ChunkReassembler::ChunkResult result = engine.push(tiny);

@@ -8,7 +8,7 @@
 
 namespace {
 
-// EN 50067's code, the driving instantiation: g = x^10+x^8+x^7+x^5+x^4+x^3+1 over 16 data bits.
+// The code of EN 50067, the case this test is built on. g = x^10+x^8+x^7+x^5+x^4+x^3+1 over 16 data bits.
 constexpr std::uint32_t kRdsPoly  = 0x5B9U;
 constexpr std::uint16_t kOffsetA  = 0x0FCU;
 constexpr std::uint16_t kOffsetB  = 0x198U;

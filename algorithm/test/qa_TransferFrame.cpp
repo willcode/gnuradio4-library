@@ -10,21 +10,21 @@
 #include <gnuradio-4.0/algorithm/ccsds/TransferFrame.hpp>
 
 /*
- * The three transfer-frame headers, the CLCW and the M_PDU header are pinned three ways, and none of
- * them is the implementation restated:
+ * The three transfer-frame headers, the CLCW and the M_PDU header are pinned three ways. None of the three restates the
+ * implementation.
  *
- *   - every field round trips through write and parse over its full declared range, and a field at
- *     its maximum leaves its neighbors alone while one past its maximum is refused, which asserts
- *     the widths as consequences rather than as comments;
- *   - nine header octet literals assembled by hand from the standards' bit positions, so a boundary
- *     that moves by one bit fails here and nowhere else. The pair that matters most is the first
- *     octet of a TM and an AOS header carrying the same spacecraft identifier of 42: 0x02 against
- *     0x4A, because the AOS version is '01' and its identifier is eight bits where TM's is ten;
- *   - the only-idle-data fill against the ten octets 132.0-B-3 publishes in its own NOTE, generated
- *     from the polynomial and from nothing else, in both the Fibonacci and the Galois realization.
+ *   - Every field round trips through write and parse over its full declared range. A field at its maximum leaves its
+ *     neighbors alone, and one past its maximum is refused. These checks assert the widths as consequences, not as
+ *     comments.
+ *   - Nine header octet literals are assembled by hand from the standards' bit positions. A boundary that moves by one
+ *     bit fails here and nowhere else. The most important pair is the first octet of a TM and an AOS header with the
+ *     same spacecraft identifier of 42. The octets are 0x02 and 0x4A, because the AOS version is '01' and its
+ *     identifier is eight bits where TM's is ten.
+ *   - The only-idle-data fill is checked against the ten octets 132.0-B-3 publishes in its own NOTE. It is generated
+ *     from the polynomial alone, in both the Fibonacci and the Galois realization.
  *
- * The frame-count arithmetic is asserted at the wrap, where the number is not obvious: a count of 3
- * after a count of 254 at modulus 256 is four frames lost, not 251 and not an error.
+ * The frame-count arithmetic is asserted at the wrap, where the number is not obvious. A count of 3 after a count of
+ * 254 at modulus 256 is four frames lost, not 251 and not an error.
  */
 namespace {
 
@@ -37,8 +37,8 @@ std::uint32_t next() {
     return static_cast<std::uint32_t>(rng >> 32U);
 }
 
-/// The Galois realization of 132.0-B-3 4.1.4.6.2.2, written here rather than in the header so the
-/// two forms are independent implementations of one sequence.
+/// The Galois realization of 132.0-B-3 4.1.4.6.2.2. It is written here and not in the header, and the two forms are
+/// independent implementations of one sequence.
 std::vector<std::uint8_t> galoisOidFill(std::size_t octets) {
     std::vector<std::uint8_t> out(octets);
     std::uint32_t             state = OidFill::kGaloisSeed;
@@ -239,12 +239,12 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         expect(eq(static_cast<unsigned>(tmOctets[0]), 0x02U)) << "the same spacecraft identifier of 42";
         expect(eq(static_cast<unsigned>(aosOctets[0]), 0x4AU)) << "one octet is the mistake a shared parser makes";
 
-        // M_PDU header with FHP 2047: the five reserved bits sit above the pointer.
+        // M_PDU header with FHP 2047. The five reserved bits are above the pointer.
         std::array<std::uint8_t, kMpduHeaderSize> mpduOctets{};
         expect(writeMpduHeader(MpduHeader{.first_header_pointer = kFhpNoPacketStart}, mpduOctets) == WriteStatus::ok);
         expect(mpduOctets == std::array<std::uint8_t, 2UZ>{0x07U, 0xFFU});
 
-        // TC: SCID 42, VCID 1, frame length field 999, sequence number 7 -- a 1000-octet frame.
+        // TC with SCID 42, VCID 1, frame length field 999 and sequence number 7, a 1000-octet frame.
         TcPrimaryHeader tc{};
         tc.spacecraft_id   = 42U;
         tc.virtual_channel = 1U;
@@ -277,18 +277,18 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
     };
 
     "4a. the two minus-one fields this header carries"_test = [] {
-        // 232.0-B-4 4.1.2.7.2: a 1000-octet TC frame carries a frame length field of 999.
+        // A 1000-octet TC frame carries a frame length field of 999 (232.0-B-4 4.1.2.7.2).
         expect(eq(totalTcFrameOctets(TcPrimaryHeader{.frame_length = 999U}), 1000UZ));
         expect(eq(totalTcFrameOctets(TcPrimaryHeader{.frame_length = 0U}), 1UZ));
         expect(eq(totalTcFrameOctets(TcPrimaryHeader{.frame_length = 1023U}), 1024UZ)) << "ten bits bound the frame at 2^10 octets";
         expect(eq(1024UZ - kTcPrimaryHeaderSize, 1019UZ)) << "232.0-B-4 4.1.1.1 b) with no error control field";
         expect(eq(1024UZ - kTcPrimaryHeaderSize - kFecfSize, 1017UZ)) << "and with one";
 
-        // The off-by-one variant: a field of 1000 describes a 1001-octet frame, one octet past the
-        // frame that was built, and the next frame boundary is then one octet late.
+        // The off-by-one variant. A field of 1000 describes a 1001-octet frame, one octet past the frame that was
+        // built. The next frame boundary is then one octet late.
         expect(eq(totalTcFrameOctets(TcPrimaryHeader{.frame_length = 1000U}), 1001UZ));
 
-        // 132.0-B-3 4.1.3.2.3.2: a 64-octet secondary header carries a length field of 63.
+        // A 64-octet secondary header carries a length field of 63 (132.0-B-3 4.1.3.2.3.2).
         expect(eq(tmSecondaryHeaderOctets(TmSecondaryHeaderId{.length = 63U}), 64UZ));
         expect(eq(tmSecondaryHeaderOctets(TmSecondaryHeaderId{.length = 1U}), 2UZ)) << "the shortest header the standard admits";
         expect(!tmSecondaryHeaderUsable(TmSecondaryHeaderId{.length = 0U})) << "a one-octet secondary header with no data field cannot exist";
@@ -304,12 +304,12 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
             expect(frameGap(10U, 10U, modulus).duplicate);
             expect(eq(frameGap(15U, 10U, modulus).lost, 4U)) << "a run missing four frames";
             expect(!frameGap(15U, 10U, modulus).continuous);
-            // The wrap: the count returns to zero and the arithmetic does not change.
+            // At the wrap the count returns to zero, and the arithmetic does not change.
             expect(frameGap(0U, modulus - 1U, modulus).continuous);
             expect(eq(frameGap(4U, modulus - 1U, modulus).lost, 4U));
         }
 
-        // 254, 255, 0, 1 at modulus 256 loses nothing; 254 then 3 loses four.
+        // 254, 255, 0, 1 at modulus 256 loses nothing. 254 then 3 loses four.
         std::uint32_t last = 254U;
         for (const std::uint32_t count : {255U, 0U, 1U}) {
             expect(frameGap(count, last, kTmCountModulus).continuous);
@@ -317,9 +317,9 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         }
         expect(eq(frameGap(3U, 254U, kTmCountModulus).lost, 4U));
 
-        // The AOS cycle. With the use flag set the count is 28 bits wide, so 0xFFFFFF followed by
-        // cycle 1 count 0 is continuous; with the flag clear the same two counts are continuous at
-        // the 24-bit modulus too, and cycle 2 under the flag is a gap of 2^24.
+        // The AOS cycle. With the use flag set, the count is 28 bits wide, and 0xFFFFFF followed by cycle 1 count 0 is
+        // continuous. With the flag clear, the same two counts are continuous at the 24-bit modulus too. Cycle 2 under
+        // the flag is a gap of 2^24.
         AosPrimaryHeader a{};
         a.vc_count_cycle_used = true;
         a.vc_frame_count      = 0xFFFFFFU;
@@ -351,8 +351,8 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         fill.next(produced);
         expect(std::equal(anchor.begin(), anchor.end(), produced.begin())) << "132.0-B-3's own NOTE to 4.1.4.6.2.2";
 
-        // The register runs across calls rather than restarting per frame (4.1.4.6.2.1), so the same
-        // sequence comes out whether it is drawn in one span or in several.
+        // The register runs across calls and does not restart per frame (4.1.4.6.2.1). The same sequence comes out
+        // whether it is drawn in one span or in several.
         OidFill                   piecewise;
         std::vector<std::uint8_t> assembled;
         for (const std::size_t chunk : {3UZ, 1UZ, 6UZ, 22UZ}) {
@@ -365,8 +365,8 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         whole.next(straight);
         expect(assembled == straight);
 
-        // And the Galois realization of 4.1.4.6.2.2, seeded with the bit pattern that subsection
-        // publishes, produces the same sequence -- the two forms are one code.
+        // And the Galois realization of 4.1.4.6.2.2, seeded with the bit pattern that subsection publishes, produces
+        // the same sequence. The two forms are one code.
         expect(galoisOidFill(assembled.size()) == straight);
 
         // Reset returns the register to the all-ones seed of 4.1.4.6.2.1.
@@ -392,7 +392,7 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         AosPrimaryHeader aosBack{};
         expect(parseAosPrimaryHeader(octets, false, aosBack) == ParseStatus::bad_version) << "and TM octets given to the AOS parser";
 
-        // A reserved spare set wrong reports and refuses nothing: the header is complete beside it.
+        // A reserved spare set wrong reports nothing and refuses nothing. The rest of the header is still complete.
         TmPrimaryHeader reserved{};
         reserved.segment_length_id = 1U; // not '11' under a zero synchronization flag
         expect(writeTmPrimaryHeader(reserved, octets) == WriteStatus::ok);

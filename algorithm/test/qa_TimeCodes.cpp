@@ -15,23 +15,20 @@
 #include <gnuradio-4.0/algorithm/ccsds/TimeCodes.hpp>
 
 /*
- * One instant, 1988-01-18T17:20:43.123456Z, is 569 524 843 123 456 000 ns since the Unix epoch, and
- * the same instant is written four ways in CCSDS 301.0-B-4: as an ASCII calendar string in either
- * variation, as a CDS day 10974 with 62 443 123 ms of day and 456 us of millisecond, as a CCS calendar
- * code, and as a CUC coarse count of 948 216 043 seconds from the 1958 epoch on the TAI scale. Every
- * one of those numbers is asserted below against the same nanosecond value, so a code that reads a
- * field one octet wide too many fails here rather than in a mission.
+ * One instant, 1988-01-18T17:20:43.123456Z, is 569 524 843 123 456 000 ns since the Unix epoch. CCSDS 301.0-B-4 writes
+ * the same instant four ways. The first is an ASCII calendar string in either variation. The second is a CDS day 10974
+ * with 62 443 123 ms of day and 456 us of millisecond. The third is a CCS calendar code. The fourth is a CUC coarse
+ * count of 948 216 043 seconds from the 1958 epoch on the TAI scale. The tests assert every one of those numbers
+ * against the same nanosecond value. A code that reads a field one octet too wide fails here, not in a mission.
  *
- * The epoch constant is recomputed from the calendar rather than asserted as a literal: 1958 to 1970
- * is twelve years, 4380 days, plus the leap days of 1960, 1964 and 1968, which is 4383. The two axis
- * bounds are asserted at their exact thresholds -- 9 602 063 236 coarse seconds and 111 134 days for
- * the 1958 epoch -- with the value at the bound passing and its successor refused, because a bound
- * that is only approximately right is a bound that is wrong on one value.
+ * The epoch constant is recomputed from the calendar, not asserted as a literal. 1958 to 1970 is twelve years or 4380
+ * days. The leap days of 1960, 1964 and 1968 make it 4383. The two axis bounds are asserted at their exact thresholds.
+ * For the 1958 epoch they are 9 602 063 236 coarse seconds and 111 134 days. The value at the bound passes, and its
+ * successor is refused. A bound that is only approximately right is wrong on one value.
  *
- * The CUC round trip has an exact boundary and it is arithmetic: distinct fraction fields map to
- * distinct nanoseconds only while the least significant bit is at or above one nanosecond, that is
- * 8m <= log2(10^9) = 29.897, that is m <= 3. Both halves are asserted, the failure at m = 4 as a
- * measurement rather than as a warning.
+ * The CUC round trip has an exact boundary, and the boundary is arithmetic. Distinct fraction fields map to distinct
+ * nanoseconds only while the least significant bit is at or above one nanosecond. That is 8m <= log2(10^9) = 29.897, or
+ * m <= 3. Both halves are asserted. The failure at m = 4 is a measurement, not a warning.
  */
 namespace {
 
@@ -72,8 +69,8 @@ Layout ccsLayout(std::uint8_t subsecondOctets, bool dayOfYear = false) {
     return layout;
 }
 
-/// A CUC T-field with a one-octet coarse count of zero and the given fraction, so what comes back is
-/// the fraction's own contribution to the axis and nothing else.
+/// A CUC T-field with a one-octet coarse count of zero and the given fraction. The result is the fraction's own
+/// contribution to the axis alone.
 std::int64_t fractionNs(std::uint8_t fine, std::uint64_t fraction, std::uint32_t& subNsPs) {
     std::vector<std::uint8_t> tfield(1UZ + fine, 0U);
     gr::ccsds::detail::writeBigEndian(tfield, 1UZ, fine, fraction);
@@ -127,7 +124,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     };
 
     "2. an agency-defined epoch, worked at 1950"_test = [] {
-        // 301.0-B-4 B3.2: the 1958 and 1950 epochs differ by exactly 2922.0 days, recomputed here.
+        // The 1958 and 1950 epochs differ by exactly 2922.0 days (301.0-B-4 B3.2), recomputed here.
         const std::int64_t difference = (sys_days{1958y / January / 1} - sys_days{1950y / January / 1}).count();
         expect(eq(difference, std::int64_t{2922}));
         expect(eq((kEpoch1958Days + difference) * 86400, std::int64_t{631'152'000}));
@@ -255,7 +252,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     "5. the CUC round trip, and its exact boundary at m = 3"_test = [] {
         const bool longRun = std::getenv("ENABLE_LONG_TESTS") != nullptr;
 
-        // m <= 3: the map is injective and the nearest-rounding inverse recovers every fraction.
+        // At m <= 3 the map is injective, and the nearest-rounding inverse recovers every fraction.
         for (std::uint8_t m = 1U; m <= 3U; ++m) {
             const std::uint64_t span    = 1ULL << (8U * m);
             const std::uint64_t stride  = (m == 3U && !longRun) ? 211ULL : 1ULL;
@@ -277,7 +274,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         }
         expect(eq(minimumStep, std::int64_t{59})) << "2^-24 s is 59.6 ns, so adjacent fractions differ by 59 or 60";
 
-        // m = 4: distinct fractions share a nanosecond, so no inverse can separate them. Measured.
+        // At m = 4 distinct fractions share a nanosecond, and no inverse can separate them. Measured.
         std::size_t sharing = 0UZ;
         for (std::uint64_t f = 0ULL; f < 8ULL; ++f) {
             if (fractionNs(4U, f, discard) == 0) {
@@ -287,7 +284,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(ge(sharing, 4UZ)) << "at least four distinct fractions map to nanosecond zero: " << sharing;
         expect(neq(roundTripFraction(4U, 3ULL), 3ULL)) << "the round trip cannot be exact at m = 4";
 
-        // The boundary's derivation, as the inequality it is: 8m <= log2(10^9).
+        // The boundary's derivation, as the inequality 8m <= log2(10^9).
         expect(lt(8U * 3U, 30U));
         expect(gt(8U * 4U, 30U));
         expect(gt((1ULL << 30U), 1'000'000'000ULL));
@@ -296,7 +293,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     };
 
     "6. exactness where it is claimed, and the double that loses it"_test = [] {
-        // m = 1: every fraction is exact, and the multiplier is 10^9 / 2^8.
+        // At m = 1 every fraction is exact, and the multiplier is 10^9 / 2^8.
         std::uint32_t discard = 0U;
         for (std::uint64_t f = 0ULL; f < 256ULL; ++f) {
             expect(eq(fractionNs(1U, f, discard), static_cast<std::int64_t>(f) * 3'906'250LL));
@@ -304,8 +301,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         }
         expect(eq(1'000'000'000LL / 256LL, std::int64_t{3'906'250}));
 
-        // An instant past 2^53 ns round trips exactly here, and the same value through a double does
-        // not -- the failure is shown rather than asserted about.
+        // An instant past 2^53 ns round trips exactly here. The same value through a double does not. The test shows
+        // that failure and does not assert on it.
         constexpr std::int64_t kPast2To53 = 9'007'199'254'740'993LL;
         expect(neq(static_cast<std::int64_t>(static_cast<double>(kPast2To53)), kPast2To53)) << "53 significand bits are not 63";
 
@@ -347,7 +344,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         Layout                              layout{};
         expect(parsePField(reserved, layout) == TimeStatus::reserved_resolution);
 
-        // The leap millisecond: converted by the same expression, counted, and flagged.
+        // The leap millisecond is converted by the same expression, counted and flagged.
         std::array<std::uint8_t, 6UZ> leapField{};
         gr::ccsds::detail::writeBigEndian(leapField, 2UZ, 4UZ, 86'400'123ULL);
         expect(decode(leapField, cdsLayout(2U, 0U), 0, 0, instant) == TimeStatus::ok);
@@ -360,7 +357,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     };
 
     "8. the worked instant, in four codes and one number"_test = [] {
-        // The number itself, from the calendar: 6591 days, then 62 443 seconds into the day.
+        // The number itself, from the calendar. 6591 days, then 62 443 seconds into the day.
         const std::int64_t days = (sys_days{1988y / January / 18} - sys_days{1970y / January / 1}).count();
         expect(eq(days, std::int64_t{6591}));
         expect(eq(days * 86400 + 17 * 3600 + 20 * 60 + 43, std::int64_t{569'524'843}));
@@ -373,7 +370,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decodeAscii("1988-018T17:20:43.123456Z", TimeCodeKind::ascii_b, instant) == TimeStatus::ok);
         expect(eq(instant.ns, kWorkedNs));
 
-        // CDS: day 10974 from the 1958 epoch, 62 443 123 ms of day, 456 us of millisecond.
+        // CDS. Day 10974 from the 1958 epoch, 62 443 123 ms of day and 456 us of millisecond.
         expect(eq(days + kEpoch1958Days, std::int64_t{10974}));
         std::array<std::uint8_t, 8UZ> cds{};
         gr::ccsds::detail::writeBigEndian(cds, 0UZ, 2UZ, 10974ULL);
@@ -382,7 +379,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decode(cds, cdsLayout(2U, 2U), 0, 0, instant) == TimeStatus::ok);
         expect(eq(instant.ns, kWorkedNs));
 
-        // CCS with three subsecond octets: six decimal places, so 123456 in units of 10^-6 s.
+        // CCS with three subsecond octets has six decimal places. The subsecond value is 123456 in units of 10^-6 s.
         std::array<std::uint8_t, 10UZ> ccs{0x19U, 0x88U, 0x01U, 0x18U, 0x17U, 0x20U, 0x43U, 0x12U, 0x34U, 0x56U};
         expect(decode(ccs, ccsLayout(3U), 0, 0, instant) == TimeStatus::ok);
         expect(eq(instant.ns, kWorkedNs));
@@ -392,8 +389,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decode(ccsDoy, ccsLayout(3U, true), 0, 0, instant) == TimeStatus::ok);
         expect(eq(instant.ns, kWorkedNs));
 
-        // CUC: a coarse count of 948 216 043 s from the 1958 epoch, on the TAI scale. The TAI-to-UTC
-        // relation is asserted as an identity for every offset the test supplies -- no table anywhere.
+        // CUC. A coarse count of 948 216 043 s from the 1958 epoch, on the TAI scale. The TAI-to-UTC relation is
+        // asserted as an identity for every offset the test supplies. No table is used.
         expect(eq(569'524'843LL + kEpoch1958Secs, std::int64_t{948'216'043}));
         std::array<std::uint8_t, 6UZ> cuc{};
         gr::ccsds::detail::writeBigEndian(cuc, 0UZ, 4UZ, 948'216'043ULL);
@@ -420,7 +417,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     };
 
     "9. CCS binary coded decimal, its ranges, and its resolution boundary"_test = [] {
-        // Every subsecond octet count: k <= 4 is exact on the axis and k >= 5 truncates.
+        // Every subsecond octet count. k <= 4 is exact on the axis, and k >= 5 truncates.
         for (std::uint8_t k = 0U; k <= 6U; ++k) {
             const Layout              layout = ccsLayout(k);
             std::vector<std::uint8_t> tfield(timeFieldOctets(layout));
@@ -504,7 +501,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decodeAscii("1988-01-18T17:20:43Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
         expect(eq(instant.ns, 569'524'843'000'000'000LL));
 
-        // Right truncation: the omitted subfields take their zero values.
+        // Right truncation. The omitted subfields take their zero values.
         expect(decodeAscii("1988-01-18", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
         expect(eq(instant.ns, 6591LL * 86400LL * 1'000'000'000LL)) << "that day's midnight";
         expect(decodeAscii("1988-01-18T17:20", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
@@ -519,7 +516,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decodeAscii("1988-1-18T17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);
         expect(decodeAscii("1988-01-18X17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);
 
-        // The fraction is an integer parse: fifteen digits keep nine, then three, then count the rest.
+        // The fraction is an integer parse. Of fifteen digits it keeps nine, then three, and counts the rest.
         expect(decodeAscii("1988-01-18T17:20:43.123456789012345", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
         expect(eq(instant.ns, 569'524'843'123'456'789LL));
         expect(eq(instant.sub_ns_ps, 12U));
@@ -594,7 +591,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(decode(coarse, cucLayout(5U, 0U), 0, 0, instant) == TimeStatus::axis_overflow);
         gr::ccsds::detail::writeBigEndian(coarse, 0UZ, 5UZ, (1ULL << 40U) - 1ULL);
         expect(decode(coarse, cucLayout(5U, 0U), 0, 0, instant) == TimeStatus::axis_overflow);
-        // A four-octet coarse count can never fail the test, which is why the check exists at five.
+        // A four-octet coarse count cannot fail the test. The check exists at five octets for that reason.
         expect(lt(std::uint64_t{0xFFFFFFFFULL}, maxCoarseSeconds(-kEpoch1958Ns)));
 
         // axis_overflow: the CDS day bound, likewise.
@@ -608,9 +605,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     };
 
     "the calendar codes at the axis's two ends, to the second"_test = [] {
-        // The last day the axis holds is only partly held: 106 751 whole days is 9 223 286 400 s and
-        // the axis stops 85 636 s later, at 23:47:16 of that day. A bound on the day count alone lets
-        // the rest of the day through, and what comes back from a wrapped sum is a negative instant.
+        // The last day the axis holds is only partly held. 106 751 whole days are 9 223 286 400 s, and the axis stops
+        // 85 636 s later, at 23:47:16 of that day. A bound on the day count alone lets the rest of the day through. A
+        // wrapped sum then returns a negative instant.
         Instant instant{};
         expect(eq(106'751LL * 86400LL + 23 * 3600 + 47 * 60 + 16, kMaxAxisSeconds));
         expect(decodeAscii("2262-04-11T23:47:16Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
@@ -623,8 +620,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(eq(instant.ns, std::numeric_limits<std::int64_t>::max()));
         expect(decodeAscii("2262-04-11T23:47:16.854775808", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow);
 
-        // The other end, bounded at the whole second: the axis's floor falls 763 s into 1677-09-21,
-        // and the second that contains it is refused with it rather than admitted in part.
+        // The other end is bounded at the whole second. The axis's floor falls 763 s into 1677-09-21. The second that
+        // contains it is refused whole, not admitted in part.
         expect(decodeAscii("1677-09-21T00:12:44Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
         expect(eq(instant.ns, std::int64_t{-9'223'372'036'000'000'000}));
         expect(decodeAscii("1677-09-21T00:12:43Z", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow);
@@ -682,9 +679,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
     };
 
     "an epoch far below the axis leaves more room than a count can carry"_test = [] {
-        // The room above INT64_MIN is very nearly 2^64 ns, and a coarse count that large would wrap the
-        // unsigned the elapsed time is carried in before any range check saw it. The two bounds are
-        // therefore capped, far above anything the axis itself admits, so no reachable case changes.
+        // The room above INT64_MIN is very nearly 2^64 ns. A coarse count that large would wrap the unsigned value that
+        // carries the elapsed time before any range check saw it. The two bounds are therefore capped far above
+        // anything the axis itself admits. No reachable case changes.
         constexpr std::int64_t kFarBelow = std::numeric_limits<std::int64_t>::min();
         expect(eq(gr::ccsds::detail::roomAbove(kFarBelow), std::numeric_limits<std::uint64_t>::max()));
         expect(eq(maxCoarseSeconds(kFarBelow), 18'446'744'072ULL));
@@ -727,7 +724,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
                     std::vector<std::uint8_t> tfield(timeFieldOctets(layout));
                     const TimeStatus          written = encode(source, layout, 0, 0, tfield);
                     if (written != TimeStatus::ok) {
-                        continue; // a two-octet day count cannot reach every instant, and says so
+                        continue; // a two-octet day count cannot reach every instant, and the encoder reports it
                     }
                     Instant back{};
                     expect(decode(tfield, layout, 0, 0, back) == TimeStatus::ok);
