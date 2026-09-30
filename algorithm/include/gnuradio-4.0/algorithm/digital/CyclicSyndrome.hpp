@@ -6,17 +6,17 @@
 #include <stdexcept>
 
 /**
- * A systematic shortened cyclic block code with coset offset words, the arithmetic behind
- * offset-word framing (EN 50067 / RBDS Annex C is the driving instantiation).
+ * A systematic shortened cyclic block code with coset offset words. It is the arithmetic of
+ * offset-word framing. EN 50067 and RBDS Annex C are its main instance.
  *
- * A block is `data * x^C | check`, the check being the remainder of `data * x^C` modulo the
- * generator, zero register preset, no inversion — where `Crc` next door carries reflection
- * and inversion vocabulary, an offset-word code carries none, which is why this is its own
- * kernel rather than a Crc configuration. A position label rides the block as an offset word
- * xored onto the checkword, and the load-bearing identity is that the syndrome is the offset:
- * a valid un-offset block's remainder is zero, so a valid offset block's remainder is exactly
- * its offset word, and framing recovery is one reduction and a lookup rather than a trial per
- * offset.
+ * A block is `data * x^C | check`. The check is the remainder of `data * x^C` modulo the
+ * generator, with a zero register preset and no inversion. `Crc` has parameters for reflection
+ * and inversion. An offset-word code uses neither. This code is therefore its own kernel and
+ * not a `Crc` configuration. Each block's checkword is xored with an offset word that labels
+ * the block's position. The syndrome of a valid block equals its offset word. A valid block
+ * with no offset has a remainder of zero. A valid block with an offset therefore has its
+ * offset word as the remainder. Framing recovery is one reduction and one lookup, with no
+ * trial per offset.
  */
 namespace gr::digital {
 
@@ -45,14 +45,14 @@ struct CyclicSyndrome {
         return static_cast<std::uint16_t>(r & ((1ULL << checkBits) - 1ULL));
     }
 
-    //! The checkword of a data word: the remainder of `data * x^C`.
+    //! The checkword of a data word, the remainder of `data * x^C`.
     [[nodiscard]] constexpr std::uint16_t check(std::uint32_t data) const noexcept { return remainder(static_cast<std::uint64_t>(data) << checkBits, dataBits + checkBits); }
 
-    //! The syndrome of a whole received block. Zero for a valid un-offset block; exactly the
-    //! offset word for a valid block carrying one.
+    // ! The syndrome of a whole received block. It is zero for a valid block with no offset.
+    // It is ! exactly the offset word for a valid block with one.
     [[nodiscard]] constexpr std::uint16_t syndrome(std::uint64_t block) const noexcept { return remainder(block, dataBits + checkBits); }
 
-    //! The transmitted block for a data word under an offset: `data * x^C | (check ^ offset)`.
+    //! The transmitted block for a data word under an offset, `data * x^C | (check ^ offset)`.
     [[nodiscard]] constexpr std::uint64_t block(std::uint32_t data, std::uint16_t offset) const noexcept { return (static_cast<std::uint64_t>(data) << checkBits) | static_cast<std::uint64_t>(check(data) ^ offset); }
 };
 
