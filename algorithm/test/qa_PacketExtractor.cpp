@@ -12,7 +12,7 @@
 /*
  * The packet extraction function is a state machine built on one sentence of the standard, 132.0-B-3 4.3.2.4. When the
  * held fragment's own length disagrees with the first header pointer, the pointer is correct. The tests here check the
- * consequence of that rule, not the rule itself. The criterion this group exists for is the third test below. One zone
+ * consequence of that rule, not the rule itself. The main case is the third test below. One zone
  * lost between two fragments of a spanning packet costs exactly one packet, not the rest of the pass.
  *
  * The negative control is in the same file. A reassembler that ignores the pointer and simply concatenates gets the

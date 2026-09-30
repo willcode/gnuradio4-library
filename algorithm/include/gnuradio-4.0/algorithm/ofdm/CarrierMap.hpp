@@ -30,7 +30,7 @@ enum class Occupancy : std::uint8_t { Guard, Data, Pilot };
  *
  * The range is asymmetric at `fft_len/2`. `-fft_len/2` is a real carrier and falls on the Nyquist bin
  * `fft_len/2`. `+fft_len/2` does not exist. A numerology that names it is refused and not folded. Folding would
- * move a carrier to the other side of the band without any sign.
+ * move a carrier to the other side of the band with no error.
  *
  * A numerology is the data set and the pilot set. Every other carrier is a guard. The guards are computed as the
  * complement. The three sets are therefore disjoint and cover `fft_len` without a completeness check. The caller
@@ -142,7 +142,7 @@ public:
      * The rule reads one cycle at two levels. The slots of a symbol take consecutive entries. The next symbol
      * continues where the previous one stopped, `pilot_symbols[(s * n_pilots + p) % len]`. A cycle whose length
      * is a multiple of `n_pilots` gives every symbol the same pilots. Any other cycle rotates them from symbol to
-     * symbol. This function is the single definition of the rule.
+     * symbol.
      *
      * `symbolIndex` is reduced before the multiply. A symbol index counts from the stream start and grows large
      * over a long run. `s * n_pilots` would overflow long before `s` itself. `(s mod len) * n_pilots` is

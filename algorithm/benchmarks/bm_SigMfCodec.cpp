@@ -16,12 +16,11 @@
 
 // The cost of the SigMF codec per component, against a plain memcpy of the same byte count as the floor.
 //
-// The specification asserts no timing number, because none was measured for it. It records three expectations. The
-// identity pairs should reach the file system's own throughput, because the codec does no arithmetic. The scaled
-// integer paths should be memory-bound. One multiply per component against four to eight bytes moved is well under one
-// operation per byte. The `_be` paths should cost nothing measurable on a target with a byte-swap instruction. A run
-// that contradicts any of the three means the per-component loop does not vectorize. The requirement of no branch in
-// the loop is then not met.
+// No row asserts a timing figure. Three results are expected. The identity pairs should reach the file system's own
+// throughput, because the codec does no arithmetic. The scaled integer paths should be memory-bound. One multiply per
+// component against four to eight bytes moved is well under one operation per byte. The `_be` paths should cost nothing
+// measurable on a target with a byte-swap instruction. A run that contradicts any of the three means the per-component
+// loop does not vectorize and holds a branch.
 //
 // Three buffer sizes make the L2 boundary visible. The metadata parser and writer run alone at three capture counts.
 // These rows measure the cost per recording directly.

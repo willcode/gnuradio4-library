@@ -301,8 +301,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         }
         expect(eq(1'000'000'000LL / 256LL, std::int64_t{3'906'250}));
 
-        // An instant past 2^53 ns round trips exactly here. The same value through a double does not. The test shows
-        // that failure and does not assert on it.
+        // An instant past 2^53 ns round trips exactly here. The same value through a double does not, and the test
+        // asserts that failure.
         constexpr std::int64_t kPast2To53 = 9'007'199'254'740'993LL;
         expect(neq(static_cast<std::int64_t>(static_cast<double>(kPast2To53)), kPast2To53)) << "53 significand bits are not 63";
 

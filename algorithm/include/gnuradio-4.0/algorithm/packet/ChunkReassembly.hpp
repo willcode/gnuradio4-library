@@ -60,10 +60,9 @@
  * Both rules here count records observed. One evicts the least recently touched file under cap
  * pressure. The other evicts a file untouched for more than `evict_after_records`.
  *
- * **The engine computes no check value.** Per-chunk integrity arrives with the record from an earlier
- * stage. The file's own value is the AND over every contributing record that stated one. It also holds
- * the sums of their corrected and uncorrectable error counts. A whole-file check is a CRC applied after
- * the engine, with the protocol's own parameters.
+ * **The engine computes no check value.** It takes a per-record verdict and error counts from the caller. The
+ * file's own verdict is the AND over every contributing record that stated one. It also holds the sums of
+ * their corrected and uncorrectable error counts.
  */
 namespace gr::packet {
 

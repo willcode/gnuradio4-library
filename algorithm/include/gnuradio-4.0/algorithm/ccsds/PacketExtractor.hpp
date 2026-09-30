@@ -104,7 +104,7 @@ public:
         have_count_ = true;
 
         // 2. Only idle data. 4.1.4.6.3 NOTE 3 permits an OID frame in the middle of a split packet.
-        //    The fill does not continue the packet. Appending it would corrupt the packet without a sign.
+        //    The fill does not continue the packet. Appending it would corrupt the packet with no error.
         if (fhp == kFhpOnlyIdleData) {
             ++counters_.idle_frames;
             dropFragment();

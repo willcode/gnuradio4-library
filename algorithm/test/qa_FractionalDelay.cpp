@@ -136,7 +136,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     };
 
     "the consistency identity: a range rate is a frequency shift, at the ratio of the two carriers"_test = [] {
-        // Criterion 6, at the kernel. A range rate `v` delays the envelope by `tau(t) = tau0 + v*t/c`. A baseband tone
+        // At the kernel, a range rate `v` delays the envelope by `tau(t) = tau0 + v*t/c`. A baseband tone
         // at `f_b` then emerges at `f_b*(1 - v/c)`, and the derivation is exact, not first order. The same `v` moves a
         // carrier at `f_c` by `offsetFor(v, f_c)`. The two shifts are therefore in the ratio `f_b/f_c`. The ratio
         // assertion fails if either sign is wrong and shows which.

@@ -23,8 +23,8 @@ namespace {
 
 using Cplx = std::complex<float>;
 
-/// The QA numerology the OFDM spec names. It has 64 carriers, 52 occupied and 4 pilots. That is the 802.11a shape. The
-/// test uses it as a numerology and makes no interoperability claim.
+/// A test numerology of 64 carriers, 52 occupied and 4 pilots, the 802.11a shape. The test makes no
+/// interoperability claim.
 struct Numerology {
     std::vector<int> data;
     std::vector<int> pilot{-21, -7, 7, 21};
@@ -73,7 +73,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         }
     };
 
-    // The spec's QA numerology. Its three sets partition the transform, and that property makes it a numerology.
+    // The test numerology. Its three sets partition the transform.
     "the QA numerology's three sets are disjoint and complete"_test = [] {
         const Numerology numerology = qaNumerology();
         const CarrierMap map(64UZ, numerology.data, numerology.pilot);

@@ -102,7 +102,7 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
     "the estimator's own identity holds whatever the data is"_test = [] {
         // No assumed model, only arbitrary seeded pairs. `a - lambda_-` and `b - lambda_-` sum to `lambda_+ - lambda_-`
         // by construction. The two branch ratios therefore sum to the combined one as algebra, not as an approximation.
-        // This criterion catches a sign error or an eigenvalue swap.
+        // This check catches a sign error or an eigenvalue swap.
         gr::rng::Xoshiro256pp         rng(0xDECAFULL);
         gr::rng::GaussianNoise<float> noise(rng);
 

@@ -219,7 +219,7 @@ const boost::ut::suite<"packet envelope"> envelopeTests = [] {
         expect(eq(static_cast<std::uint32_t>(kHeaderCrc.compute(kGoldenHeader)), kHeaderCrcResidue));
     };
 
-    // an emitter pin, not an interop contract. A deliberate change to how gr::pmt::yaml writes a map changes this
+    // An emitter pin, not an interop contract. A deliberate change to how gr::pmt::yaml writes a map changes this
     // assertion too. The test's name states this.
     "the golden metadata, byte for byte (emitter pin)"_test = [] {
         const std::string serialized = gr::pmt::yaml::serialize(goldenMap());

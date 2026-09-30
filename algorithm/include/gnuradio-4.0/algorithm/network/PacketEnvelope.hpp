@@ -33,12 +33,12 @@
  * every version. A reader must parse `magic`, `wire_version`, `byte_order` and `header_bytes` before it knows which
  * version it is reading.
  *
- * **The header carries a CRC and the payload does not.** The header holds the sizes. `item_count`, `payload_bytes`
- * and `meta_bytes` drive allocation and indexing. The CRC turns every header this format did not write into one
- * named refusal. It costs a fixed 28 table lookups, outside the payload path. The CRC also lets a byte-stream reader
- * confirm that four bytes matching the magic start a real header and are not a chance match inside a payload. The
- * payload's integrity is checked elsewhere, by an appended CRC and a `crc_ok` verdict over it. A second, weaker
- * check here could disagree with that one and would be worse than none.
+ * **The header carries a CRC and the payload does not.** The header holds the sizes. `item_count`, `payload_bytes` and
+ * `meta_bytes` drive allocation and indexing. The CRC turns every header this format did not write into one named
+ * refusal. It costs a fixed 28 table lookups, outside the payload path. The CRC also lets a byte-stream reader confirm
+ * that four bytes matching the magic start a real header and are not a chance match inside a payload. The payload
+ * carries no check value here. A weak second check on the payload could disagree with a stronger one and would be worse
+ * than none.
  *
  * The CRC residue gives a reader a one-line validation with no field extraction. CRC-32/ISO-HDLC over all 32
  * bytes of an intact header is `0x2144DF1C`.
@@ -152,10 +152,10 @@ inline const gr::digital::Crc kHeaderCrc{32U, 0x04C11DB7ULL, 0xFFFFFFFFULL, 0xFF
 /// @brief The `item_type` code of a C++ payload item type, as a compile-time lookup.
 ///
 /// The specializations restate the table of `itemSizeOf` in the other direction. They do not call
-/// `gr::pmt::Value::get_value_type<T>()`, which is a private member. The mapping here also keeps the kernel free of
-/// any dependency on the interface of `pmt::Value`. `static_assert`s pin the two numberings to each other. A
-/// renumbering in the framework then fails the build and does not fail a peer at run time. The primary template is
-/// left undefined on purpose. An item type this envelope cannot carry is a compile error and not a run-time zero.
+/// `gr::pmt::Value::get_value_type<T>()`, which is a private member. The mapping here also keeps the kernel free of any
+/// dependency on the interface of `pmt::Value`. The specializations must match the numbering of
+/// `gr::pmt::Value::ValueType`. A renumbering there changes this mapping. The primary template is left undefined on
+/// purpose. An item type this envelope cannot carry is a compile error and not a run-time zero.
 template<typename T>
 struct ItemTypeCode;
 

@@ -14,8 +14,7 @@ namespace detail {
  * @brief A 128-bit unsigned magnitude in two 64-bit limbs.
  *
  * The exact products this header needs exceed 64 bits and must not be rounded. The build uses
- * `-Wpedantic -Werror`, and `__int128` is not ISO C++. `filter/ArbitraryResampler.hpp` has the same
- * constraint and solves it the same way. Only the four operations the clock performs are provided. This
+ * `-Wpedantic -Werror`, and `__int128` is not ISO C++. Only the four operations the clock performs are provided. This
  * is not a general wide-integer type.
  */
 struct U128 {

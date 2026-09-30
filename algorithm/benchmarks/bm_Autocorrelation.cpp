@@ -113,7 +113,7 @@ void benchAutocorrelation() {
                 const auto name = std::format("transform pair alone     M={:>5} hop={:>5} overlap={:.1f}", transformLength, hop, overlap);
 
                 ::benchmark::benchmark<kRepeats>(std::string_view(name), windows * hop) = [&] {
-                    // the backward transform writes to its own buffer. Every iteration therefore transforms the
+                    // The backward transform writes to its own buffer. Every iteration therefore transforms the
                     // same window. A correlation fed back as input would grow in scale by a factor of the transform
                     // length on each iteration.
                     for (std::size_t window = 0UZ; window < windows; ++window) {

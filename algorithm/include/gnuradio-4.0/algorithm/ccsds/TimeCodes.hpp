@@ -226,7 +226,8 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     return TimeStatus::ok;
 }
 
-/// @brief Whether `value - shift` or `value + shift` overflows, tested before the operation.
+/// @brief Whether `value - shift` overflows (`subtractOverflows`) and whether `value + shift` overflows
+/// (`addOverflows`), each tested before the operation.
 [[nodiscard]] inline constexpr bool subtractOverflows(std::int64_t value, std::int64_t shift) noexcept { return shift > 0 ? value < std::numeric_limits<std::int64_t>::min() + shift : value > std::numeric_limits<std::int64_t>::max() + shift; }
 
 [[nodiscard]] inline constexpr bool addOverflows(std::int64_t value, std::int64_t shift) noexcept { return shift > 0 ? value > std::numeric_limits<std::int64_t>::max() - shift : value < std::numeric_limits<std::int64_t>::min() - shift; }

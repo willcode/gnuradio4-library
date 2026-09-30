@@ -34,11 +34,11 @@
  * second. `2^63 - 1` cycles then take **584.55 years at `fs = 10^9` S/s** and 584 554 years at 1 MS/s. The saturating
  * check is still made and counted. The check costs little and enforces the claim that the limit is unreachable.
  *
- * **The two parts are not summed here**, by design. Forming `2*pi*cycles + phase` requires a floating type.
- * Any choice of type would bring back the loss this class avoids, at a point where the loss cannot be recovered.
- * The class returns both parts exactly. A caller that needs one number forms it in a type of its choice. A caller
- * that needs frequency differences the count in integers and the fraction in floats, with no large number at
- * all. `unwrappedRadians()` is a convenience for the current sample only. Its spacing is stated at the accessor.
+ * **The two parts are not summed here**, by design. Forming `2*pi*cycles + phase` requires a floating type. Any choice
+ * of type would bring back the loss this class avoids, at a point where the loss cannot be recovered. The class returns
+ * both parts exactly. A caller that needs one number forms it in a type of its choice. A caller that needs frequency
+ * takes the difference of the counts in integers and of the fractions in floats, with no large number at all.
+ * `unwrappedRadians()` is a convenience for the current sample only. Its spacing is stated at the accessor.
  *
  * **The precondition, derived.** The unwrap is correct exactly when the true phase advances by less than `pi`
  * per sample, that is when `|f| < fs/2`. Below that bound the wrapped difference determines the turn uniquely.

@@ -16,8 +16,8 @@
  * whose last chunk is full would not exercise the short-last-chunk arithmetic. The file is pushed in order, in reverse
  * and in ten seeded permutations. The twelve completed files are byte-identical.
  *
- * Criterion 9 covers a file whose last chunk reaches the declared size while an earlier chunk is missing. That file
- * publishes nothing. Completion is coverage, and a write pointer is not coverage.
+ * A file whose last chunk reaches the declared size while an earlier chunk is missing publishes nothing. Completion is
+ * coverage, and a write pointer is not coverage.
  *
  * The engine computes two of its figures as arithmetic. The coverage bitmap for a 1 MiB file at 224-byte chunks is 586
  * bytes. The peak for eight files of 1 MiB at 1024 gaps is 8 520 832 bytes, exactly 8.125 MiB. bm_ChunkReassembly

@@ -93,9 +93,9 @@ inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
 /**
  * @brief A span of delays in seconds converted to `Q32` samples.
  *
- * The delays are in the form `gr::timing::DelaySchedule::valuesFor` writes. This function converts a delay from
- * `double` to fixed point. It is a free function and not a step inside `process`. The schedule walk and the delay line
- * stay independent. The line takes fixed point from any source. A caller with no schedule does not need one.
+ * The delays are in seconds, one per sample. This function converts a delay from `double` to fixed point. It is a free
+ * function and not a step inside `process`. The schedule walk and the delay line stay independent. The line takes fixed
+ * point from any source. A caller with no schedule does not need one.
  */
 inline void fractionalDelayQ32(std::span<const double> delaySeconds, double sampleRateHz, std::span<std::uint64_t> out) {
     if (out.size() != delaySeconds.size()) {
@@ -164,8 +164,8 @@ public:
      * @brief Install a new prototype and clear the history.
      *
      * The window length follows the prototype. The held samples then do not line up with the taps that read
-     * them. Keeping them would put an unexplained transient in the stream. A bank rebuild therefore clears the
-     * history, and this function states that.
+     * them. Keeping them would put an unexplained transient in the stream. Installing new taps therefore clears
+     * the history.
      */
     void setTaps(std::span<const float> taps) {
         if (taps.empty()) {

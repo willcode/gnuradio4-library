@@ -22,7 +22,7 @@
 // SigMF is an interchange format. The assertions below check bytes wherever another program would see bytes. The
 // canonical recording's metadata is derived by hand and compared in full. The scaling tables are compared as dataset
 // bytes. The tests cover every refusal the document layer can express. The datatype alphabet is generated from the
-// grammar, not listed. Nothing here opens a file or instantiates a block. Part I is testable on its own.
+// grammar, not listed. Nothing here opens a file or instantiates a block.
 
 namespace {
 
@@ -524,7 +524,7 @@ const suite<"SigMF sample codec"> _codec = [] {
         expect(eq(fromU8[7].real(), 0.25f));
         expect(eq(fromU8[7].imag(), -0.75f));
 
-        // round half away from zero. The pin makes a later change to std::lrint break the test instead of the data.
+        // Round half away from zero. The pin makes a later change to std::lrint break the test instead of the data.
         const auto               datatype = sigmf::parseDatatype("ri16_le");
         const auto               encode   = sigmf::selectEncoder<float>(*datatype, sigmf::Scaling::Unit);
         std::array<float, 2>     half{0.5f / 32768.0f, -0.5f / 32768.0f};

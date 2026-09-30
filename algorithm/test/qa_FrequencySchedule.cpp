@@ -93,7 +93,7 @@ struct Profile {
 } // namespace
 
 const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
-    // Criterion 1. A ramp from -5 kHz to +5 kHz over ten seconds. The knots read their own values. The midpoint and the
+    // A ramp from -5 kHz to +5 kHz over ten seconds. The knots read their own values. The midpoint and the
     // quarter points read the interpolant exactly, and the numbers are chosen to make "exactly" a fair word. Outside
     // the table the end values hold and the line does not continue.
     "a ramp reads its knots, its interpolant and its held ends"_test = [] {
@@ -119,7 +119,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         }
     };
 
-    // Criterion 2. The span starts before the table and ends after it. It covers the held value, both segments and the
+    // The span starts before the table and ends after it. It covers the held value, both segments and the
     // held value again. Every knot falls inside a sample interval, not on its boundary. The trapezoid split exists for
     // that case.
     "the accumulated phase is the schedule's integral, however it is chunked"_test = [] {
@@ -183,9 +183,8 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         expect(that % std::ranges::equal(oneAtATime, increments)) << "a dense table read one sample at a time";
     };
 
-    // Criterion 3's sign anchor. The spec quotes +10.207 kHz for this case. Worked out, it is
-    // 437e6 * 7000 / 299792458 = 10203.7257 Hz. The spec's figure is 3.3 Hz high, and the test pins the correct one.
-    // The sign matters beyond the digits. A closing range reads high.
+    // A closing pass at 437 MHz and 7 km/s reads +10203.7257 Hz, which is 437e6 * 7000 / 299792458. The sign
+    // matters beyond the digits. A closing range reads high.
     "a closing pass reads high, to the hertz"_test = [] {
         const double closing = offsetFor(-7'000., 437e6);
 
@@ -277,8 +276,8 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
     // The tolerance is float32's. It belongs to the output, not to the phasor. The phase is accumulated in double and
     // reduced every step. Its own error over 96000 samples is a few times 1e-11 rad. The test reads `atan2` of a
     // `std::complex<float>` from a complex multiply. The multiply has four products and two sums, each rounded at
-    // 2^-24 = 5.96e-8 relative. That bounds the angle of the result at roughly 8 * 2^-24 = 4.8e-7 rad. The criterion is
-    // 1e-6 rad, twice that bound. The test prints the achieved figure.
+    // 2^-24 = 5.96e-8 relative. That bounds the angle of the result at roughly 8 * 2^-24 = 4.8e-7 rad. The test bound
+    // is 1e-6 rad, twice that bound. The test prints the achieved figure.
     "a schedule's increments drive the phasor to the schedule's own integral"_test = [] {
         constexpr std::size_t kSamples   = 96'000UZ;
         constexpr double      kTolerance = 1e-6;

@@ -4,7 +4,7 @@ add_ut_test(qa_Kurtosis)
 add_ut_test(qa_PhaseUnwrap)
 add_ut_test(qa_PolarizationCombiner)
 add_ut_test(qa_Autocorrelation)
-# runs its estimates and its direct-sum references through the library FFT. That FFT uses SimdFFT, which needs the
+# Runs its estimates and its direct-sum references through the library FFT. That FFT uses SimdFFT, which needs the
 # inliner depth of -O2.
 gr_pin_test_optimization(qa_Autocorrelation -O2)
 add_ut_test(qa_MeasurementRecord)
@@ -92,7 +92,7 @@ add_ut_test(qa_Bch)
 add_ut_test(qa_Convolutional)
 add_ut_test(qa_Interleaver)
 add_ut_test(qa_CarrierMap)
-# checks the preamble's half-repeat through the library FFT. That FFT uses SimdFFT, which needs the inliner depth of
+# Checks the preamble's half-repeat through the library FFT. That FFT uses SimdFFT, which needs the inliner depth of
 # -O2.
 gr_pin_test_optimization(qa_CarrierMap -O2)
 add_ut_test(qa_TransferFrame)

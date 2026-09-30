@@ -226,7 +226,7 @@ const suite<"autocorrelation free functions"> _acfFunctions = [] {
     };
 
     "a real estimate has a heavier tail and needs a higher threshold"_test = [] {
-        // the two-sided normal deviate t solves erfc(t/sqrt2) = tail. The checks use its well-known values.
+        // The two-sided normal deviate t solves erfc(t/sqrt2) = tail. The checks use its well-known values.
         expect(std::abs(acfNormalDeviate(0.05) - 1.959964) < 1e-5) << std::format("{:.6f}", acfNormalDeviate(0.05));
         expect(std::abs(acfNormalDeviate(0.01) - 2.575829) < 1e-5) << std::format("{:.6f}", acfNormalDeviate(0.01));
         expect(std::abs(acfNormalDeviate(0.002699796) - 3.) < 1e-5) << std::format("{:.6f}", acfNormalDeviate(0.002699796));
@@ -340,7 +340,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         expect(rateDerived <= pFa + spread) << std::format("derived rate {:.4f} against design {:.4f} + spread {:.4f}", rateDerived, pFa, spread);
         expect(rateNaive > rateDerived) << "the lag dependence is not a refinement";
 
-        // a negative result holds only if the instrument finds a known positive. The positive is the same geometry
+        // A negative result holds only if the instrument finds a known positive. The positive is the same geometry
         // with a sinusoidal envelope modulation at a known period. The envelope kind must find it.
         constexpr std::size_t period    = 64UZ;
         constexpr double      depth     = 0.9;
@@ -482,7 +482,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         std::println("criterion 6: with the mean removed the largest lag reads {:.4f} against a scatter of {:.4f}", best, withoutPedestal[0UZ].scatter);
         expect(best < 6. * withoutPedestal[0UZ].scatter) << "the pedestal is gone and what is left is scatter";
 
-        // a constant-modulus input has no envelope autocorrelation. The estimator counts the window degenerate and
+        // A constant-modulus input has no envelope autocorrelation. The estimator counts the window degenerate and
         // publishes no result of 0/0.
         std::vector<Complex>  constant(n);
         gr::rng::Xoshiro256pp rng(0x1234ULL);

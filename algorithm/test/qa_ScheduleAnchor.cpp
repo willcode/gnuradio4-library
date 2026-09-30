@@ -161,8 +161,8 @@ const boost::ut::suite<"ScheduleAnchor"> _schedule_anchor = [] {
             expect(anchor.armed() == (source == AnchorSource::setting)) << anchorSourceName(source);
         }
 
-        // The bound itself is admitted. 2^63 - 1 ns is 2262-04-11T23:47:16.854775807Z. No honest producer reaches it. A
-        // producer that puts something other than a nanosecond count in the field does.
+        // The bound itself is admitted. 2^63 - 1 ns is 2262-04-11T23:47:16.854775807Z. No correct producer reaches it.
+        // A producer that puts something other than a nanosecond count in the field does.
         ScheduleAnchor edge(AnchorSource::first_trigger, 0ULL, 0LL);
         expect(edge.onTrigger(1ULL, ScheduleAnchor::kMaxTriggerTimeNs) == ScheduleAnchor::Response::armed);
         expect(edge.anchorNs() == std::numeric_limits<std::int64_t>::max());

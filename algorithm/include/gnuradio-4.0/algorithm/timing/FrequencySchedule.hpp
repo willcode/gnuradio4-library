@@ -86,9 +86,8 @@ public:
      *
      * The derivative does not exist at a knot or outside the table. This value is therefore not a derivative.
      * The function returns the slope of the segment that holds the time. At both ends it clamps to a real segment,
-     * as `valueAt` clamps its value. A caller that compares a table against a rate needs the segment slope. One
-     * example is `worstRangeRateMismatch`. Without this function the caller would have to derive the slope from the
-     * knots again.
+     * as `valueAt` clamps its value. A caller that compares a table against a rate needs the segment slope.
+     * Without this function the caller would have to derive the slope from the knots again.
      */
     [[nodiscard]] double segmentSlopePerSecond(std::int64_t t_ns) const noexcept { return _slopes[locate(t_ns)] * 1e9; }
 
@@ -179,12 +178,11 @@ protected:
 /**
  * @brief A table of frequency-offset knots, and the radian increments a phasor consumes.
  *
- * A pass's Doppler curve arrives as a few points and must become one radian increment per sample.
- * `phaseIncrementsFor` produces that form. It gives `Phasor::mixModulated` its input, one `double` radian
- * increment per sample. Each increment is `2*pi` times the **integral** of the offset across that sample's own
- * interval. It is not `2*pi*offset(t_k)/fs` sampled at the interval's start. The offset is piecewise linear.
- * Its integral is a trapezoid per segment in closed form and costs no more than the sampled form. The
- * accumulated phase is then the schedule's true integral. A coherent demodulator tracks the phase and not the
+ * A pass's Doppler curve arrives as a few points and must become one radian increment per sample. `phaseIncrementsFor`
+ * produces that form, one `double` radian increment per sample. Each increment is `2*pi` times the **integral** of the
+ * offset across that sample's own interval. It is not `2*pi*offset(t_k)/fs` sampled at the interval's start. The offset
+ * is piecewise linear. Its integral is a trapezoid per segment in closed form and costs no more than the sampled form.
+ * The accumulated phase is then the schedule's true integral. A coherent demodulator tracks the phase and not the
  * frequency. A sampled increment would give it an error that grows over the run.
  *
  * The sample interval boundaries come from `SampleClock::NsWalk`. They are the exact `timeOf` of the absolute
@@ -208,8 +206,7 @@ public:
      * @brief The radian increments for `out.size()` samples starting at `firstIndex` on `clock`.
      *
      * `out[k]` is `2*pi` times the integral of the offset, in cycles, across the interval from `timeOf` of
-     * sample `firstIndex + k` to `timeOf` of the next one. `Phasor::mixModulated` consumes these increments, one
-     * per sample, in the same `double` the phasor accumulates in.
+     * sample `firstIndex + k` to `timeOf` of the next one. The increments are `double`, one per sample.
      */
     void phaseIncrementsFor(const SampleClock& clock, std::uint64_t firstIndex, std::span<double> out) const noexcept {
         if (out.empty()) {

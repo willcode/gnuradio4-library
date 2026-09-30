@@ -78,7 +78,7 @@ enum class AnchorSource : std::uint8_t {
  *
  * `trigger_offset` is a `float` in seconds, "sample delay w.r.t. the trigger". It is honored when
  * `honor_trigger_offset` is set. The anchored sample's time is then `trigger_time + llround(offset * 1e9)`.
- * The **sign is plus**. The convention publishes the pair as `trigger_time = now - relOffset` beside
+ * The **sign is plus**. By convention a source sets `trigger_time = now - relOffset` and
  * `trigger_offset = relOffset`. The tagged sample's time is therefore the sum of the two. This is the one
  * float-to-nanosecond step here, and its resolution is stated. A `float` has a 24-bit significand. Its spacing
  * is 0.116 ns at 1 ms, 119.2 ns at 1 s and 3.815 us at 60 s. An offset of a few milliseconds is exact to well

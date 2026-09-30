@@ -42,7 +42,7 @@
  * the file to `file(1)` and to a person who opens it by mistake. The integer after the space is the **format**
  * version. A reader built for version 1 refuses any other value by number and does not guess. A later version
  * that only adds optional headers still increments it. A reader that ignored unknown headers would also ignore
- * the one that mattered, without a sign.
+ * the one that mattered, with no error.
  *
  * Every refusal names its line. The line number is the part of a parse failure an operator can act on. There
  * are twenty-six refusals.
@@ -233,7 +233,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
  * The fractional part is parsed as an **integer** and not as a fraction. The digits after the point are read
  * as a decimal integer and scaled by `10^(9-d)` for `d` digits. `.5` is exactly 500000000 ns, and
  * `.000000001` is exactly 1 ns. More than nine digits are refused, because truncating them would lose data
- * without a sign.
+ * with no error.
  *
  * A seconds field of `60` is refused with its reason named. The axis is a plain nanosecond count, and a leap
  * second has no representation on it.

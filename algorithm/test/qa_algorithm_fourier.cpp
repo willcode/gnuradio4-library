@@ -73,7 +73,7 @@ std::vector<T> deterministicComplexSignal(std::size_t n) {
     return signal;
 }
 
-// the same broadband signal for a real-valued input. Two tones and no symmetry leave every bin occupied.
+// The same broadband signal for a real-valued input. Two tones and no symmetry leave every bin occupied.
 template<typename T>
 std::vector<T> deterministicSignal(std::size_t n) {
     if constexpr (gr::meta::complex_like<T>) {
@@ -372,7 +372,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // the PocketFFT backend keeps the native path's result, not only its convention. The two engines factor a length
+    // The PocketFFT backend keeps the native path's result, not only its convention. The two engines factor a length
     // differently. They agree to rounding and not bit for bit. The bound is on the relative L2 norm of the difference
     // over the whole spectrum.
     //
@@ -402,7 +402,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     } | AllTypesToTest{};
 
-    // one long single-precision transform at the display lengths. Kept to single precision, because a 2^22 transform
+    // One long single-precision transform at the display lengths. Kept to single precision, because a 2^22 transform
     // costs about as much as the rest of this suite.
     "PocketFFT matches the native backend at the display lengths"_test = [] {
         using Cplx = std::complex<float>;
@@ -419,7 +419,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // which of the two the disagreement above belongs to. Both float backends are measured against the same input
+    // Which of the two the disagreement above belongs to. Both float backends are measured against the same input
     // transformed in double precision. The "non-power-of-two forward DFT" case above checks that transform against a
     // direct DFT. PocketFFT stays near the precision's own epsilon. The error of the native path's twiddle recurrence
     // grows with the transform length.
@@ -594,7 +594,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     };
 
-    // the split's per-length state is parked and restored with the rest. Alternating two lengths rebuilds neither
+    // The split's per-length state is parked and restored with the rest. Alternating two lengths rebuilds neither
     // table. A length that comes back gives the same spectrum it gave the first time.
     "the four-step split parks its tables"_test = [] {
         using Cplx = std::complex<float>;

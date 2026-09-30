@@ -26,9 +26,8 @@
  * ```
  *
  * `K` is dimensionless and independent of scale. Replacing `x` by `a*x` multiplies both terms by `|a|^4`. The
- * `m2m4` signal-to-noise estimator uses the same quantity under the names `ka` and `kn`. The **excess** is `K`
- * minus the value for a Gaussian of the same domain. A Gaussian then reads zero. That value is 3 for real input
- * and 2 for complex input. Both values are derived below.
+ * **excess** is `K` minus the value for a Gaussian of the same domain. A Gaussian then reads zero. That value is 3 for
+ * real input and 2 for complex input. Both values are derived below.
  *
  * - Real. For `x ~ N(0, s^2)`, `E[x^2] = s^2` and `E[x^4] = 3 s^4`. Then `K = 3`.
  * - Complex, circular. Take `z = u + jv` with `u, v ~ N(0, s^2/2)` independent, so `E|z|^2 = s^2`. This is
@@ -243,7 +242,7 @@ enum class SpectrumResponse : std::uint8_t {
  * @brief `S1` and `S2` per bin over a run of spectra, and the per-bin statistic they make.
  *
  * The state is two `double` vectors and a count. Each input record costs one add and one multiply-add per bin.
- * The final evaluation costs one evaluation per bin. That is the entire cost of finding an intermittent
+ * Evaluation at the end costs one division per bin. That is the entire cost of finding an intermittent
  * interferer without knowing what it is.
  *
  * **The scale cancels.** `SK` is homogeneous of degree zero in `u`. Replacing `u_k` by `a*u_k` leaves

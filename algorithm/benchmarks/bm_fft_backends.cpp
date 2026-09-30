@@ -40,7 +40,7 @@ Aligned<T> broadbandSignal(std::size_t N) {
     return signal;
 }
 
-/// the same transform in double precision through PocketFFT, which qa_algorithm_fourier checks against a direct DFT
+/// the same transform in double precision through PocketFFT
 template<typename TIn>
 [[nodiscard]] std::vector<std::complex<double>> doubleReference(const Aligned<TIn>& signal) {
     using WideIn = std::conditional_t<gr::meta::complex_like<TIn>, std::complex<double>, double>;
@@ -68,7 +68,7 @@ template<typename TIn>
     return denominator > 0. ? std::sqrt(numerator / denominator) : std::sqrt(numerator);
 }
 
-// each measurement gets about the same amount of work. A short length is then not timed against the clock's own
+// Each measurement gets about the same amount of work. A short length is then not timed against the clock's own
 // resolution, and a long one does not dominate the run.
 [[nodiscard]] std::size_t repetitionsFor(std::size_t N) {
     constexpr double  kUnitBudget = 3.e8; // butterfly units per measurement
@@ -147,7 +147,7 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
     const double secondBatchInPlace    = timed([&] { pocketfft::c2c(shape, rowMajor, rowMajor, pocketfft::shape_t{1UZ}, true, work.data(), work.data(), 1.f, threads); });
     const double secondBatchTransposed = timed([&] { pocketfft::c2c(shape, rowMajor, transposed, pocketfft::shape_t{1UZ}, true, work.data(), out.data(), 1.f, threads); });
 
-    // the pass the fold replaces, a blocked out-of-place transpose of the same record. It reads and writes the record
+    // The pass the fold replaces, a blocked out-of-place transpose of the same record. It reads and writes the record
     // again.
     constexpr std::size_t kBlock    = 32UZ;
     const double          transpose = timed([&] {
@@ -162,7 +162,7 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
         }
     });
 
-    // the same twiddles read from two small tables instead of one N-entry table. i1*i2 splits as a*N2 + b, and every
+    // The same twiddles read from two small tables instead of one N-entry table. i1*i2 splits as a*N2 + b, and every
     // entry is W_N1^a * W_N^b. The pass then moves two records instead of three.
     std::vector<Cplx> coarse(n1);
     std::vector<Cplx> fine(n2);
@@ -207,13 +207,13 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
         "", threads, twiddleFromTables, simdBatch);
 }
 
-// The same four-step built on SimdFFT instead of PocketFFT. The comparison decides whether the vendored header is
-// still needed. SimdFFT transforms one contiguous, 64-byte aligned span at a time. It has no batched entry point and
-// no strided access. The columns cannot be transformed where they lie in the record, and the result cannot be written
-// transposed. The split on SimdFFT therefore takes five passes over the record against PocketFFT's three. The five
-// passes are a transposing copy, the column batch, a transposing pass that applies the twiddles, the row batch and a
-// transpose into natural bin order. The two shapes share no transpose. Every pass runs on the same threads. Each
-// thread holds its own engines, because a SimdFFT instance transforms through scratch it owns.
+// The same four-step built on SimdFFT instead of PocketFFT. SimdFFT transforms one contiguous, 64-byte aligned span at
+// a time. It has no batched entry point and no strided access. The columns cannot be transformed where they lie in the
+// record, and the result cannot be written transposed. The split on SimdFFT therefore takes five passes over the record
+// against PocketFFT's three. The five passes are a transposing copy, the column batch, a transposing pass that applies
+// the twiddles, the row batch and a transpose into natural bin order. The two shapes share no transpose. Every pass
+// runs on the same threads. Each thread holds its own engines, because a SimdFFT instance transforms through scratch it
+// owns.
 void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::vector<std::complex<double>>& reference, std::size_t threads) {
     using Cplx                 = std::complex<float>;
     const std::size_t N        = signal.size();
@@ -347,8 +347,7 @@ int main() {
         }
     }
 
-    // The engine to build the split on. The same decomposition runs through PocketFFT's batched driver and through
-    // loops over SimdFFT, at the two long lengths 2^20 and 2^22.
+    // The same decomposition through PocketFFT's batched driver and through loops over SimdFFT, at 2^20 and 2^22.
     std::println("");
     std::println("the four-step on PocketFFT's batched driver against the same split built on SimdFFT loops");
     for (const std::size_t N : {1UZ << 20UZ, 1UZ << 22UZ}) {

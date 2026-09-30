@@ -26,7 +26,7 @@ namespace gr::sigmf {
 
 // The codec's byte handling assumes a little-endian host. The read path swaps only for a `_be`
 // datatype, and the write path emits little-endian only. A big-endian port needs a review of this
-// whole header. The assertion stops a build that would mishandle the bytes without a sign.
+// whole header. The assertion stops a build that would mishandle the bytes with no error.
 static_assert(std::endian::native == std::endian::little, "gr::sigmf's sample codec requires a little-endian host");
 
 enum class Domain : std::uint8_t { Real, Complex };
@@ -385,7 +385,7 @@ template<detail::StreamComponent TStream>
         }
         break;
     }
-    // unreachable for a value from `parseDatatype`, which admits only the listed widths. A hand-built
+    // Unreachable for a value from `parseDatatype`, which admits only the listed widths. A hand-built
     // value with another width is refused with the grammar's own name.
     return std::unexpected(std::string("datatype_unparsable"));
 }
@@ -428,7 +428,8 @@ template<detail::StreamComponent TStream>
     return std::unexpected(std::string("datatype_unparsable"));
 }
 
-/// Checks the domain. A complex stream needs a complex datatype, and a real stream a real one.
+/// The domain of sample type `T`. It is `Complex` for `std::complex<float>` and `std::complex<double>` and `Real`
+/// otherwise. A complex stream needs a complex datatype, and a real stream a real one.
 template<typename T>
 [[nodiscard]] constexpr Domain domainOf() noexcept {
     if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {

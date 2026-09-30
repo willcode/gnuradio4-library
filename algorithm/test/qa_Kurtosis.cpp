@@ -135,8 +135,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         // a short cycle of it.
         constexpr double kIncrement = 0.30901699437494745;
 
-        // Constant modulus. `E|z|^4 = A^4` and `(E|z|^2)^2 = A^4`, so `K = 1`. This is the `ka = 1` of the m2m4
-        // signal-to-noise estimator, reached by the same derivation.
+        // Constant modulus. `E|z|^4 = A^4` and `(E|z|^2)^2 = A^4`, so `K = 1`.
         KurtosisAccumulator<Complex> constantModulus;
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
             const double phase = kTwoPi * kIncrement * static_cast<double>(k);
@@ -339,7 +338,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         //
         // Unlike the carrier arm, this arm has a finite-M correction that is not derived anywhere. The correction is
         // largest where the interferer is rarest. At p = 0.1 only about a tenth of the M estimates carry it. The
-        // criterion is therefore convergence, not a pinned tolerance. The deviation is measured at two values of M and
+        // test therefore checks convergence, not a pinned tolerance. The deviation is measured at two values of M and
         // asserted to fall. That shows the closed form to be the limit and the gap to be the correction.
         for (const double p : {0.1, 0.25, 0.5}) {
             constexpr double kSignal = 100.;

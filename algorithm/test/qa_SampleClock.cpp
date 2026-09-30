@@ -48,7 +48,7 @@ constexpr std::uint64_t kTrimReducedDen = 10'000ULL;
 } // namespace
 
 const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
-    // Criterion 1, the integral-period half. At 250 kS/s a sample is exactly 4000 ns. Index and time are then in
+    // An integral period. At 250 kS/s a sample is exactly 4000 ns. Index and time are then in
     // bijection. The round trip is an identity, even at indexes a double index would already have lost.
     "an integral period round-trips exactly past 2^53"_test = [] {
         for (const std::uint64_t index : {kBeyondDouble, kNearTop}) {
@@ -67,7 +67,7 @@ const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
         }
     };
 
-    // Criterion 1, the rational half. 10^9 * rate_den = 10^15 and 10^15 = 22675 * 44100044100 + 31500032500. A sample
+    // A rational period. 10^9 * rate_den = 10^15 and 10^15 = 22675 * 44100044100 + 31500032500. A sample
     // of this clock is therefore 22675 ns and a bit, and almost no sample lands on a whole nanosecond. The map is still
     // exact. A sample used as the anchor reads back with no remainder. Every time in the span falls between the two
     // samples it belongs between.
@@ -144,7 +144,7 @@ const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
         expect(eq(clock.indexOf(-999'999'999LL).index, 750'000ULL)) << "one nanosecond later is still that sample";
     };
 
-    // Criterion 2. The anchor is bookkeeping and not part of the map. A rebase must leave every conversion
+    // The anchor is bookkeeping and not part of the map. A rebase must leave every conversion
     // bit-identical wherever it lands. That covers a rebase inside the span, above it, below it and on a sample whose
     // time is not a whole nanosecond. `anchor_rem` makes that true. A rebase that dropped it would shift the whole span
     // by a nanosecond.

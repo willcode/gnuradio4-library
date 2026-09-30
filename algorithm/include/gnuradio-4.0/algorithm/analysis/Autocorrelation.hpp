@@ -47,8 +47,8 @@
  * 1934). The correlation over lags `0..L` is the inverse transform of the magnitude-squared forward transform of one
  * window. The window is zero-padded. The padding keeps circular wraparound out of every published lag.
  *
- * Windows are averaged after P. D. Welch, *IEEE Trans. Audio Electroacoust.* AU-15 (1967). One point differs, and
- * it is easy to miss. **Overlap does not reduce the scatter of a linear estimator.** The variance of the average is
+ * Windows are averaged after P. D. Welch, *IEEE Trans. Audio Electroacoust.* AU-15 (1967). One point differs from
+ * Welch's spectral use. **Overlap does not reduce the scatter of a linear estimator.** The variance of the average is
  * `sigma^4 / N_distinct` with `N_distinct = N + (K-1)H`, whatever the overlap. Two half-overlapped windows give the
  * same estimate as one window of twice the length, at twice the transform cost. Overlap gives a record every `K*H`
  * samples instead of every `K*N`. Overlap also captures a feature shorter than a window whole instead of split
@@ -429,7 +429,8 @@ struct Autocorrelation {
     /// @brief Forward a stream position to the grid. A record's start index is then absolute.
     void seek(std::uint64_t absolute) noexcept { _segmenter.seek(absolute); }
 
-    /// @brief Set the windows per record. The value changes when a record is published and nothing in the estimate.
+    /// @brief Set the windows per record. The setting changes how many windows make a record and nothing in the
+    /// estimate.
     /// The accumulation in progress and the window grid are kept.
     void setAveraging(std::size_t nAverages) {
         if (nAverages == 0UZ) {

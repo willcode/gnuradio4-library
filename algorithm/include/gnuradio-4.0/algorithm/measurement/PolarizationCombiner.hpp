@@ -149,8 +149,8 @@ struct PolarizationEstimate {
 };
 
 /// @brief The estimate for use before any measurement. Branch @p branch passes through unchanged.
-/// The other branch goes to the orthogonal port. The output is a valid signal. Once branch 0 is the gauge
-/// reference, the later output has no phase discontinuity against it. No phase is made up.
+/// The other branch goes to the orthogonal port. The output is a valid signal. With the default branch 0,
+/// later estimates keep the output phase continuous, because their gauge is branch 0. No phase is made up.
 [[nodiscard]] inline PolarizationEstimate polarizationPassthrough(std::size_t branch = 0UZ) {
     PolarizationEstimate out;
     out.selectedBranch = static_cast<int>(branch);

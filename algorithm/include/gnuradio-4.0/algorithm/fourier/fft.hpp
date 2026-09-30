@@ -16,7 +16,7 @@
 #include <gnuradio-4.0/algorithm/fourier/SimdFFT.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-// vendored, BSD-3-Clause. The include path is the header's installed path. A consumer with the include root on its
+// Vendored, BSD-3-Clause. The include path is the header's installed path. A consumer with the include root on its
 // path resolves it without a second include directory from the CMake target.
 // GCC cannot prove the plan pointers non-null once the mixed-radix codelets are inlined. -Wnull-dereference then
 // fires inside the header. An optimizer pass raises the diagnostic after inlining, and a system include does not
@@ -151,20 +151,20 @@ struct FFT {
     std::vector<ValueType, gr::allocator::Aligned<ValueType>> alignedInputBuffer{};
     std::vector<ValueType, gr::allocator::Aligned<ValueType>> alignedOutputBuffer{};
 
-    /// the one-dimensional PocketFFT plan for this instance's current length. It is built through
+    /// The one-dimensional PocketFFT plan for this instance's current length. It is built through
     /// pocketfft::detail directly and not through the header's c2c()/r2c() drivers. The plan belongs to this
     /// instance, and the header's global plan cache and its mutex are not used.
     using PocketPlan = std::conditional_t<kTransform == Transform::Complex, pocketfft::detail::pocketfft_c<ValueType>, pocketfft::detail::pocketfft_r<ValueType>>;
     std::unique_ptr<PocketPlan> pocketPlan{};
     std::size_t                 pocketPlanBuilds{0UZ}; ///< plans built since construction, one per distinct length and not one per compute()
 
-    /// the four-step split's per-length state. The work buffer holds the first batch's result. The table holds the
+    /// The four-step split's per-length state. The work buffer holds the first batch's result. The table holds the
     /// inter-pass twiddles. Each has N entries. Both are saved and restored with the rest of the per-length state.
     std::vector<TOutput, gr::allocator::Aligned<TOutput>> fourStepWork{};
     std::vector<TOutput, gr::allocator::Aligned<TOutput>> fourStepTwiddles{};
 
     FftBackend backend{FftBackend::Auto};
-    /// deprecated, set backend instead. It is read only when backend is Auto. There, false selects the Native
+    /// Deprecated, set backend instead. It is read only when backend is Auto. There, false selects the Native
     /// path.
     bool useSimdFFT{true};
 
@@ -231,7 +231,7 @@ struct FFT {
     /// the measurement reaches below the bound.
     static constexpr std::size_t kFourStepMinSize = 1UZ << 16UZ;
 
-    /// lengths the four-step can run at. The transform is complex and the length a power of two of at least 4.
+    /// Lengths the four-step can run at. The transform is complex and the length a power of two of at least 4.
     /// Both factors are then powers of two, and neither batch needs a mixed-radix fallback.
     [[nodiscard]] static constexpr bool canFourStep(std::size_t n) noexcept { return kTransform == Transform::Complex && n >= 4UZ && std::has_single_bit(n); }
 
@@ -241,7 +241,7 @@ struct FFT {
         return {n1, n / n1};
     }
 
-    /// true when the square of n's largest prime factor exceeds n. A mixed-radix engine then falls back on a direct
+    /// True when the square of n's largest prime factor exceeds n. A mixed-radix engine then falls back on a direct
     /// O(p^2) codelet for that factor and cannot split it further.
     [[nodiscard]] static constexpr bool largestPrimeFactorExceedsRoot(std::size_t n) noexcept {
         std::size_t remaining = n;
@@ -372,7 +372,7 @@ private:
         }
     }
 
-    /// unnormalized, with a plan scale factor of one. Forward and backward differ only in the flag.
+    /// Unnormalized, with a plan scale factor of one. Forward and backward differ only in the flag.
     static constexpr bool kPocketForward = !kInverse;
 
     void ensurePocketPlan(std::size_t N) {
@@ -467,7 +467,7 @@ private:
         }
     }
 
-    /// the inter-pass multiply, spread over the same threads the two batches use. PocketFFT's threading::thread_map
+    /// The inter-pass multiply, spread over the same threads the two batches use. PocketFFT's threading::thread_map
     /// is a plain parallel map over its own pool. The split starts no threads beyond those the batches start.
     void multiplyFourStepTwiddles(std::size_t nThreads) {
         TOutput* const       data  = fourStepWork.data();
@@ -498,7 +498,7 @@ private:
         const pocketfft::stride_t rowMajor{static_cast<std::ptrdiff_t>(n2 * sizeof(TOutput)), static_cast<std::ptrdiff_t>(sizeof(TOutput))};
         const pocketfft::stride_t transposed{static_cast<std::ptrdiff_t>(sizeof(TOutput)), static_cast<std::ptrdiff_t>(n1 * sizeof(TOutput))};
 
-        // an input that is already a contiguous range of TOutput is the first batch's source as it is. Any other
+        // An input that is already a contiguous range of TOutput is the first batch's source as it is. Any other
         // input is first converted into the output range, and the second batch overwrites it.
         const PocketComplex* source = nullptr;
         if constexpr (requires {
