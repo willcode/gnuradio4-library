@@ -17,22 +17,23 @@ namespace gr::algorithm {
 /**
  * @brief Time-scale modification of a complex stream that keeps every partial coherent.
  *
- * Frames of `frameSize` samples are taken every `analysisHop` samples under a Hann window and
- * resynthesized every `synthesisHop` samples under the same window, so the stream's spectrum is
- * replayed at `analysisHop / synthesisHop` times its original pace with the spectral content
- * untouched. Each bin's synthesis phase advances by the bin's MEASURED frequency — its center plus
- * the principal value of the analysis phase advance's deviation from the center's, divided by the
- * analysis hop — rather than by the center alone, which keeps a partial that sits between bins
- * coherent from frame to frame. The first frame adopts its analysis phase outright, so a
- * stream that begins mid-tone begins coherent instead of at an arbitrary offset.
+ * Frames of `frameSize` samples are taken every `analysisHop` samples under a Hann window. They are
+ * resynthesized every `synthesisHop` samples under the same window. The stream is replayed at
+ * `analysisHop / synthesisHop` times its original pace, and its spectral content is unchanged. Each
+ * bin's synthesis phase advances by the bin's *measured* frequency and not by its center frequency
+ * alone. The measured frequency is the center plus a correction. The correction is the principal
+ * value of the analysis phase advance's deviation from the center's advance, divided by the
+ * analysis hop. A partial that lies between bins then stays coherent from frame to frame. The
+ * first frame takes its analysis phase unchanged. A stream that begins mid-tone therefore begins
+ * coherent and not at an arbitrary phase offset.
  *
- * The spectrum is never modified, so no two bins collide in the output and there is no amplitude
- * ambiguity to resolve: the overlap-add is normalized by the summed squared window actually laid
- * down, which preserves level at any hop pair. Equal hops replay the stream exactly; the identity
- * case is short-circuited to a copy with no latency.
+ * The magnitude spectrum is not modified. No two bins collide in the output, and no amplitude
+ * ambiguity arises. The overlap-add is normalized by the summed squared window actually applied.
+ * This preserves the level at any hop pair. Equal hops replay the stream exactly. The identity case
+ * is a plain copy with no latency.
  *
- * State carries across `process` calls and the call boundaries are not observable in the output:
- * a stream fed whole and the same stream fed one sample at a time produce identical results.
+ * State carries across `process` calls. The call boundaries are not visible in the output. A stream
+ * fed whole and the same stream fed one sample at a time produce identical results.
  */
 struct PhaseVocoder {
     std::size_t frameSize    = 0UZ;
@@ -42,8 +43,8 @@ struct PhaseVocoder {
     /**
      * @brief Size the engine. Throws on a shape the algorithm cannot run.
      *
-     * The frame must be a power of two (the transform's shape) and both hops whole, positive and
-     * no longer than the frame; a hop above the frame would leave gaps no window overlaps.
+     * The frame must be a power of two, the transform's size. Both hops must be positive and no
+     * longer than the frame. A hop above the frame would leave gaps that no window covers.
      */
     void configure(std::size_t frame, std::size_t hopIn, std::size_t hopOut) {
         if (frame == 0UZ || (frame & (frame - 1UZ)) != 0UZ) {
@@ -67,7 +68,7 @@ struct PhaseVocoder {
         reset();
     }
 
-    /// @brief Forget all stream state; the next call primes from nothing, as at construction.
+    /// @brief Clear all stream state. The next call starts empty, as after construction.
     void reset() {
         _pending.clear();
         _lastPhase.assign(frameSize, 0.0);
@@ -80,11 +81,11 @@ struct PhaseVocoder {
     /**
      * @brief Consume a block of input, appending however much output it completes.
      *
-     * Output arrives at `synthesisHop / analysisHop` of the input count in the steady state; a
-     * final partial frame stays pending, since a window that cannot fill resolves no frequency.
+     * In the steady state the output count is `synthesisHop / analysisHop` times the input count.
+     * A final partial frame stays pending. A window that is not full resolves no frequency.
      */
     void process(std::span<const std::complex<float>> in, std::vector<std::complex<float>>& out) {
-        if (analysisHop == synthesisHop) { // identity: replaying at the same pace is the input
+        if (analysisHop == synthesisHop) { // identity, replaying at the same pace gives the input
             out.insert(out.end(), in.begin(), in.end());
             return;
         }
@@ -128,9 +129,8 @@ private:
             _accWindow[i] += _window[i] * _window[i];
         }
 
-        // The leading synthesis hop can receive no further contribution, so it is final;
-        // normalizing by the window energy actually laid down keeps the level independent of
-        // the overlap.
+        // The leading synthesis hop receives no further contribution and is final. Normalizing by
+        // the window energy actually applied keeps the level independent of the overlap.
         for (std::size_t i = 0UZ; i < synthesisHop; ++i) {
             out.push_back(_accWindow[i] > 1e-12f ? _acc[i] / _accWindow[i] : std::complex<float>{0.f, 0.f});
         }
@@ -143,7 +143,7 @@ private:
     /// @brief Wrap to (-pi, pi].
     [[nodiscard]] static double principal(double angle) noexcept { return angle - 2.0 * std::numbers::pi * std::round(angle / (2.0 * std::numbers::pi)); }
 
-    /// @brief Inverse transform through the forward one: conjugate, transform, conjugate, scale.
+    /// @brief Inverse transform as conjugate, forward transform, conjugate and scale.
     void inverse(const std::vector<std::complex<float>>& in, std::vector<std::complex<float>>& out) {
         for (std::size_t i = 0UZ; i < frameSize; ++i) {
             _scratch[i] = std::conj(in[i]);
