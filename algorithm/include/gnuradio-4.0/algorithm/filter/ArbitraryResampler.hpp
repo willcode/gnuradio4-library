@@ -126,7 +126,7 @@ namespace detail {
 /// @brief A prototype cut into arms, and the length of the window every arm reads.
 struct ArmBank {
     std::vector<float> taps;             ///< arm-major, each arm reversed, adjacent arms adjacent
-    std::size_t        windowLength = 0; ///< `B = ceil(N/L)`; an arm stores `B+1`, the extra being the wrap term
+    std::size_t        windowLength = 0; ///< `B = ceil(N/L)`, with `B+1` taps stored per arm for the wrap term
 };
 
 /**
@@ -141,8 +141,8 @@ struct ArmBank {
  * at order 3 reaches `p = L+1` from `p = -1`. Order 0 needs the second arm because it rounds
  * rather than truncates.
  *
- * One bank serves the rate change and the pure delay alike: the two differ in what drives the
- * phase, not in what the phase indexes.
+ * The rate change and the pure delay use the same bank. They differ in what drives the phase and
+ * not in what the phase indexes.
  */
 [[nodiscard]] inline ArmBank polyphaseArmBank(std::span<const float> prototype, std::size_t bankSize, int order) {
     ArmBank out;
@@ -550,8 +550,8 @@ public:
     }
 
 private:
-    /// The bank and the window it reads, both from `detail::polyphaseArmBank` so that this and the
-    /// pure-delay line cut one prototype the same way.
+    /// The bank and the window it reads, both built by `detail::polyphaseArmBank`. The resampler and
+    /// the pure-delay line cut one prototype the same way through it.
     void build(std::span<const float> taps) {
         _prototypeLength      = taps.size();
         detail::ArmBank built = detail::polyphaseArmBank(taps, _bankSize, _order);

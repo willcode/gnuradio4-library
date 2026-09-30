@@ -15,32 +15,32 @@
 /**
  * @brief A delay of a signal by a time that changes while the signal runs, over the arbitrary resampler's own bank.
  *
- * A trajectory does two things to a signal and this is the second: the carrier is shifted, and the envelope is
- * *moved*. Over a ten-minute low-orbit pass at 7 km/s the one-way delay changes by
- * `7000 * 600 / 299792458 = 14.0097 ms` — 672.5 samples at 48 kS/s and 14010 at 1 MS/s. A symbol-timing loop
- * that is not told about that has to track it, and a graph that wants to test whether it can must be able to
- * generate it.
+ * A trajectory shifts the carrier of a signal and *moves* its envelope. This class models the envelope
+ * movement. Over a ten-minute low-orbit pass at 7 km/s the one-way delay changes by
+ * `7000 * 600 / 299792458 = 14.0097 ms`. That is 672.5 samples at 48 kS/s and 14010 samples at 1 MS/s. A
+ * symbol-timing loop that is not given this delay has to track it. Testing that tracking needs a signal that
+ * carries the delay.
  *
- * Everything a fractional delay needs is already in `ArbitraryResampler`, driven by the wrong thing: its read
- * position advances by a fixed `step`, and a scheduled delay's advances by `1 - dtau/dt`. So the **prototype
- * design and the arm blend are shared** — `detail::polyphaseArmBank` cuts the prototype the same way for both
- * and `detail::polyphaseArmBlend` reads it the same way — and only the phase driver differs. Reaching into the
- * resampler to move its phase per sample instead would break exactly the guarantee that kernel spends a section
- * establishing, that its realized ratio is a stated rational which never drifts.
+ * `ArbitraryResampler` already holds the parts a fractional delay needs, with a different phase driver. Its read
+ * position advances by a fixed `step`. The read position of a scheduled delay advances by `1 - dtau/dt`. The
+ * **prototype design and the arm blend are shared**. `detail::polyphaseArmBank` cuts the prototype the same way
+ * for both, and `detail::polyphaseArmBlend` reads it the same way. Only the phase driver differs. Moving the
+ * resampler's phase per sample would break a guarantee the resampler states. Its realized ratio is a stated
+ * rational that does not drift.
  *
- * **The delay is fixed point, `Q32`**, matching `kArbitraryFractionBits`: the whole part selects how far back in
- * history to read and the fraction selects the arm and `mu`. A sample index is never a `double` and the delay is
- * never a `double` after the one conversion that produces it. The bound that conversion carries is derived: the
- * product must fit `std::int64_t`, so the largest delay is `2^63 / 2^32 = 2^31 = 2147483648` samples — 44739 s
- * at 48 kS/s and 2147.5 s at 1 MS/s, four to twelve hours, three orders beyond the 8.339 ms a 2500 km slant
- * range costs. It is a guard, not a limit. The `double` seconds that feed it are far finer than the fixed point
- * they land in: a `double`'s spacing at 1 s is 2.22e-16 s, which even at `fs = 10^9` is 2.2e-7 samples, seven
- * orders below the `2^-32` the representation keeps.
+ * **The delay is fixed point, `Q32`**, the same as `kArbitraryFractionBits`. The whole part selects how far back
+ * in history to read. The fraction selects the arm and `mu`. A sample index is not a `double`. The delay is not a
+ * `double` after the one conversion that produces it. That conversion has a derived bound. The product must fit
+ * `std::int64_t`, so the largest delay is `2^63 / 2^32 = 2^31 = 2147483648` samples. That is 44739 s at 48 kS/s
+ * and 2147.5 s at 1 MS/s, or four to twelve hours. It is three orders of magnitude beyond the 8.339 ms of a
+ * 2500 km slant range. The bound guards against overflow and limits no real use. The `double` seconds at the
+ * input are far finer than the fixed point. The spacing of a `double` at 1 s is 2.22e-16 s. Even at
+ * `fs = 10^9` that is 2.2e-7 samples, seven orders of magnitude below the `2^-32` the representation keeps.
  *
- * **The interpolation-error bound.** For a signal band-limited to `f_max = (1 - rolloff)/2` cycles per sample
- * and arms `1/L` apart, the deviation from an ideal fractional delay is `h/2`, `h^2/8` and `h^4 * 9/384` at
- * orders 0, 1 and 3, with `h = 2*pi*f_max/L` — the Lagrange remainder, and the closed form
- * `arbitraryInterpolationError` already computes. At `rolloff = 0.2`:
+ * **The interpolation-error bound.** Take a signal band-limited to `f_max = (1 - rolloff)/2` cycles per sample
+ * and arms `1/L` apart. The deviation from an ideal fractional delay is `h/2`, `h^2/8` and `h^4 * 9/384` at
+ * orders 0, 1 and 3, with `h = 2*pi*f_max/L`. This is the Lagrange remainder. `arbitraryInterpolationError`
+ * computes the same closed form. At `rolloff = 0.2` the bounds are these.
  *
  * ```
  *    L    q = 0                q = 1                 q = 3
@@ -51,30 +51,31 @@
  *  128    9.818e-3 (-40.2 dB)  4.819e-5 (-86.3 dB)   3.484e-9 (-169.2 dB)
  * ```
  *
- * These bound the *ideal* interpolator; the realized floor is the prototype's own delivered passband ripple,
- * so a bank sized past that point improves nothing unless the attenuation also rises. The default here is
- * `q = 1` at a 60 dB design, hence `L = 32`, which `arbitraryBankSize` reads off.
+ * These values bound the *ideal* interpolator. The realized floor is the passband ripple the prototype
+ * delivers. A larger bank improves nothing past that point unless the attenuation also rises. The default is
+ * `q = 1` at a 60 dB design. `arbitraryBankSize` gives `L = 32` for it.
  *
- * **Why the bound holds under a moving delay.** It is derived for a fixed fractional offset. A moving delay
- * compresses the band by `1 - dtau/dt`, so it applies with `f_max` replaced by `f_max / (1 - dtau/dt)`. Since
- * `dtau/dt = v/c`, at `|v| <= 30 km/s` — an order above any orbital range rate — `|dtau/dt| <= 1.0e-4`, the band
- * changes by at most 0.01 % and the `q = 1` bound by 0.02 %. It is therefore quoted unchanged in that regime.
+ * **The bound also holds under a moving delay.** It is derived for a fixed fractional offset. A moving delay
+ * compresses the band by `1 - dtau/dt`. The bound then applies with `f_max` replaced by `f_max / (1 - dtau/dt)`.
+ * Here `dtau/dt = v/c`. At `|v| <= 30 km/s`, an order of magnitude above any orbital range rate,
+ * `|dtau/dt| <= 1.0e-4`. The band then changes by at most 0.01 %, and the `q = 1` bound by 0.02 %. The bound
+ * is quoted unchanged in this regime.
  *
- * This is the hot path: per output one shift, one multiply, one `llround`-free index and `q+1` dot products of
- * `B+1` taps, or one blended dot product for complex `T`. No allocation, no transcendental, no branch beyond
- * the one that chooses between the history and the caller's own span.
+ * The per-output cost is one shift, one multiply, one index without `llround`, and `q+1` dot products of `B+1`
+ * taps. Complex `T` takes one blended dot product instead. The path has no allocation and no transcendental
+ * function. Its one branch chooses between the history and the caller's span.
  */
 namespace gr::filter {
 
-/// @brief The largest delay `Q32` samples can carry: `2^63 / 2^32`. See the class note for what it is in seconds.
+/// @brief The largest delay `Q32` samples can carry, `2^63 / 2^32`. The file note gives it in seconds.
 inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
 
 /**
  * @brief The prototype for a pure delay over a bank of @p bankSize arms.
  *
- * `designArbitraryResampler` with `minRate = 1`, the design a pure delay takes: the stopband edge is `0.5/L`
- * and the bank neither decimates nor interpolates, it only shifts. Named here so that a caller building a delay
- * line does not have to know that the rate it would otherwise pass is the identity.
+ * This is `designArbitraryResampler` with `minRate = 1`, the design for a pure delay. The stopband edge is
+ * `0.5/L`. The bank neither decimates nor interpolates. It only shifts. The function has its own name. A caller
+ * that builds a delay line need not know that the rate to pass is the identity.
  */
 [[nodiscard]] inline ResamplerDesign designFractionalDelay(std::size_t bankSize, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1) { return designArbitraryResampler(bankSize, 1.0, rolloff, attenuationDb, maxRippleDb); }
 
@@ -90,11 +91,11 @@ inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
 }
 
 /**
- * @brief A span of delays in seconds — as `gr::timing::DelaySchedule::valuesFor` writes them — as `Q32` samples.
+ * @brief A span of delays in seconds converted to `Q32` samples.
  *
- * The one place a delay stops being a `double`. It is a free function rather than a step inside `process` so
- * that the schedule walk and the delay line stay independent of one another: the line takes fixed point from
- * wherever it comes, and a caller with no schedule at all is not made to acquire one.
+ * The delays are in the form `gr::timing::DelaySchedule::valuesFor` writes. This function converts a delay from
+ * `double` to fixed point. It is a free function and not a step inside `process`. The schedule walk and the delay line
+ * stay independent. The line takes fixed point from any source. A caller with no schedule does not need one.
  */
 inline void fractionalDelayQ32(std::span<const double> delaySeconds, double sampleRateHz, std::span<std::uint64_t> out) {
     if (out.size() != delaySeconds.size()) {
@@ -109,20 +110,20 @@ inline void fractionalDelayQ32(std::span<const double> delaySeconds, double samp
 }
 
 /**
- * @brief The variable fractional-delay line: one output per (input sample, delay) pair, phase continuous and chunk independent.
+ * @brief A variable fractional-delay line with one output per (input sample, delay) pair.
  *
- * The line carries the history a delay needs, so the stream it produces is a pure function of the absolute
- * sample index and the delay commanded at it. A caller that hands over one span and a caller that hands over a
- * hundred get the same samples to the bit, which is the property a delay whose value moves has to have and the
- * one a naive ring buffer loses at every call boundary.
+ * The output is phase continuous and does not depend on how the input is split into calls. The line holds the
+ * history a delay needs. Its output is a pure function of the absolute sample index and the delay commanded at
+ * that index. A caller that passes one span and a caller that passes a hundred get the same samples to the bit.
+ * A delay whose value moves needs this property. A naive ring buffer loses it at every call boundary.
  *
- * **The lag, and where the extra sample comes from.** At a commanded delay of zero the output is the input
- * `latencySamples()` behind, which is `1 + groupDelaySamples()`. The group delay is the prototype's own,
- * `(N-1)/(2L)` input samples, stated and not compensated — the Lagrange weights add none of their own, being
- * exact at their nodes. The extra whole sample is the bank's: the wrap arm's first tap reads one input sample
- * past the window's anchor, so the anchor is placed one sample behind the output to keep every read inside the
- * span the caller handed over. Paying that sample makes the stream chunk independent; without it the last
- * output of every chunk would depend on the first sample of the next.
+ * **The lag, and the source of the extra sample.** At a commanded delay of zero the output lags the input by
+ * `latencySamples()`, which is `1 + groupDelaySamples()`. The group delay is the prototype's own, `(N-1)/(2L)`
+ * input samples. It is stated and not compensated. The Lagrange weights add no delay, because they are exact at
+ * their nodes. The extra whole sample comes from the bank. The first tap of the wrap arm reads one input sample
+ * past the window's anchor. The anchor is therefore placed one sample behind the output. Every read then stays
+ * inside the caller's span. That sample makes the output independent of the call split. Without it the last
+ * output of each call would depend on the first sample of the next call.
  */
 template<typename T>
 requires PolyphaseSample<T>
@@ -138,8 +139,8 @@ public:
     /**
      * @brief A bank of @p bankSize arms at interpolation @p order over @p taps, holding history for @p maxWholeDelay samples.
      *
-     * @p order is 0 (nearest arm), 1 (linear) or 3 (cubic Lagrange), the same three the resampler offers and for
-     * the same reason: the even orders put the interpolation nodes off-center for no gain, and the weights above
+     * @p order is 0 (nearest arm), 1 (linear) or 3 (cubic Lagrange). The resampler offers the same three, for
+     * the same reason. The even orders put the interpolation nodes off center for no gain. The weights above
      * order 3 cost more than the extra arms they save.
      */
     FractionalDelayLine(std::size_t bankSize, int order, std::span<const float> taps, std::uint64_t maxWholeDelay = 0ULL) : _bankSize(bankSize), _order(order) {
@@ -156,15 +157,15 @@ public:
         setMaxDelay(maxWholeDelay);
     }
 
-    /// @brief Forget the history: the next `process` starts a new stream on silence.
+    /// @brief Clear the history. The next `process` starts a new stream on silence.
     void reset() { std::ranges::fill(_window, T{}); }
 
     /**
      * @brief Install a new prototype and clear the history.
      *
-     * The window length follows the prototype, so the samples the line was holding no longer line up with the
-     * taps that would read them; carrying them across would put a transient in the stream that no caller could
-     * account for. The reset is the honest cost of a bank rebuild and is stated rather than hidden.
+     * The window length follows the prototype. The held samples then do not line up with the taps that read
+     * them. Keeping them would put an unexplained transient in the stream. A bank rebuild therefore clears the
+     * history, and this function states that.
      */
     void setTaps(std::span<const float> taps) {
         if (taps.empty()) {
@@ -187,11 +188,11 @@ public:
     /**
      * @brief Reach back for delays up to @p maxWholeDelay whole samples, keeping the history already held.
      *
-     * A table that commands a deeper delay than the one before it needs a longer history, and the samples the
-     * line is holding are still the samples that precede the next one: they line up with the same taps, because
-     * the prototype did not change. So the window grows and the held samples move to its end, the older part
-     * reading as the silence that preceded the stream. A request the line already covers is left alone, so a
-     * schedule that alternates between two depths does not thrash its buffer.
+     * A table that commands a deeper delay than the previous one needs a longer history. The held samples still
+     * precede the next sample. They line up with the same taps, because the prototype is unchanged. The window
+     * grows, and the held samples move to its end. The older part reads as silence before the stream. A request
+     * the line already covers changes nothing. A schedule that alternates between two depths therefore does not
+     * reallocate its buffer each time.
      */
     void growMaxDelay(std::uint64_t maxWholeDelay) {
         if (maxWholeDelay <= _maxWholeDelay) {
@@ -212,36 +213,37 @@ public:
     /**
      * @brief The history a delay of @p maxDelayWhole whole samples needs, in samples.
      *
-     * `maxDelayWhole + tapsPerArm + 1`. Bounded, because a schedule clamps at its ends, so the largest delay
-     * over all time is the largest delay in the table. As a number: a 2500 km slant range is 8.339 ms, so at
-     * 1 MS/s the history is 8339 samples plus the taps — about 67 KiB for `std::complex<float>` — and a caller
-     * who wants only the *variation* subtracts a constant from the table and pays for the variation alone.
+     * The value is `maxDelayWhole + tapsPerArm + 1`. It is bounded, because a schedule clamps at its ends. The
+     * largest delay over all time is the largest delay in the table. For example, a 2500 km slant range is
+     * 8.339 ms. At 1 MS/s the history is 8339 samples plus the taps, about 67 KiB for `std::complex<float>`. A
+     * caller that needs only the *variation* subtracts a constant from the table. The history then covers the
+     * variation alone.
      */
     [[nodiscard]] std::size_t historyNeeded(std::uint64_t maxDelayWhole) const noexcept { return static_cast<std::size_t>(maxDelayWhole) + _windowLength + 1UZ; }
 
     [[nodiscard]] std::size_t bankSize() const noexcept { return _bankSize; }
     [[nodiscard]] int         order() const noexcept { return _order; }
-    /// @brief `B = ceil(N/L)`; an arm stores `B+1`, the extra one being the wrap term that is zero below arm `L`.
+    /// @brief `B = ceil(N/L)`. An arm stores `B+1` taps. The extra tap is the wrap term, zero below arm `L`.
     [[nodiscard]] std::size_t tapsPerArm() const noexcept { return _windowLength; }
     /// @brief `N`, the prototype as supplied, before padding to a multiple of `L`.
     [[nodiscard]] std::size_t prototypeLength() const noexcept { return _prototypeLength; }
     /// @brief `(N-1)/(2L)` input samples, the prototype's own, stated and not compensated.
     [[nodiscard]] double groupDelaySamples() const noexcept { return 0.5 * static_cast<double>(_prototypeLength - 1UZ) / static_cast<double>(_bankSize); }
-    /// @brief The output's lag behind the input at a commanded delay of zero: `1 + groupDelaySamples()`.
+    /// @brief The output's lag behind the input at a commanded delay of zero, `1 + groupDelaySamples()`.
     [[nodiscard]] double        latencySamples() const noexcept { return 1. + groupDelaySamples(); }
     [[nodiscard]] std::uint64_t maxDelaySamples() const noexcept { return _maxWholeDelay; }
     [[nodiscard]] std::size_t   historySamples() const noexcept { return _history; }
 
     /**
-     * @brief One output per (input sample, delay) pair: `out[k]` is the input at `k - latency - delayQ32[k]/2^32`.
+     * @brief One output per (input sample, delay) pair, `out[k]` the input at `k - latency - delayQ32[k]/2^32`.
      *
      * @param in        the input samples
      * @param delayQ32  one delay per input sample, in whole samples in the high 32 bits
      * @param out       at least `in.size()` outputs
      *
-     * Refuses a delay whose whole part exceeds the history the line was sized for, rather than reading what is
-     * not there: the check is one pass of compares over the delay span, which is off the dot products the
-     * per-sample cost is actually made of.
+     * Throws for a delay whose whole part exceeds the history the line was sized for. It does not read past
+     * the history. The check is one pass of compares over the delay span. The per-sample cost is in the dot
+     * products, and the check adds little to it.
      */
     void process(std::span<const T> in, std::span<const std::uint64_t> delayQ32, std::span<T> out) {
         if (in.size() != delayQ32.size()) {
@@ -265,8 +267,8 @@ public:
         const std::size_t n       = in.size();
         const std::size_t armStep = _windowLength + 1UZ;
 
-        // The head of `in` copied into the tail of the window, so a read that straddles the boundary between the
-        // history and the caller's span is still one contiguous run of B+1 samples.
+        // The head of `in` is copied into the tail of the window. A read across the boundary between the history
+        // and the caller's span is then still one contiguous run of B+1 samples.
         const std::size_t head = std::min(n, _windowLength);
         std::copy_n(in.begin(), head, _window.begin() + static_cast<std::ptrdiff_t>(_history));
 
@@ -277,9 +279,9 @@ public:
         const std::int64_t       reach   = static_cast<std::int64_t>(_windowLength) - 1;
 
         for (std::size_t k = 0UZ; k < n; ++k) {
-            // The commanded delay, plus the one whole sample the wrap arm's reach costs.
+            // The commanded delay, plus the one whole sample for the reach of the wrap arm.
             const std::int64_t  position = (static_cast<std::int64_t>(k) << kArbitraryFractionBits) - static_cast<std::int64_t>(delayQ32[k]) - static_cast<std::int64_t>(kArbitraryOne);
-            const std::int64_t  anchor   = position >> kArbitraryFractionBits; // arithmetic, so it floors on both sides of zero
+            const std::int64_t  anchor   = position >> kArbitraryFractionBits; // an arithmetic shift, which floors on both sides of zero
             const std::uint64_t frac     = static_cast<std::uint64_t>(position) & kArbitraryMask;
 
             const std::uint64_t armPos = frac * _bankSize;
@@ -292,8 +294,8 @@ public:
             out[k] = detail::polyphaseArmBlend<T>(bank + (arm + 1UZ) * armStep, x, armStep, mu, _order);
         }
 
-        // The history is the last `_history` input samples, whether they came from this call alone or from this
-        // call and what was already held.
+        // The history is the last `_history` input samples. They come from this call alone, or from this call
+        // and the samples already held.
         if (n >= _history) {
             std::copy_n(in.end() - static_cast<std::ptrdiff_t>(_history), _history, _window.begin());
         } else {
