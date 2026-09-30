@@ -16,75 +16,73 @@
 #include <vector>
 
 /**
- * @brief Reassembling a file delivered as chunks in ordinary frames, in bounded memory.
+ * @brief Reassembles a file delivered as chunks in ordinary frames, in bounded memory.
  *
- * Many mission protocols deliver an image, a spectrum sweep or a log as a sequence of chunks carried
- * in whatever frames the link already has, and one engine serves them all under a different header
- * read. This file holds that engine: it is general and protocol-independent, and the per-protocol
- * part is a pure function from a record to a `ChunkDescriptor`. Two general descriptor formats ship —
- * a fixed header carrying a chunk index over a fixed chunk size, and one carrying a byte offset — and
- * a protocol whose header is its own supplies a descriptor directly.
+ * Many mission protocols deliver an image, a spectrum sweep or a log as a sequence of chunks. The chunks
+ * travel in the frames the link already has. One engine serves all such protocols, each with its own
+ * header reader. This file holds that engine. It is general and independent of the protocol. The
+ * per-protocol part is a pure function from a record to a `ChunkDescriptor`. Two general descriptor
+ * formats are provided. One is a fixed header with a chunk index over a fixed chunk size. The other
+ * carries a byte offset. A protocol with its own header format supplies a descriptor directly.
  *
- * **Completion is decided on coverage, never on a write pointer.** An engine that completes a file
- * when its write pointer reaches the declared size is finished the moment the *last* chunk arrives,
- * however many earlier ones are missing, and publishes a file with holes in it as complete. Here a
- * file is complete when every byte of it has been written, and the cost of that is one bitmap.
+ * **Completion is decided on coverage and not on a write pointer.** Suppose an engine completes a file
+ * when its write pointer reaches the declared size. It then finishes when the *last* chunk arrives,
+ * however many earlier chunks are missing. It publishes a file with holes as complete. Here a file is
+ * complete when every byte of it has been written. The cost is one bitmap.
  *
- * **Coverage is a bit per cell for an index and a byte interval for an offset.** One bit says a whole
- * cell is covered, so an index-addressed chunk carrying fewer bytes than the chunk size is admitted
- * only at the file's last index, and a chunk carrying no bytes at all is refused on either path: a
- * cell marked covered by a payload that did not fill it is exactly how a file with a hole comes to
- * look complete. An offset-addressed file is placed by intervals however its chunk size is set,
- * because two of its chunks may share a cell.
+ * **Coverage is a bit per cell for an index and a byte interval for an offset.** One bit marks a whole
+ * cell as covered. An index-addressed chunk with fewer bytes than the chunk size is therefore admitted
+ * only at the file's last index. A chunk with no bytes is refused on both paths. A cell marked covered
+ * by a payload that did not fill it would make a file with a hole look complete. An offset-addressed
+ * file is placed by intervals whatever its chunk size, because two of its chunks may share a cell.
  *
  * **Two declarations, not three.** A declared total size and a declared chunk count each complete a
- * file; a last-chunk flag is not a third criterion but a *declaration* of `total_chunks = index + 1`
- * and goes through the same path with the same conflict rule. Where two declarations disagree, or a
- * second declaration differs from the first, the **first stands** — a later header is not more
- * trustworthy than an earlier one, and letting the later one win would make completion depend on
- * arrival order.
+ * file. A last-chunk flag is not a third criterion. It is a *declaration* of `total_chunks = index + 1`
+ * and takes the same path with the same conflict rule. When two declarations disagree, or a second
+ * declaration differs from the first, the **first stands**. A later header is no more trustworthy than
+ * an earlier one. If the later one won, completion would depend on arrival order.
  *
- * **First-writer-wins on conflicting content.** A chunk whose range is already covered with different
- * bytes is refused and counted; the first write stands. Overwriting would discard a copy that may have
- * been the good one and leave nothing to compare, whereas keeping the first leaves the conflict
- * counted and the file's own integrity accounting as the arbiter. A graph that wants the other policy
- * runs two engines and compares, which it can do precisely because this one does not overwrite.
+ * **The first write wins on conflicting content.** A chunk whose range is already covered with
+ * different bytes is refused and counted. The first write stands. Overwriting would discard a copy that
+ * may have been the good one, and nothing would remain to compare. Keeping the first copy leaves the
+ * conflict counted, and the file's own integrity figures decide. The other policy needs two engines and
+ * a comparison. That works because this engine does not overwrite.
  *
- * **The memory bound is two required settings and one expression.** `max_open_files` and
- * `max_file_bytes` have no defaults and zero is refused for both, because the quantity bounded is not
- * one record but the sum of every file in flight, and the values that size it — an offset, a declared
- * size, a chunk count — all arrive from the air. `peakBytes` states the worst case from the settings
- * themselves, so a graph can state its own. `max_file_bytes` is refused above
- * `2^31 - 1` so that every payload this engine produces fits a record extent by construction.
+ * **Two required settings and one expression bound the memory.** `max_open_files` and `max_file_bytes`
+ * have no defaults, and zero is refused for both. The bounded quantity is the sum over all open files
+ * and not one record. The values that size it are an offset, a declared size and a chunk count. All of
+ * them are received data. `peakBytes` states the worst case from the settings alone. `max_file_bytes`
+ * is refused above `2^31 - 1`. Every payload this engine produces then fits a record extent by
+ * construction.
  *
- * **Eviction counts records and never reads a clock.** A wall-clock timeout makes a graph's output
- * depend on how fast the machine ran it, and the same recording replayed on a slower host would evict
- * different files. Both rules here — least-recently-touched under cap pressure, and untouched for more
- * than `evict_after_records` — are counted in records observed.
+ * **Eviction counts records and reads no clock.** With a wall-clock timeout the output would depend on
+ * the speed of the machine. The same recording replayed on a slower host would evict different files.
+ * Both rules here count records observed. One evicts the least recently touched file under cap
+ * pressure. The other evicts a file untouched for more than `evict_after_records`.
  *
- * **The engine computes no check value of any kind.** Per-chunk integrity is the deframer's and
- * arrives with the record; the file's own value is the AND of every contributing record that stated
- * one and the sum of their corrected and uncorrectable error counts. A whole-file check is a CRC after
- * the engine, with the protocol's own parameter set.
+ * **The engine computes no check value.** Per-chunk integrity arrives with the record from an earlier
+ * stage. The file's own value is the AND over every contributing record that stated one. It also holds
+ * the sums of their corrected and uncorrectable error counts. A whole-file check is a CRC applied after
+ * the engine, with the protocol's own parameters.
  */
 namespace gr::packet {
 
-/// @brief The byte order of a multi-byte header field. Stated rather than assumed: an index of
-/// `0x0100` read the other way is 1, and a receiver reading it wrongly reassembles a scrambled file
-/// that decodes to nothing with no counter moving.
+/// @brief The byte order of a multi-byte header field. It is stated and not assumed. An index of
+/// `0x0100` read in the other order is 1. A receiver that reads it wrongly reassembles a scrambled
+/// file that decodes to nothing, and no counter shows the error.
 enum class ByteOrder { big, little };
 
-/// @brief One header field: where it starts and how wide it is. A width of zero means it is absent.
+/// @brief One header field, its start and its width. A width of zero means the field is absent.
 struct FieldSpec {
     std::size_t offset = 0UZ;
-    std::size_t width  = 0UZ; //!< 1 to 8 bytes; 0 means the format does not carry this field
+    std::size_t width  = 0UZ; //!< 1 to 8 bytes, or 0 when the format does not carry this field
 
     [[nodiscard]] constexpr bool        present() const noexcept { return width != 0UZ; }
     [[nodiscard]] constexpr std::size_t end() const noexcept { return present() ? offset + width : 0UZ; }
     [[nodiscard]] bool                  operator==(const FieldSpec&) const noexcept = default;
 };
 
-/// @brief Where a last-chunk flag lives: a byte position and a bit within it. Bit 8 disables the flag.
+/// @brief The position of a last-chunk flag, a byte and a bit within it. Bit 8 disables the flag.
 struct FlagSpec {
     std::size_t  offset = 0UZ;
     std::uint8_t bit    = 8U;
@@ -94,18 +92,18 @@ struct FlagSpec {
 };
 
 /**
- * @brief What a protocol's format function returns, carrying no protocol knowledge whatever.
+ * @brief The result of a protocol's format function, with no protocol knowledge in it.
  *
- * Position is an index, an offset, or neither. With both present the **offset wins** and the
- * index is carried only for regression detection, because an offset is a statement about the file and
- * an index is a statement about the transmission.
+ * The position is an index, an offset or neither. With both present the **offset wins**. The index is
+ * then kept only to detect a regression. An offset describes the file, and an index describes the
+ * transmission.
  *
- * The payload is a span of the record and not a copy: `payload_begin` and `payload_end` are item
- * indices into the record the format was handed, so a format that strips a link header and a trailer
- * copies nothing. The engine validates them against the record's length before it reads anything, so a
- * format cannot make the engine read out of bounds.
+ * The payload is a span of the record and not a copy. `payload_begin` and `payload_end` are item
+ * indices into the record given to the format. A format that strips a link header and a trailer copies
+ * nothing. The engine checks both indices against the record's length before it reads. A format cannot
+ * make the engine read out of bounds.
  *
- * `declared_check` is carried and never interpreted.
+ * `declared_check` is carried and not interpreted.
  */
 struct ChunkDescriptor {
     std::optional<std::uint64_t> file_id{};
@@ -122,14 +120,14 @@ struct ChunkDescriptor {
 /// @brief A fixed header carrying an identifier and a 0-based chunk index over a fixed chunk size.
 struct IndexedChunkFormat {
     FieldSpec   identifier{};
-    FieldSpec   index{}; //!< required: this is the format's defining field
+    FieldSpec   index{}; //!< required, the format's defining field
     FieldSpec   chunk_count{};
     FieldSpec   total_size{};
     FieldSpec   check_value{};
     FlagSpec    last_flag{};
     std::size_t payload_offset = 0UZ;
     std::size_t payload_trim   = 0UZ;
-    std::size_t chunk_size     = 0UZ; //!< required: an index means nothing without it
+    std::size_t chunk_size     = 0UZ; //!< required, since an index means nothing without it
     ByteOrder   byte_order     = ByteOrder::big;
 };
 
@@ -143,13 +141,13 @@ struct OffsetChunkFormat {
     FlagSpec    last_flag{};
     std::size_t payload_offset = 0UZ;
     std::size_t payload_trim   = 0UZ;
-    std::size_t chunk_size     = 0UZ; //!< optional: only makes the two declarations checkable
+    std::size_t chunk_size     = 0UZ; //!< optional, and used only to check the two declarations against each other
     ByteOrder   byte_order     = ByteOrder::big;
 };
 
 using ChunkFormat = std::variant<IndexedChunkFormat, OffsetChunkFormat>;
 
-/// @brief The reason a configuration was refused, each value naming what is wrong with it.
+/// @brief The reason a configuration was refused. Each value names the fault.
 enum class FormatError { ok, field_too_wide, field_reaches_payload, fields_overlap, index_required, offset_required, chunk_size_required, cannot_complete, open_files_required, file_bytes_required, file_bytes_too_large, gaps_required };
 
 [[nodiscard]] inline constexpr std::string_view formatErrorName(FormatError error) noexcept {
@@ -207,7 +205,7 @@ namespace detail {
 
 /// @brief The header bytes and payload extent a format needs before a record can be read at all.
 ///
-/// Computed without touching the heap, because it runs once per record on the accept path.
+/// It is computed without heap allocation. It runs once per record on the accept path.
 [[nodiscard]] inline constexpr std::size_t minimumRecordItems(const ChunkFormat& format) noexcept {
     const auto fold = [](std::initializer_list<FieldSpec> fields, const FlagSpec& flag, std::size_t payloadOffset, std::size_t payloadTrim) {
         std::size_t minimum = payloadOffset;
@@ -227,11 +225,11 @@ namespace detail {
 }
 
 /**
- * @brief Validate a format's configuration, naming what is wrong rather than returning a bool.
+ * @brief Validate a format's configuration and name the fault. It returns more than a bool.
  *
- * A header field that reaches into the payload is a configuration error and not a runtime one, so it
- * is caught here; so is a format that can never complete a file, because refusing it at configuration
- * time is strictly better than discovering it as a graph that stalls forever.
+ * A header field that reaches into the payload is a configuration error and not a runtime error. It is
+ * caught here. A format that cannot complete a file is caught here too. Refusing it at configuration is
+ * better than a run that stalls with no file completed.
  */
 [[nodiscard]] inline FormatError validateChunkFormat(const ChunkFormat& format) {
     const std::vector<FieldSpec> fields = detail::fieldsOf(format);
@@ -270,8 +268,8 @@ namespace detail {
         if (indexed->chunk_size == 0UZ) {
             return FormatError::chunk_size_required;
         }
-        // A declared size, a declared count, and a last-chunk flag (which declares the count of the index it
-        // rides on) each complete an index-addressed file; any one of them suffices.
+        // A declared size, a declared count and a last-chunk flag each complete an index-addressed file. The
+        // flag declares the count from the index it arrives with. Any one of the three suffices.
         return common(indexed->payload_offset, indexed->last_flag, indexed->chunk_count.present() || indexed->total_size.present() || indexed->last_flag.present());
     }
     const OffsetChunkFormat& offsetFormat = std::get<OffsetChunkFormat>(format);
@@ -279,17 +277,16 @@ namespace detail {
         return FormatError::offset_required;
     }
     // An offset-addressed file is placed by byte intervals and completes on a declared size alone. A chunk
-    // count names cells this format does not address, and a last-chunk flag declares a count in exactly the
-    // same way, so neither can decide completion here and a format carrying no size field never completes.
+    // count names cells this format does not address. A last-chunk flag declares a count in the same way.
+    // Neither can decide completion here. A format with no size field cannot complete a file.
     return common(offsetFormat.payload_offset, offsetFormat.last_flag, offsetFormat.total_size.present());
 }
 
 /**
  * @brief Read one record under a format. `std::nullopt` is a refusal for the caller to count.
  *
- * A record that came off the air must not be able to stop a graph, so a record the format cannot read
- * — shorter than `minimumRecordItems`, or with a payload extent the record does not have — yields
- * nothing rather than an exception.
+ * A received record cannot stop the caller. A record the format cannot read yields no value and no
+ * exception. Such a record is shorter than `minimumRecordItems` or lacks the stated payload extent.
  */
 [[nodiscard]] inline std::optional<ChunkDescriptor> parseChunk(const ChunkFormat& format, std::span<const std::uint8_t> record) {
     if (record.size() < minimumRecordItems(format)) {
@@ -329,9 +326,9 @@ namespace detail {
 
 /// @brief The chunk-index bitmap's size in bytes: `ceil(ceil(bytes / chunk) / 8)`.
 ///
-/// Worked: a 1 MiB file in 224-byte chunks is `ceil(1 048 576 / 224) = 4682` chunks, so the bitmap is
-/// `ceil(4682 / 8) = 586` bytes — 0.056 % of the file's own storage, which is why the bitmap path
-/// exists and why the common case never pays the interval path's insert cost.
+/// For example, a 1 MiB file in 224-byte chunks is `ceil(1 048 576 / 224) = 4682` chunks. The bitmap is
+/// then `ceil(4682 / 8) = 586` bytes, 0.056 % of the file's own storage. The bitmap path exists for that
+/// reason. The common case avoids the insert cost of the interval path.
 [[nodiscard]] inline constexpr std::uint64_t bitmapBytes(std::uint64_t fileBytes, std::uint64_t chunkBytes) noexcept {
     if (chunkBytes == 0ULL) {
         return 0ULL;
@@ -342,17 +339,17 @@ namespace detail {
 
 /// @brief The engine's worst case from its own settings, on the interval path (the bitmap is smaller).
 ///
-/// `max_open_files * (max_file_bytes + 16 * (max_gaps + 1) + 128)`, the 128 being the bookkeeping and
-/// identifier bound. At 8 files, 1 MiB and 1024 gaps that is 8 520 832 bytes, exactly 8.125 MiB.
+/// `max_open_files * (max_file_bytes + 16 * (max_gaps + 1) + 128)`. The 128 bounds the bookkeeping and the
+/// identifier. At 8 files, 1 MiB and 1024 gaps that is 8 520 832 bytes, exactly 8.125 MiB.
 [[nodiscard]] inline constexpr std::uint64_t peakBytes(std::uint64_t maxOpenFiles, std::uint64_t maxFileBytes, std::uint64_t maxGaps) noexcept { return maxOpenFiles * (maxFileBytes + 16ULL * (maxGaps + 1ULL) + 128ULL); }
 
-/// @brief `spec-packet-to-dataset.md`'s extent bound, which `max_file_bytes` may not exceed.
+/// @brief The record extent bound, `2^31 - 1`. `max_file_bytes` may not exceed it.
 inline constexpr std::uint64_t kMaxFileBytes = static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max());
 
 /// @brief The reason a file left the engine before it was released.
 enum class EvictReason { none, cap, stale, superseded, no_position, reconfigure, at_stop, completed };
 
-/// @brief What a completed or evicted file says about itself. Every value is a count, never a verdict.
+/// @brief What a completed or evicted file reports. Every value is a count and not a verdict.
 struct FileFacts {
     std::uint64_t                id                   = 0ULL;
     bool                         anonymous            = false; //!< the format carried no identifier
@@ -374,10 +371,10 @@ class ChunkReassembler {
 public:
     struct Config {
         ChunkFormat   format                       = IndexedChunkFormat{};
-        std::size_t   max_open_files               = 0UZ;  //!< required; zero is refused
-        std::uint64_t max_file_bytes               = 0ULL; //!< required; zero and above `kMaxFileBytes` refused
+        std::size_t   max_open_files               = 0UZ;  //!< required, zero refused
+        std::uint64_t max_file_bytes               = 0ULL; //!< required, zero and values above `kMaxFileBytes` refused
         std::size_t   max_gaps                     = 1024UZ;
-        std::uint64_t evict_after_records          = 0ULL; //!< 0 means cap pressure is the only rule
+        std::uint64_t evict_after_records          = 0ULL; //!< 0 leaves cap pressure as the sole rule
         bool          require_crc_ok               = false;
         bool          new_file_on_index_regression = true;
     };
@@ -417,16 +414,16 @@ public:
         [[nodiscard]] bool operator==(const Counters&) const noexcept = default;
     };
 
-    /// @brief An inadmissible configuration is refused where it is offered, so no later operation has to
-    /// carry a bound that does not exist: a cap of zero open files, for instance, admits no file at all and
-    /// would leave the cap-pressure eviction with nothing to evict and no way to make room.
+    /// @brief Refuses an inadmissible configuration at construction. No later operation then works with a
+    /// bound that does not exist. For example, a cap of zero open files admits no file. Cap-pressure eviction
+    /// would then have nothing to evict and no way to make room.
     explicit ChunkReassembler(Config config) : config_{std::move(config)} {
         if (const FormatError error = validate(config_); error != FormatError::ok) {
             throw std::invalid_argument("gr::packet::ChunkReassembler: " + std::string(formatErrorName(error)));
         }
     }
 
-    /// @brief Checks a configuration, returning `ok` or the error naming what is wrong with it.
+    /// @brief Checks a configuration and returns `ok` or the error that names the fault.
     [[nodiscard]] static FormatError validate(const Config& config) {
         if (config.max_open_files == 0UZ) {
             return FormatError::open_files_required;
@@ -459,8 +456,8 @@ public:
     /**
      * @brief Fold in a descriptor a protocol's own parser produced, with the record it came from.
      *
-     * This is the hook shape: a protocol supplies a pure function from a record to a descriptor and
-     * calls this, and the engine never learns which mission it is serving.
+     * This is the hook for a protocol. The protocol supplies a pure function from a record to a descriptor
+     * and calls this function. The engine does not know which mission it serves.
      */
     ChunkResult pushDescriptor(const ChunkDescriptor& descriptor, std::span<const std::uint8_t> record, bool crcOk = true, bool crcStated = false, std::uint64_t correctedErrors = 0ULL, std::uint64_t uncorrectableErrors = 0ULL) {
         beginRecord();
@@ -491,8 +488,8 @@ public:
         if (placed != RefusalReason::none) {
             countRefusal(placed);
             if (placed == RefusalReason::no_position) {
-                // No later chunk can be placed either, so holding the file open until the cap or the
-                // age rule notices only wastes the bound. This is the one place a refusal evicts.
+                // No later chunk can be placed either. Holding the file open until the cap or the age rule
+                // acts would only waste the bound. This refusal is the one that also evicts.
                 retire(file.id, EvictReason::no_position);
             }
             return ChunkResult{Status::refused, std::nullopt, placed};
@@ -549,7 +546,7 @@ public:
     /// @brief Drop a retired file's storage once the caller has published it.
     void release(std::uint64_t id) { retired_.erase(id); }
 
-    /// @brief End of stream: every still-open file is incomplete by definition and is retired.
+    /// @brief End of stream. Every file still open is incomplete by definition and is retired.
     std::span<const std::uint64_t> finish() {
         departed_.clear();
         std::vector<std::uint64_t> open;
@@ -565,13 +562,13 @@ public:
         return departed_;
     }
 
-    /// @brief Reset for a reconfiguration: every open file is evicted and the state is cleared.
+    /// @brief Reset for a reconfiguration. Every open file is evicted and the state is cleared.
     ///
-    /// A chunk format and a memory bound are properties of a link, so a reconfigured engine must not
-    /// complete a file from bytes that belonged to the previous configuration.
+    /// A chunk format and a memory bound are properties of a link. A reconfigured engine must not complete
+    /// a file from bytes received under the previous configuration.
     std::span<const std::uint64_t> reconfigure(Config config) {
         if (const FormatError error = validate(config); error != FormatError::ok) {
-            // Refused before anything is retired, so a rejected configuration leaves the engine as it was.
+            // Refused before any file is retired. A rejected configuration leaves the engine unchanged.
             throw std::invalid_argument("gr::packet::ChunkReassembler: " + std::string(formatErrorName(error)));
         }
         departed_.clear();
@@ -614,13 +611,13 @@ private:
         FileFacts                 facts{};
         std::vector<std::uint8_t> bytes{};
         std::vector<std::uint8_t> bitmap{};    //!< one bit per chunk index, where a chunk size is configured
-        std::vector<Interval>     intervals{}; //!< sorted, disjoint, half-open; the other path
+        std::vector<Interval>     intervals{}; //!< sorted, disjoint and half-open, for the offset path
         std::uint64_t             highest_index = 0ULL;
         std::uint64_t             bits_set      = 0ULL;
         std::uint64_t             write_pointer = 0ULL;
         std::uint64_t             last_touch    = 0ULL;
         std::uint64_t             next_index    = 0ULL;
-        /// the one index whose payload was shorter than a chunk while no declaration said where the file ends
+        /// the index whose payload was shorter than a chunk, taken while no declaration stated the file's end
         std::optional<std::uint64_t> short_index{};
     };
 
@@ -648,10 +645,10 @@ private:
         }
     }
 
-    /// @brief The bitmap is the indexed format's representation and only its own: an index addresses a fixed
-    /// grid, one cell per bit. An offset addresses bytes, and two chunks of an offset-addressed protocol may
-    /// share a cell however the chunk size is set, so that format is placed by intervals throughout and its
-    /// chunk size only makes the two declarations checkable against each other.
+    /// @brief True for the indexed format, which alone uses the bitmap. An index addresses a fixed grid, one
+    /// cell per bit. An offset addresses bytes. Two chunks of an offset-addressed protocol may share a cell,
+    /// whatever the chunk size. That format is placed by intervals throughout. Its chunk size serves only to
+    /// check the two declarations against each other.
     [[nodiscard]] bool bitmapPath() const noexcept { return std::holds_alternative<IndexedChunkFormat>(config_.format); }
 
     [[nodiscard]] std::size_t chunkSize() const noexcept {
@@ -696,8 +693,8 @@ private:
         }
     }
 
-    /// @brief Least-recently-touched first, so a transmitter that has moved on loses the old file and
-    /// not the new one: refusing the new file would convert a bounded loss into a permanent one.
+    /// @brief Evicts the least recently touched file first. A transmitter that has moved on loses the old
+    /// file and not the new one. Refusing the new file would turn a bounded loss into a permanent one.
     void evictForCap() {
         while (files_.size() >= config_.max_open_files) {
             std::uint64_t oldest      = 0ULL;
@@ -736,8 +733,8 @@ private:
             return openFile(*descriptor.file_id, false, descriptor);
         }
 
-        // No identifier: one current file, and an index that regresses is the only general signal a
-        // transmitter gives that it has started a new one.
+        // No identifier, so there is one current file. A regressing index is the general signal that a
+        // transmitter has started a new file.
         if (current_.has_value()) {
             const auto found = files_.find(*current_);
             if (found != files_.end()) {
@@ -745,9 +742,8 @@ private:
                 if (!regressed) {
                     return found->second;
                 }
-                // A transmitter that restarts its numbering has said as clearly as it is going to that
-                // the previous file is over. It is retired, not counted as an eviction: nothing was
-                // lost to a bound.
+                // A transmitter that restarts its numbering has ended the previous file. That file is
+                // retired and not counted as an eviction. No data was lost to a bound.
                 retire(*current_, EvictReason::superseded);
             }
         }
@@ -758,7 +754,7 @@ private:
 
     [[nodiscard]] std::uint64_t anonymousId() noexcept { return kAnonymousBase + anonymous_next_++; }
 
-    /// @brief Fold a chunk's declarations in. First-wins, and a disagreement is counted, never applied.
+    /// @brief Fold a chunk's declarations in. The first wins. A disagreement is counted and not applied.
     void foldDeclarations(File& file, const ChunkDescriptor& descriptor) {
         const auto declare = [this](std::optional<std::uint64_t>& held, std::optional<std::uint64_t> offered) {
             if (!offered.has_value()) {
@@ -774,8 +770,8 @@ private:
         };
         declare(file.facts.declared_size, descriptor.total_size);
 
-        // A last-chunk flag is a way of declaring `total_chunks = index + 1`, so it goes through the
-        // same path and is subject to the same conflict rule rather than being a third criterion.
+        // A last-chunk flag declares `total_chunks = index + 1`. It takes the same path under the same
+        // conflict rule and is not a third criterion.
         std::optional<std::uint64_t> chunks = descriptor.total_chunks;
         if (descriptor.last_chunk && descriptor.index.has_value()) {
             const std::uint64_t implied = *descriptor.index + 1ULL;
@@ -791,7 +787,7 @@ private:
         }
 
         // With both declared and a chunk size configured, the two agree exactly when the last
-        // chunk is non-empty and no longer than a chunk.
+        // chunk is non-empty and at most one chunk long.
         if (file.facts.declared_size.has_value() && file.facts.declared_chunks.has_value() && chunkSize() != 0UZ) {
             const std::uint64_t chunk = chunkSize();
             const std::uint64_t count = *file.facts.declared_chunks;
@@ -806,7 +802,7 @@ private:
         }
     }
 
-    /// @brief Where this chunk's bytes go. The multiplication is checked before it is performed.
+    /// @brief The position of this chunk's bytes. The multiplication is checked before it is performed.
     [[nodiscard]] RefusalReason resolvePosition(const File& file, const ChunkDescriptor& descriptor, std::size_t length, std::uint64_t& begin) const {
         const std::uint64_t chunk = chunkSize();
         if (descriptor.offset.has_value()) {
@@ -816,13 +812,13 @@ private:
                 return RefusalReason::no_position;
             }
             if (*descriptor.index > config_.max_file_bytes / chunk) {
-                return RefusalReason::over_max_bytes; // tested before the multiply, so no product wraps
+                return RefusalReason::over_max_bytes; // tested before the multiply, and no product wraps
             }
             begin = *descriptor.index * chunk;
         } else {
-            // The degenerate descriptor: placed at the write pointer, and only where the file's
-            // coverage is exactly [0, write_pointer). A running pointer is meaningful only when
-            // nothing has been lost, and this is that condition made visible.
+            // The degenerate descriptor. It is placed at the write pointer, and only when the file's
+            // coverage is exactly [0, write_pointer). A running pointer is meaningful only when no data
+            // has been lost. This check tests that condition.
             if (!contiguous(file)) {
                 return RefusalReason::no_position;
             }
@@ -851,10 +847,10 @@ private:
         return byte < bitmap.size() && ((bitmap[byte] >> (index % 8ULL)) & 1U) != 0U;
     }
 
-    /// @brief The index of the file's last chunk, where a declaration already says where the file ends.
+    /// @brief The index of the file's last chunk, when a declaration already states where the file ends.
     ///
-    /// A chunk count names it directly; a declared size names it through the chunk size. A last-chunk flag
-    /// has already been folded in as a chunk count by the time this is asked.
+    /// A chunk count names it directly. A declared size names it through the chunk size. A last-chunk flag
+    /// has already been folded in as a chunk count before this runs.
     [[nodiscard]] std::optional<std::uint64_t> lastIndex(const File& file) const noexcept {
         const std::uint64_t chunk = chunkSize();
         if (chunk == 0ULL) {
@@ -872,8 +868,8 @@ private:
     RefusalReason writeChunk(File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) {
         const std::uint64_t end = begin + payload.size();
 
-        // A chunk carrying no bytes covers nothing. Admitting it would mark a cell or an interval as
-        // covered over an empty range, which is how a file with a hole in it comes to look complete.
+        // A chunk with no bytes covers nothing. Admitting it would mark a cell or an interval as covered
+        // over an empty range. A file with a hole would then look complete.
         if (payload.empty()) {
             return RefusalReason::bad_payload_span;
         }
@@ -882,16 +878,16 @@ private:
         if (bitmapPath()) {
             index = begin / chunkSize();
             if (payload.size() > chunkSize()) {
-                // The index addresses a fixed grid, so a chunk longer than one cell would overlap the
-                // next cell's bytes and the bitmap could no longer say what is covered.
+                // The index addresses a fixed grid. A chunk longer than one cell would overlap the next
+                // cell's bytes, and the bitmap could not record what is covered.
                 return RefusalReason::bad_payload_span;
             }
             if (payload.size() < chunkSize()) {
-                // One bit says one cell is covered, so a cell filled only in part would report coverage the
-                // file does not have. Only the last chunk of a file is allowed to be short, and where a
-                // declaration already says which index that is, any other index carrying a short payload is
-                // a malformed chunk. Until something says where the file ends, the chunk is admitted and
-                // its index remembered, since only one index can turn out to be the last one.
+                // One bit marks one cell as covered. A cell filled only in part would report coverage the
+                // file does not have. Only the last chunk of a file may be short. When a declaration already
+                // names that index, a short payload at any other index is a malformed chunk. Until a
+                // declaration states where the file ends, the chunk is admitted and its index is kept. Only
+                // one index can turn out to be the last.
                 const std::optional<std::uint64_t> last = lastIndex(file);
                 if (last.has_value()) {
                     if (index != *last) {
@@ -930,11 +926,10 @@ private:
             return RefusalReason::none;
         }
 
-        // The interval path. The intervals are sorted and disjoint, so the run this chunk touches is
-        // two binary searches away and the update is one erase-and-insert: a memmove bounded by
-        // `16 * (max_gaps + 1)` bytes and no allocation once the vector has grown. Merging is
-        // attempted before the cap is tested, so a chunk that fills a hole is never refused for
-        // making one.
+        // The interval path. The intervals are sorted and disjoint. Two binary searches find the run this
+        // chunk touches. The update is one erase-and-insert, a memmove of at most `16 * (max_gaps + 1)`
+        // bytes, with no allocation once the vector has grown. The merge is tried before the cap is
+        // tested. A chunk that fills a hole is therefore not refused as if it made one.
         const auto lower = std::lower_bound(file.intervals.begin(), file.intervals.end(), begin, [](const Interval& interval, std::uint64_t value) { return interval.end < value; });
         const auto upper = std::upper_bound(lower, file.intervals.end(), end, [](std::uint64_t value, const Interval& interval) { return value < interval.begin; });
 
@@ -946,10 +941,10 @@ private:
             return compareCovered(file, begin, payload);
         }
 
-        // Part of this chunk is already held with different bytes in it. The first write stands whether it
-        // covered the whole range or only some of it, so the chunk is refused entire rather than written
-        // around the disagreement: half a chunk placed against a copy that contradicts the other half is a
-        // file no consumer could reason about, and the refusal puts it on the reject port.
+        // Part of this chunk is already held with different bytes. The first write stands, whether it
+        // covered the whole range or only part of it. The whole chunk is refused and not written around
+        // the disagreement. Half a chunk placed beside a copy that contradicts the other half would make
+        // the file inconsistent. The refusal reports the whole chunk instead.
         if (alreadyIn != 0ULL && coveredDiffers(file, begin, payload)) {
             ++file.facts.conflicts;
             return RefusalReason::content_conflict;
@@ -960,7 +955,7 @@ private:
             return RefusalReason::too_fragmented;
         }
 
-        // Write only what was not covered, so a first write always stands.
+        // Write only the uncovered parts. A first write then stands.
         std::uint64_t position = begin;
         for (auto it = lower; it != upper; ++it) {
             if (it->end <= position || it->begin >= end) {
@@ -1003,10 +998,10 @@ private:
         return high > low ? high - low : 0ULL;
     }
 
-    /// @brief True when the parts of this chunk that are already covered disagree with what is held.
+    /// @brief True when the already covered parts of this chunk disagree with the bytes held.
     ///
-    /// Only the covered sub-ranges are compared: the uncovered ones have not been written yet and
-    /// comparing them would report a conflict against zeros on every partially overlapping chunk.
+    /// Only the covered sub-ranges are compared. The uncovered ones hold no data yet. Comparing them would
+    /// report a conflict against zeros for every partly overlapping chunk.
     [[nodiscard]] bool coveredDiffers(const File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) const {
         const std::uint64_t end     = begin + payload.size();
         const auto          differs = [&](std::uint64_t from, std::uint64_t to) {
@@ -1027,7 +1022,7 @@ private:
         return false;
     }
 
-    /// @brief A fully covered range: equal content is a duplicate, different content a conflict.
+    /// @brief Compares a fully covered range. Equal content is a duplicate. Different content is a conflict.
     RefusalReason compareCovered(File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) {
         if (!coveredDiffers(file, begin, payload)) {
             ++counters_.duplicate_chunks;
@@ -1043,8 +1038,9 @@ private:
         }
         if (file.facts.declared_chunks.has_value() && bitmapPath()) {
             const std::uint64_t count = *file.facts.declared_chunks;
-            // A short chunk covers its cell only in part, so a file that took one at an index the count now
-            // says is not the last one has a hole at that index and cannot complete on the count alone.
+            // A short chunk covers its cell only in part. The file may hold a short chunk at an index that
+            // the count now shows is not the last. The file then has a hole at that index. It cannot complete
+            // on the count alone.
             if (file.short_index.has_value() && count != 0ULL && *file.short_index != count - 1ULL) {
                 return false;
             }
