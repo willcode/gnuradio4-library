@@ -14,53 +14,50 @@
 #include <string_view>
 
 /**
- * @brief Instantaneous phase carried as an exact integer cycle count beside a fractional phase, never as a float sum.
+ * @brief Instantaneous phase as an exact integer cycle count beside a fractional phase, not as a float sum.
  *
  * The instantaneous phase of a complex stream is `atan2(im, re)`, wrapped to `[-pi, pi)`. Unwrapping adds back
- * the whole turns. The accumulator that carries those turns decides the accuracy:
+ * the whole turns. The accumulator that holds those turns sets the accuracy.
  *
- * - A **`float`** accumulator holding total radians has a 24-bit significand. At `2*pi*10^9` radians its spacing
- *   is **512 radians — 81.5 whole cycles per representable step**. It stops resolving a milliradian past about
- *   **1335 cycles**, and past roughly `2^23` radians it cannot represent adjacent cycles at all. It does not
- *   degrade; it stops working, early.
- * - A **`double`** accumulator survives further — spacing `9.54e-7 rad` at `2*pi*10^9` radians, and a nanoradian
- *   is lost past about `7.2e5` cycles — but it still degrades monotonically, and every reading's resolution
- *   depends on how long the block has been running.
- * - An **`std::int64_t` cycle count beside a fractional phase** has neither property. The count is exact for as
- *   many turns as it can hold, and the fraction keeps a `float`'s spacing at `pi` (`2.38e-7 rad`) forever,
- *   because it never grows.
+ * - A **`float`** accumulator of total radians has a 24-bit significand. At `2*pi*10^9` radians its spacing is
+ *   **512 radians, or 81.5 whole cycles per representable step**. It stops resolving a milliradian past about
+ *   **1335 cycles**. Past roughly `2^23` radians it cannot represent adjacent cycles at all. It fails early and
+ *   does not degrade gradually.
+ * - A **`double`** accumulator lasts longer. Its spacing at `2*pi*10^9` radians is `9.54e-7 rad`, and it loses a
+ *   nanoradian past about `7.2e5` cycles. It still degrades monotonically. The resolution of every reading then
+ *   depends on how long the accumulator has run.
+ * - An **`std::int64_t` cycle count beside a fractional phase** has neither problem. The count is exact for as many
+ *   turns as it can hold. The fraction keeps a `float`'s spacing at `pi` (`2.38e-7 rad`) for all time, because it
+ *   does not grow.
  *
- * The count's range is not a limit in any physical sense. The fastest a stream can turn and still be unwrappable
- * is `fs/2` cycles per second, so `2^63 - 1` cycles takes **584.55 years at `fs = 10^9` S/s** and 584 554 years
- * at 1 MS/s. The saturating check is carried anyway and counted, on the principle that a claim of
- * unreachability should be cheap to enforce.
+ * The count's range is no physical limit. The fastest a stream can turn and still be unwrapped is `fs/2` cycles per
+ * second. `2^63 - 1` cycles then take **584.55 years at `fs = 10^9` S/s** and 584 554 years at 1 MS/s. The saturating
+ * check is still made and counted. The check costs little and enforces the claim that the limit is unreachable.
  *
- * **The two parts are never summed here**, and that is the decision rather than an omission. Forming
- * `2*pi*cycles + phase` requires a floating type, and choosing one would reintroduce exactly the loss this
- * exists to avoid, at the point where nothing downstream can recover it. A consumer that wants one number
- * computes it in whatever type it can afford, having been handed the parts exactly; a consumer that wants
- * frequency differences the count in integers and the fraction in floats and never touches a large number at
- * all. `unwrappedRadians()` exists as a convenience for the current sample only, with its own spacing stated at
- * the accessor.
+ * **The two parts are not summed here**, by design. Forming `2*pi*cycles + phase` requires a floating type.
+ * Any choice of type would bring back the loss this class avoids, at a point where the loss cannot be recovered.
+ * The class returns both parts exactly. A caller that needs one number forms it in a type of its choice. A caller
+ * that needs frequency differences the count in integers and the fraction in floats, with no large number at
+ * all. `unwrappedRadians()` is a convenience for the current sample only. Its spacing is stated at the accessor.
  *
  * **The precondition, derived.** The unwrap is correct exactly when the true phase advances by less than `pi`
- * per sample, that is when `|f| < fs/2`. Below that bound the wrapped difference determines the turn uniquely;
- * at or above it two different turn counts produce the same wrapped difference and no algorithm operating on the
- * samples alone can choose. That is Nyquist restated for phase, and it is not something this can check — it can
- * only observe that a step came close. `maxStepFraction` and `nSuspectSteps()` carry that observation: an
- * observability hook, not a detector.
+ * per sample, that is when `|f| < fs/2`. Below that bound the wrapped difference determines the turn uniquely.
+ * At or above it, two different turn counts produce the same wrapped difference. No algorithm that sees only the
+ * samples can choose between them. This is the Nyquist limit restated for phase. The class cannot check it. It
+ * can only observe that a step came close to the limit. `maxStepFraction` and `nSuspectSteps()` report that
+ * observation. They are an observability hook and not a detector.
  */
 namespace gr::measurement {
 
 /// Where the count and the reported phase start.
 enum class UnwrapOrigin : std::uint8_t {
     first_sample, ///< `cycles = 0` at the first sample, whose phase is reported as it is
-    zero          ///< additionally subtract the first sample's phase, so the output starts at exactly zero
+    zero          ///< also subtract the first sample's phase, and the output starts at exactly zero
 };
 
 [[nodiscard]] inline constexpr std::string_view unwrapOriginName(UnwrapOrigin origin) noexcept { return origin == UnwrapOrigin::zero ? "zero" : "first_sample"; }
 
-/// @brief The two spellings a setting may carry, and nothing else.
+/// @brief The origin named by a setting's text, `first_sample` or `zero`, or no value for any other text.
 [[nodiscard]] inline constexpr std::optional<UnwrapOrigin> unwrapOriginFrom(std::string_view name) noexcept {
     if (name == "first_sample") {
         return UnwrapOrigin::first_sample;
@@ -84,7 +81,7 @@ public:
         }
     }
 
-    /// @brief Back to the state `start()` leaves: no origin, no count, no counters.
+    /// @brief Return to the state `start()` leaves, with no origin, no count and no counters.
     void reset() noexcept {
         _started  = false;
         _cycles   = 0LL;
@@ -98,15 +95,14 @@ public:
     }
 
     /**
-     * @brief The reset a gap in the stream calls for: the count returns to zero and the origin is re-taken.
+     * @brief The reset for a gap in the stream. The count returns to zero and the origin is taken again.
      *
-     * After a gap the cycle count is no longer the number of turns the underlying signal made, because the turns
-     * during the gap were not seen. Continuing it would be a number that looks exact and is wrong. Resetting
-     * makes the discontinuity visible as a step to zero, and it is counted. A caller who would rather keep a
-     * running count through gaps and account for them elsewhere simply does not call this, and the count's
-     * meaning is then the caller's.
+     * After a gap the cycle count is not the number of turns the signal made. The turns during the gap
+     * were not seen. A continued count would look exact and be wrong. The reset shows the discontinuity as a
+     * step to zero, and the step is counted. A caller that keeps a running count through gaps does not call
+     * this function. The meaning of the count is then the caller's responsibility.
      *
-     * Unlike `reset()` the counters are kept, because they are the record of what the stream did.
+     * Unlike `reset()`, this keeps the counters. They record what the stream did.
      */
     void markDiscontinuity() noexcept {
         _started = false;
@@ -159,8 +155,8 @@ public:
     [[nodiscard]] std::int64_t cycles() const noexcept { return _cycles; }
     [[nodiscard]] float        phase() const noexcept { return _phase; }
 
-    /// @brief `2*pi*cycles + phase` for the current sample only, as a convenience and not as the contract: its
-    /// spacing is `9.54e-7 rad` at `10^9` cycles, which is precisely why the two parts travel separately.
+    /// @brief `2*pi*cycles + phase` for the current sample only, as a convenience outside the contract. Its
+    /// spacing is `9.54e-7 rad` at `10^9` cycles. That loss is the reason the two parts are kept separate.
     [[nodiscard]] double unwrappedRadians() const noexcept { return kTwoPi * static_cast<double>(_cycles) + static_cast<double>(_phase); }
 
     [[nodiscard]] bool                         started() const noexcept { return _started; }

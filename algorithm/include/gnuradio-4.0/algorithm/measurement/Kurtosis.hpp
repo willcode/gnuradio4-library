@@ -12,41 +12,41 @@
 #include <vector>
 
 /**
- * @brief The normalized fourth moment, over a stream and over a run of spectra, with its bias and its spread in closed form.
+ * @brief The normalized fourth moment of a stream and of a run of spectra, with its bias and spread in closed form.
  *
- * Kurtosis is the statistic that separates noise from structure, and spectral kurtosis is the same statistic per
- * frequency bin across a run of spectra, which is how a pulsed or bursty interferer is found without knowing
- * what it is. Both are here because they are one piece of arithmetic and a second convention for it would be a
- * silent disagreement.
+ * Kurtosis separates noise from structure. Spectral kurtosis is the same statistic per frequency bin across a run
+ * of spectra. It finds a pulsed or bursty interferer without knowing what the interferer is. Both statistics are
+ * in this file because they share one piece of arithmetic. A second convention for it could disagree without
+ * any error.
  *
- * **The normalization, stated once.** For a stream `x` with `m2 = mean|x|^2` and `m4 = mean|x|^4`,
+ * **The normalization.** For a stream `x` with `m2 = mean|x|^2` and `m4 = mean|x|^4`,
  *
  * ```
  * K = m4 / m2^2
  * ```
  *
- * `K` is dimensionless and scale free: replacing `x` by `a*x` multiplies both terms by `|a|^4`. This is the
- * quantity the tree's `m2m4` signal-to-noise estimator already calls `ka` and `kn`, and nothing here changes it.
- * The **excess** is `K` minus the value a Gaussian of the same domain takes, so that a Gaussian reads zero: 3 for
- * real input and 2 for complex, and both are derived rather than quoted.
+ * `K` is dimensionless and independent of scale. Replacing `x` by `a*x` multiplies both terms by `|a|^4`. The
+ * `m2m4` signal-to-noise estimator uses the same quantity under the names `ka` and `kn`. The **excess** is `K`
+ * minus the value for a Gaussian of the same domain. A Gaussian then reads zero. That value is 3 for real input
+ * and 2 for complex input. Both values are derived below.
  *
- * - Real. For `x ~ N(0, s^2)`, `E[x^2] = s^2` and `E[x^4] = 3 s^4`, so `K = 3`.
- * - Complex, circular. For `z = u + jv` with `u, v ~ N(0, s^2/2)` independent — the tree's noise convention,
- *   `E|z|^2 = s^2` — the quantity `|z|^2` is **exponential** with mean `s^2`. An exponential's second moment is
- *   twice its mean squared, so `E|z|^4 = 2 s^4` and `K = 2`. The factor of two, not three, is the whole of the
- *   difference, and it comes from `|z|^2` being a sum of two squared normals rather than one.
+ * - Real. For `x ~ N(0, s^2)`, `E[x^2] = s^2` and `E[x^4] = 3 s^4`. Then `K = 3`.
+ * - Complex, circular. Take `z = u + jv` with `u, v ~ N(0, s^2/2)` independent, so `E|z|^2 = s^2`. This is
+ *   the noise convention used here. The quantity `|z|^2` is then **exponential** with mean `s^2`. The second
+ *   moment of an exponential is twice its mean squared. Then `E|z|^4 = 2 s^4` and `K = 2`. The factor of two in
+ *   place of three is the entire difference. It arises because `|z|^2` is a sum of two squared normals and not one.
  * - Constant modulus. `|z| = A` gives `K = 1` and an excess of `-1`.
- * - Two equal complex tones. `|z|^2 = 2 + 2*cos(D)` with `D` uniform over a long window, so `E|z|^2 = 2` and
- *   `E|z|^4 = 6`: `K = 3/2` and the excess is exactly `-0.5`.
- * - A real sinusoid. `m4 = 3A^4/8` and `m2 = A^2/2`, so `K = 3/2` and the excess is exactly `-1.5`.
+ * - Two equal complex tones. `|z|^2 = 2 + 2*cos(D)` with `D` uniform over a long window. Then `E|z|^2 = 2` and
+ *   `E|z|^4 = 6`. `K = 3/2`, and the excess is exactly `-0.5`.
+ * - A real sinusoid. `m4 = 3A^4/8` and `m2 = A^2/2`. Then `K = 3/2`, and the excess is exactly `-1.5`.
  *
- * Both structured values are negative and the impulsive ones are positive: bounded structure drives the
- * normalized fourth moment *down*, impulsive structure drives it *up*, and that sign is the discriminant the
- * statistic exists for.
+ * The structured values are negative, and the impulsive values are positive. Bounded structure drives the
+ * normalized fourth moment *down*. Impulsive structure drives it *up*. The sign of the excess is the
+ * discriminant the statistic provides.
  *
  * **The estimator's bias and spread, in closed form.** The plug-in estimator `m4_hat/m2_hat^2` is biased low.
- * By the delta method on `u = |z|^2` exponential of mean `mu`, with `E[u^2]=2mu^2`, `E[u^3]=6mu^3` and
- * `E[u^4]=24mu^4`, writing `A = mean(u^2)` and `B = mean(u)`:
+ * Apply the delta method to `u = |z|^2`, exponential with mean `mu`. Then `E[u^2]=2mu^2`, `E[u^3]=6mu^3` and
+ * `E[u^4]=24mu^4`. Write `A = mean(u^2)` and `B = mean(u)`.
  *
  * ```
  * Var(A) = 20 mu^4 / N     Var(B) = mu^2 / N     Cov(A,B) = 4 mu^3 / N
@@ -54,18 +54,17 @@
  * Var(A/B^2) ~ 20/N + 16/N - 32/N = 4/N
  * ```
  *
- * so the complex excess is biased by `-2/N` and its standard deviation is `2/sqrt(N)`. The same construction on
- * the real Gaussian gives `-6/N` and the classical `24/N`, a standard deviation of `4.899/sqrt(N)`. These two
- * numbers are the envelope every kurtosis criterion is written against, and they are why a QA case asserts a
- * band rather than a value.
+ * The complex excess is therefore biased by `-2/N`, and its standard deviation is `2/sqrt(N)`. The same
+ * construction on the real Gaussian gives a bias of `-6/N` and the classical variance `24/N`. That is a standard
+ * deviation of `4.899/sqrt(N)`. A measured excess falls in a band set by these two numbers, not at one value.
  *
- * There is no `unbiased` mode. The bias is `O(1/N)` and known in closed form for both domains, so a caller who
- * needs it corrects from `kurtosisBias`; a setting that silently switched between two estimators would make two
- * estimators with one name, and there is no standard unbiased form for the complex case to switch to.
+ * There is no `unbiased` mode. The bias is `O(1/N)` and known in closed form for both domains. A caller that
+ * needs an unbiased value corrects it with `kurtosisBias`. A setting that switched between two estimators would
+ * give two estimators one name. The complex case also has no standard unbiased form.
  */
 namespace gr::measurement {
 
-/// The four sample types the moments are defined over: the two real domains and the two complex ones.
+/// The four sample types the moments are defined over, two real and two complex.
 template<typename T>
 concept MomentSample = std::same_as<T, float> || std::same_as<T, double> || std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>;
 
@@ -83,31 +82,31 @@ struct MomentDomain<std::complex<F>> {
 
 } // namespace detail
 
-/// @brief What a Gaussian of the given domain reads on `m4/m2^2`: 3 real, 2 complex, both derived in the header note.
+/// @brief The value of `m4/m2^2` for a Gaussian of the given domain, 3 real and 2 complex, derived in the file note.
 [[nodiscard]] constexpr double gaussianFourthMoment(bool complexDomain) noexcept { return complexDomain ? 2. : 3.; }
 
-/// @brief The plug-in estimator's bias on the excess over `n` samples: `-2/n` complex, `-6/n` real.
+/// @brief The plug-in estimator's bias on the excess over `n` samples, `-2/n` complex and `-6/n` real.
 [[nodiscard]] constexpr double kurtosisBias(std::size_t n, bool complexDomain) noexcept { return n == 0UZ ? 0. : -(complexDomain ? 2. : 6.) / static_cast<double>(n); }
 
-/// @brief The estimator's variance over `n` samples: `4/n` complex, `24/n` real.
+/// @brief The estimator's variance over `n` samples, `4/n` complex and `24/n` real.
 [[nodiscard]] constexpr double kurtosisVariance(std::size_t n, bool complexDomain) noexcept { return n == 0UZ ? 0. : (complexDomain ? 4. : 24.) / static_cast<double>(n); }
 
-/// @brief The standard deviation of one window's reading: `2/sqrt(n)` complex, `4.899/sqrt(n)` real.
+/// @brief The standard deviation of one window's reading, `2/sqrt(n)` complex and `4.899/sqrt(n)` real.
 [[nodiscard]] inline double kurtosisSpread(std::size_t n, bool complexDomain) noexcept { return std::sqrt(kurtosisVariance(n, complexDomain)); }
 
 /**
  * @brief `n`, `sum|x|^2` and `sum|x|^4` in `double`, and the three figures they make.
  *
- * A value type and nothing more: the arithmetic has exactly one home and a block over it is thin.
+ * A plain value type. It holds the arithmetic and no stream handling.
  *
- * A plain sum in `double`, with the bound derived rather than assumed. The relative error of a naive sum of `N`
- * non-negative terms is at most `N * eps` with `eps = 2^-52 = 2.22e-16`, so at a window of `2^24` samples it is
- * `3.7e-9` — nine orders below the `2/sqrt(N) = 2.4e-4` spread of the estimate itself at that window. Kahan
- * summation would be measuring the adder rather than the signal.
+ * The sums are plain sums in `double`, and their error bound is derived. The relative error of a naive sum of
+ * `N` non-negative terms is at most `N * eps`, with `eps = 2^-52 = 2.22e-16`. At a window of `2^24` samples that
+ * is `3.7e-9`. The spread of the estimate at that window is `2/sqrt(N) = 2.4e-4`, nine orders of magnitude
+ * larger. Kahan summation would improve the adder and not the measurement.
  *
- * A window whose `sum|x|^2` is exactly zero has no defined ratio, and this reports `degenerate()` rather than a
- * NaN or a guess. The test is exact equality with zero and not an epsilon, because there is no defensible
- * epsilon and a chosen one would be a number without a derivation.
+ * A window whose `sum|x|^2` is exactly zero has no defined ratio. The type reports `degenerate()` for it, and
+ * no NaN or estimate. The test is exact equality with zero and not an epsilon. No epsilon could be derived, and
+ * a chosen one would be an arbitrary number.
  */
 template<MomentSample T>
 class KurtosisAccumulator {
@@ -146,13 +145,13 @@ public:
     [[nodiscard]] constexpr bool        degenerate() const noexcept { return _n == 0UZ || _m2 == 0.; }
     [[nodiscard]] constexpr double      meanPower() const noexcept { return _n == 0UZ ? 0. : _m2 / static_cast<double>(_n); }
 
-    /// @brief `m4/m2^2`, and `0` on a degenerate window rather than a NaN a consumer would have to test for.
+    /// @brief `m4/m2^2`, or `0` on a degenerate window in place of a NaN.
     [[nodiscard]] constexpr double normalized() const noexcept { return degenerate() ? 0. : static_cast<double>(_n) * _m4 / (_m2 * _m2); }
 
-    /// @brief `normalized()` less the Gaussian reference for this domain, so that a Gaussian reads zero.
+    /// @brief `normalized()` less the Gaussian reference for this domain. A Gaussian reads zero.
     [[nodiscard]] constexpr double excess() const noexcept { return degenerate() ? 0. : normalized() - gaussianFourthMoment(kComplexDomain); }
 
-    /// @brief This window's own bias and spread, from the closed forms, so a consumer never re-derives them.
+    /// @brief This window's own bias and spread, from the closed forms.
     [[nodiscard]] constexpr double bias() const noexcept { return kurtosisBias(_n, kComplexDomain); }
     [[nodiscard]] double           spread() const noexcept { return kurtosisSpread(_n, kComplexDomain); }
 
@@ -174,7 +173,7 @@ private:
 };
 
 /**
- * @brief Spectral kurtosis over `M` independent estimates of one bin, and the two figures that make it assertable.
+ * @brief Spectral kurtosis over `M` independent estimates of one bin.
  *
  * With `u_k` the bin's power in estimate `k`, `S1 = sum u_k` and `S2 = sum u_k^2`,
  *
@@ -182,17 +181,17 @@ private:
  * SK = ((M*d + 1) / (M - 1)) * ( M * S2 / S1^2 - 1 )
  * ```
  *
- * with `d` the shape parameter: `d = 1` for a single periodogram per estimate, `d = n` when each estimate is
- * already the mean of `n` periodograms. The normalization is derived, not taken. For `u_k` i.i.d. Gamma of shape
- * `d`, the normalized vector `u_k/S1` is Dirichlet with all parameters `d` and **independent of `S1`**, so with
- * `Q = S2/S1^2` the Dirichlet moment `E[w^2] = d(d+1)/(Md(Md+1))` gives
+ * with `d` the shape parameter. `d = 1` for a single periodogram per estimate. `d = n` when each estimate is
+ * already the mean of `n` periodograms. The normalization is derived here. For `u_k` i.i.d. Gamma of shape `d`,
+ * the normalized vector `u_k/S1` is Dirichlet with all parameters `d`. It is **independent of `S1`**. With
+ * `Q = S2/S1^2`, the Dirichlet moment `E[w^2] = d(d+1)/(Md(Md+1))` gives
  *
  * ```
  * E[Q] = (d+1)/(Md+1)          E[M*Q - 1] = (M - 1)/(Md + 1)
  * ```
  *
- * and the leading factor is exactly the reciprocal of that: **`E[SK] = 1` exactly**, at every `M` and every `d`,
- * not asymptotically. That exactness makes the criterion assertable rather than approximate.
+ * The leading factor is exactly the reciprocal of that. **`E[SK] = 1` exactly**, at every `M` and every `d`, and
+ * not only asymptotically. The expected value on noise is therefore exact and not approximate.
  */
 [[nodiscard]] inline double spectralKurtosis(double s1, double s2, std::size_t m, double shape) noexcept {
     if (!(s1 > 0.) || m < 2UZ) {
@@ -208,9 +207,8 @@ private:
 /**
  * @brief `Var(SK) = 2 M^2 d (d+1) / ((M-1)(Md+2)(Md+3))`, from the same Dirichlet moments.
  *
- * It tends to `2(d+1)/(dM)`, and at `d = 1` it is `4M^2/((M-1)(M+2)(M+3))`, approaching `4/M`. Carrying it
- * beside a spectral-kurtosis record lets a downstream threshold be set in standard deviations without the
- * consumer re-deriving it.
+ * It tends to `2(d+1)/(dM)`. At `d = 1` it is `4M^2/((M-1)(M+2)(M+3))`, which approaches `4/M`. With the variance
+ * beside a spectral-kurtosis record, a threshold can be set in standard deviations without a new derivation.
  */
 [[nodiscard]] inline double spectralKurtosisVariance(std::size_t m, double shape) noexcept {
     if (m < 2UZ) {
@@ -225,12 +223,12 @@ private:
 [[nodiscard]] inline double spectralKurtosisSpread(std::size_t m, double shape) noexcept { return std::sqrt(spectralKurtosisVariance(m, shape)); }
 
 /**
- * @brief What spectral kurtosis reads on a carrier in noise at bin signal-to-noise ratio @p rho: `(2*rho + 1)/(rho + 1)^2`.
+ * @brief Spectral kurtosis of a carrier in noise at bin signal-to-noise ratio @p rho, `(2*rho + 1)/(rho + 1)^2`.
  *
- * `u = |A + n|^2` has `E[u] = S + N0` and `E[u^2] = S^2 + 4 S N0 + 2 N0^2`, so the large-`M` limit of `SK` is
- * `E[u^2]/E[u]^2 - 1`, which reduces to the expression above. It runs from 1 at `rho = 0` — noise — down through
- * 0.75, 0.556, 0.174 and 0.0197 at `rho = 1, 2, 10, 100` and to 0 for a noiseless tone, which is the other side
- * of the discriminant from the values above 1 an intermittent interferer produces.
+ * `u = |A + n|^2` has `E[u] = S + N0` and `E[u^2] = S^2 + 4 S N0 + 2 N0^2`. The large-`M` limit of `SK` is
+ * `E[u^2]/E[u]^2 - 1`, which reduces to the expression above. It is 1 at `rho = 0`, which is noise alone. It
+ * falls through 0.75, 0.556, 0.174 and 0.0197 at `rho = 1, 2, 10, 100`. It reaches 0 for a noiseless tone. An
+ * intermittent interferer gives values above 1, on the other side of the discriminant.
  */
 [[nodiscard]] constexpr double spectralKurtosisCw(double rho) noexcept { return (2. * rho + 1.) / ((rho + 1.) * (rho + 1.)); }
 
@@ -238,26 +236,26 @@ private:
 enum class SpectrumResponse : std::uint8_t {
     accepted,      ///< folded in
     wrongBinCount, ///< a different bin count from the accumulation in progress
-    negativeBin    ///< a power that is not a power; nothing was folded in
+    negativeBin    ///< a negative power, and nothing was folded in
 };
 
 /**
  * @brief `S1` and `S2` per bin over a run of spectra, and the per-bin statistic they make.
  *
- * Two `double` vectors and a count. Per input record one add and one multiply-add per bin, and at the end one
- * evaluation per bin — the whole cost of finding an intermittent interferer without knowing what it is.
+ * The state is two `double` vectors and a count. Each input record costs one add and one multiply-add per bin.
+ * The final evaluation costs one evaluation per bin. That is the entire cost of finding an intermittent
+ * interferer without knowing what it is.
  *
- * **The scale cancels.** `SK` is homogeneous of degree zero in `u`: replacing `u_k` by `a*u_k` leaves
- * `M*S2/S1^2` unchanged. So a linear power-density spectrum can be consumed directly and no calibration
- * argument is needed at all — the window's equivalent noise bandwidth, the full-scale reference and the
- * `1/(fs * sum(w^2))` factor are one positive scalar per bin and every one of them divides out. Against a
- * spectrum already converted to decibels the cancellation would not exist and the conversion would have to be
- * inverted first.
+ * **The scale cancels.** `SK` is homogeneous of degree zero in `u`. Replacing `u_k` by `a*u_k` leaves
+ * `M*S2/S1^2` unchanged. A linear power-density spectrum can therefore be used directly, with no calibration.
+ * The window's equivalent noise bandwidth, the full-scale reference and the `1/(fs * sum(w^2))` factor form one
+ * positive scalar per bin. Each of them divides out. A spectrum in decibels does not cancel this way. The
+ * conversion to decibels would have to be inverted first.
  *
- * **Independence is a precondition and this cannot check it.** The derivation requires the `M` spectra to be
- * independent, which overlapping Welch segments are not: at 50 % overlap consecutive periodograms share half
- * their samples, `S1`'s variance falls and `E[SK]` is biased. A producer's overlap is metadata a block reads,
- * not something the arithmetic can see, so it is stated here and refused there.
+ * **Independence is a precondition, and this class cannot check it.** The derivation requires the `M` spectra
+ * to be independent. Overlapping Welch segments are not independent. At 50 % overlap consecutive periodograms
+ * share half their samples. The variance of `S1` then falls, and `E[SK]` is biased. The arithmetic cannot see a
+ * producer's overlap. The caller must refuse overlapped spectra.
  */
 class SpectralKurtosisAccumulator {
 public:
@@ -277,7 +275,7 @@ public:
         _m = 0UZ;
     }
 
-    /// @brief Fold one spectral estimate in, leaving the accumulation untouched where the record cannot be used.
+    /// @brief Fold one spectral estimate in. A record that cannot be used leaves the accumulation unchanged.
     SpectrumResponse accumulate(std::span<const float> spectrum) noexcept {
         if (spectrum.size() != _s1.size()) {
             ++_refused;
@@ -299,11 +297,11 @@ public:
     }
 
     /**
-     * @brief The per-bin statistic at shape @p shape, and how many bins had no signal at all to divide by.
+     * @brief The per-bin statistic at shape @p shape, and the count of bins with no signal to divide by.
      *
-     * A bin whose `S1` is exactly zero has no defined `SK` and is written as zero and counted. One dead bin is a
-     * property of the signal rather than of the record, so a consumer reads the count rather than a flag on the
-     * whole spectrum.
+     * A bin whose `S1` is exactly zero has no defined `SK`. It is written as zero and counted. One dead bin is a
+     * property of the signal and not of the record. The function therefore returns a count and sets no flag on
+     * the whole spectrum.
      */
     [[nodiscard]] std::size_t evaluate(double shape, std::span<double> out) const {
         if (out.size() != _s1.size()) {
