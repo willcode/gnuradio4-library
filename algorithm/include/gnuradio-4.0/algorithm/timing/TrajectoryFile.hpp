@@ -23,10 +23,10 @@
 #include <gnuradio-4.0/algorithm/timing/FrequencySchedule.hpp>
 
 /**
- * @brief The version-1 trajectory table: a text file of knots, and the two schedules it turns into.
+ * @brief The version-1 trajectory table, a text file of knots, and the two schedules made from it.
  *
- * A pass is hundreds to thousands of knots. Paired vector settings are the right primitive and the wrong user
- * interface, so a trajectory arrives from whatever propagated it as a file, and the file says what it is:
+ * A pass has hundreds to thousands of knots. Paired vector settings are the right primitive and the wrong user
+ * interface. A trajectory therefore arrives from its propagator as a file, and the file states what it is.
  *
  * ```
  * #!gr4-trajectory 1
@@ -38,36 +38,35 @@
  * 2026-09-02T10:00:20.5Z        2360000.0  -6900.0
  * ```
  *
- * The version is in-band, on the first line, and nothing else may occupy it. The `#!` prefix makes the file
- * self-identifying to `file(1)` and to a human who opened it in the wrong directory; the integer after the
- * space is the **format** version, and a reader built for version 1 refuses any other value by number rather
- * than guessing. A later version that only adds optional headers still bumps it, because a reader that
- * silently ignores an unknown header is a reader that silently ignores the one that mattered.
+ * The version is in-band, on the first line, and that line holds only the version. The `#!` prefix identifies
+ * the file to `file(1)` and to a person who opens it by mistake. The integer after the space is the **format**
+ * version. A reader built for version 1 refuses any other value by number and does not guess. A later version
+ * that only adds optional headers still increments it. A reader that ignored unknown headers would also ignore
+ * the one that mattered, without a sign.
  *
- * Every refusal names the line it happened on, because the line number is the only part of a parse failure an
- * operator can act on. There are twenty-six of them and each is a QA case.
+ * Every refusal names its line. The line number is the part of a parse failure an operator can act on. There
+ * are twenty-six refusals.
  *
- * **The loader never differentiates and never integrates**, and that is a derivation rather than a policy.
- * Both schedules are piecewise linear and therefore continuous; the derivative of a continuous piecewise-linear
- * function is piecewise *constant* with a jump at every knot, and the integral is piecewise *quadratic*.
- * Neither is in the class `PiecewiseLinearSchedule` represents, so either conversion would have to
- * approximate — and the approximation is not small. Differentiating a range table sampled every 20 s across a
- * pass whose range rate swings +/-7 km/s mis-states the slope by up to half a segment's change in it, which at
- * 437 MHz is tens of hertz: large enough to break a narrow carrier loop and small enough that nobody would
- * notice it was invented. So the file states what it states, the loader converts units and nothing else, and a
- * caller who wants both schedules supplies both columns.
+ * **The loader does not differentiate or integrate**, and that follows from the math. Both schedules are
+ * piecewise linear and therefore continuous. The derivative of a continuous piecewise-linear function is
+ * piecewise *constant*, with a jump at every knot. The integral is piecewise *quadratic*. Neither fits the
+ * class `PiecewiseLinearSchedule` represents. Either conversion would have to approximate, and the error is not
+ * small. Take a range table sampled every 20 s across a pass whose range rate swings +/-7 km/s. Its derivative
+ * misstates the slope by up to half the slope's change over a segment. At 437 MHz that is tens of hertz. The
+ * error is large enough to break a narrow carrier loop and too small to notice. The loader therefore only
+ * converts units. A caller that needs both schedules supplies both columns.
  *
- * The loader is the one component of this group that is **not** hot path: it runs once, at staging, off the
- * sample path, and its cost is bounded by the file's size — one pass over the text with no backtracking and no
- * allocation per line beyond the vectors it is filling.
+ * The loader is **not** on the hot path. It runs once, outside the sample path. Its cost is bounded by the
+ * file's size. It makes one pass over the text with no backtracking. It allocates nothing per line beyond the
+ * vectors it fills.
  */
 namespace gr::timing {
 
 /**
- * @brief What one trajectory file carried, in the two forms a graph consumes.
+ * @brief The contents of one trajectory file, as a frequency schedule and a delay schedule.
  *
- * A schedule is present exactly when the file named the column that produces it. A `range_m`-only file yields
- * no `frequency`, and a caller that needs one is told which column is missing rather than handed a table
+ * A schedule is present exactly when the file named the column that produces it. A file with only `range_m`
+ * yields no `frequency`. A caller that needs one learns which column is missing. It does not receive a table
  * derived from the wrong quantity.
  */
 struct Trajectory {
@@ -93,10 +92,10 @@ enum class TrajectoryQuantity : std::uint8_t { offset_hz, range_m, range_rate_m_
 
 [[noreturn]] inline void trajectoryRefuse(std::size_t line, std::string_view what, std::string_view offending) { throw std::invalid_argument(std::format("gr::timing::loadTrajectory: line {}: {} — {}", line, what, offending)); }
 
-/// @brief Lines of the text, `\r` stripped from the end of each so a file written on another platform loads.
+/// @brief Lines of the text, with `\r` stripped from each end. A file from another platform then loads.
 ///
-/// A `\r` in the middle of a line is *not* stripped: it then fails the byte check below, which is the honest
-/// reading of a line that is not the text it claims to be.
+/// A `\r` in the middle of a line is *not* stripped. It then fails the byte check below. Such a line is not
+/// the text it claims to be.
 struct TrajectoryLines {
     std::string_view text;
     std::size_t      pos    = 0UZ;
@@ -140,8 +139,8 @@ struct TrajectoryFields {
         return true;
     }
 
-    /// What remains of the line from the current position, leading blanks dropped: a header value that runs to
-    /// the end of the line.
+    /// The rest of the line from the current position, with leading blanks dropped. A header value runs to the
+    /// end of the line.
     [[nodiscard]] std::string_view rest() const noexcept {
         std::size_t at = pos;
         while (at < line.size() && blank(line[at])) {
@@ -151,8 +150,8 @@ struct TrajectoryFields {
     }
 };
 
-/// The file is US-ASCII. A byte outside the printable range, tab excepted, turns "someone handed me a
-/// recording instead of a table" into one refusal instead of ten thousand.
+/// The file is US-ASCII. A byte outside the printable range, other than tab, is refused. A recording passed in
+/// place of a table then gives one refusal and not ten thousand.
 inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     for (const char c : raw) {
         const auto byte = static_cast<unsigned char>(c);
@@ -162,9 +161,9 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     }
 }
 
-/// A header key begins with a letter or an underscore and a knot's time never does — it begins with a digit or
-/// a sign under either time scale. That first character separates the two, and the header block can therefore
-/// end at the first knot line while an unknown key on a line that is plainly a header still refuses.
+/// A header key begins with a letter or an underscore. A knot's time begins with a digit or a sign under either
+/// time scale. The first character separates the two. The header block therefore ends at the first knot line,
+/// and an unknown key on a line that is plainly a header is still refused.
 [[nodiscard]] inline bool trajectoryLooksLikeKey(std::string_view token) noexcept {
     if (token.empty()) {
         return false;
@@ -185,8 +184,8 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     return out;
 }
 
-/// `unix_ns`: an optional sign then decimal digits, and nothing else. A nanosecond count never passes through
-/// a floating type, so there is no exponent form and no decimal point here.
+/// `unix_ns`, an optional sign followed by decimal digits only. A nanosecond count does not pass through a
+/// floating type. There is no exponent form and no decimal point.
 [[nodiscard]] inline std::int64_t trajectoryUnixNs(std::size_t line, std::string_view field) {
     std::string_view digits = field;
     if (!digits.empty() && digits.front() == '+') {
@@ -227,15 +226,16 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
 /**
  * @brief `YYYY-MM-DDThh:mm:ss[.f{1,9}]Z` to nanoseconds since the Unix epoch, in integers throughout.
  *
- * Fixed widths on every field; `T` and `Z` are required and literal. No timezone offset form is accepted,
- * because honoring one requires a rule about which offsets are legal and this format does not want that rule:
- * a producer that has an offset converts before writing.
+ * Every field has a fixed width. `T` and `Z` are required and literal. No timezone offset form is accepted.
+ * Honoring one would need a rule about which offsets are legal, and this format has no such rule. A producer
+ * with an offset converts before writing.
  *
- * The fractional part is parsed as an **integer**, never as a fraction: the digits after the point are read as
- * a decimal integer and scaled by `10^(9-d)` for `d` digits, so `.5` is exactly 500000000 ns and `.000000001`
- * is exactly 1 ns. More than nine digits refuses, because truncating them is silent loss.
+ * The fractional part is parsed as an **integer** and not as a fraction. The digits after the point are read
+ * as a decimal integer and scaled by `10^(9-d)` for `d` digits. `.5` is exactly 500000000 ns, and
+ * `.000000001` is exactly 1 ns. More than nine digits are refused, because truncating them would lose data
+ * without a sign.
  *
- * A seconds field of `60` refuses with its reason named: the axis is a plain nanosecond count, and a leap
+ * A seconds field of `60` is refused with its reason named. The axis is a plain nanosecond count, and a leap
  * second has no representation on it.
  */
 [[nodiscard]] inline std::int64_t trajectoryIso8601Ns(std::size_t line, std::string_view field) {
@@ -292,8 +292,8 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
         trajectoryRefuse(line, "a calendar field is out of range", field);
     }
 
-    // 4-digit years reach 9999 and the axis reaches 2262-04-11; the product below runs out first, so it is
-    // checked against the axis rather than against the year.
+    // 4-digit years reach 9999, and the axis reaches 2262-04-11. The product below overflows first. It is
+    // therefore checked against the axis and not against the year.
     constexpr std::int64_t kMaxSeconds = std::numeric_limits<std::int64_t>::max() / 1'000'000'000LL;
 
     const std::int64_t seconds = std::chrono::sys_days(date).time_since_epoch().count() * 86'400LL + hour * 3'600LL + minute * 60LL + second;
@@ -308,11 +308,11 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
 /**
  * @brief Load a version-1 trajectory table from its text.
  *
- * A pure function of its argument: no global state and no locale dependence — `std::from_chars` and
- * `std::chrono` only, because `strtod` under a comma locale is exactly the class of defect this avoids.
+ * A pure function of its argument, with no global state and no locale dependence. It uses only
+ * `std::from_chars` and `std::chrono`. `strtod` under a comma locale is the kind of defect this avoids.
  *
- * Throws `std::invalid_argument` with the line number in the message, matching `FrequencySchedule`'s landed
- * behavior, and nothing partial escapes: the schedules are constructed after the whole file has parsed.
+ * Throws `std::invalid_argument` with the line number in the message, as `FrequencySchedule` does. No partial
+ * result escapes. The schedules are constructed after the whole file has parsed.
  */
 [[nodiscard]] inline Trajectory loadTrajectory(std::string_view text) {
     using detail::TrajectoryQuantity;
@@ -398,8 +398,8 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
                 if (std::ranges::find(quantities, quantity) != quantities.end()) {
                     trajectoryRefuse(lines.number, std::format("`columns` names `{}` twice", name), raw);
                 }
-                // The two are the same quantity through `offsetFor`, so a file carrying both carries either a
-                // redundancy or a contradiction, and there is no rule that picks the right one.
+                // The two are the same quantity through `offsetFor`. A file with both holds either a redundancy
+                // or a contradiction. No rule can pick the right one.
                 const bool clash = (quantity == TrajectoryQuantity::offset_hz && std::ranges::find(quantities, TrajectoryQuantity::range_rate_m_s) != quantities.end()) //
                                    || (quantity == TrajectoryQuantity::range_rate_m_s && std::ranges::find(quantities, TrajectoryQuantity::offset_hz) != quantities.end());
                 if (clash) {
@@ -521,7 +521,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     return out;
 }
 
-/// @brief The same, from a file. The path joins the message so a staging failure names what it tried to open.
+/// @brief The same, from a file. The message includes the path, and a failure names the file it tried to open.
 [[nodiscard]] inline Trajectory loadTrajectoryFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
@@ -538,19 +538,18 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
 /**
  * @brief The largest radial velocity the two halves of one trajectory disagree by, in meters per second.
  *
- * A file may carry both a range column and a range-rate column, which are genuinely independent quantities and
- * can therefore genuinely disagree. The loader does not police them — a parser that half-validates is a parser
- * whose refusals nobody can predict — so the check lives here, as one free function, so that a second
- * implementation of the same arithmetic never appears.
+ * A file may carry both a range column and a range-rate column. They are independent quantities and can
+ * disagree. The loader does not check them against each other. A parser that validates only in part gives
+ * refusals no one can predict. The check is this one free function. The arithmetic then has a single
+ * implementation.
  *
- * Both schedules are evaluated at every knot time of both. The frequency schedule implies `-offset*c/f_c`; the
- * delay schedule implies `c * dtau/dt` on the segment that time falls in. The largest absolute difference is
- * returned and the caller applies whatever tolerance its producer earns.
+ * Both schedules are evaluated at every knot time of both. The frequency schedule gives `-offset*c/f_c`. The
+ * delay schedule gives `c * dtau/dt` on the segment that holds that time. The function returns the largest
+ * absolute difference. The caller applies the tolerance that suits its producer.
  *
- * The figure a consistent pair produces is not zero, and its size is arithmetic rather than tolerance: the
- * secant slope of a piecewise-linear table sampled every `h` seconds from a curve whose second derivative is
- * bounded by `a` differs from the true derivative by at most `a*h/2`, so a consistent pair reads that bound
- * and the QA asserts against it.
+ * A consistent pair does not give zero. The size of the figure follows from the arithmetic. Take a
+ * piecewise-linear table sampled every `h` seconds from a curve whose second derivative is bounded by `a`. Its
+ * secant slope differs from the true derivative by at most `a*h/2`. A consistent pair stays within this bound.
  */
 [[nodiscard]] inline double worstRangeRateMismatch(const DelaySchedule& delay, const FrequencySchedule& frequency, double carrierHz) {
     if (!(carrierHz > 0.) || !std::isfinite(carrierHz)) {

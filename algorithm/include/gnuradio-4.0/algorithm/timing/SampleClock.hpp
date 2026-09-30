@@ -13,10 +13,10 @@ namespace detail {
 /**
  * @brief A 128-bit unsigned magnitude in two 64-bit limbs.
  *
- * The exact products this header needs run past 64 bits and must not be rounded, and the tree compiles
- * `-Wpedantic -Werror`, where `__int128` is not ISO C++ — `filter/ArbitraryResampler.hpp` states the same
- * constraint and takes the same way out. Only the four operations the clock performs are provided; this is
- * not a general wide-integer type.
+ * The exact products this header needs exceed 64 bits and must not be rounded. The build uses
+ * `-Wpedantic -Werror`, and `__int128` is not ISO C++. `filter/ArbitraryResampler.hpp` has the same
+ * constraint and solves it the same way. Only the four operations the clock performs are provided. This
+ * is not a general wide-integer type.
  */
 struct U128 {
     std::uint64_t hi{0ULL};
@@ -46,7 +46,7 @@ struct U128 {
     return U128{a.hi + (lo < a.lo ? 1ULL : 0ULL), lo};
 }
 
-/// `a - b`, the caller having established that `a >= b`.
+/// `a - b`, where the caller has established that `a >= b`.
 [[nodiscard]] constexpr U128 sub(U128 a, std::uint64_t b) noexcept { return U128{a.hi - (a.lo < b ? 1ULL : 0ULL), a.lo - b}; }
 
 [[nodiscard]] constexpr bool less(U128 a, std::uint64_t b) noexcept { return a.hi == 0ULL && a.lo < b; }
@@ -59,10 +59,10 @@ struct DivResult {
 /**
  * @brief `a / d` and `a % d`, exact, for `0 < d < 2^63`.
  *
- * The high limb divides first and leaves a remainder below `d`; the low limb then runs a 64-step
- * shift-subtract over that remainder. The shifted remainder needs no 65th bit precisely because `d` is
- * below `2^63`, which is why `SampleClock` validates both of its divisors against that bound. A clock
- * divides once per span rather than once per sample — `NsWalk` is the per-sample path.
+ * The high limb divides first and leaves a remainder below `d`. The low limb then runs a 64-step
+ * shift-subtract over that remainder. The shifted remainder needs no 65th bit, because `d` is below
+ * `2^63`. `SampleClock` therefore validates both of its divisors against that bound. A clock divides
+ * once per span and not once per sample. `NsWalk` is the per-sample path.
  */
 [[nodiscard]] constexpr DivResult divide(U128 a, std::uint64_t d) noexcept {
     DivResult     out{};
@@ -86,20 +86,19 @@ struct DivResult {
     return out;
 }
 
-/// The magnitude of a negative `std::int64_t`, without the overflow that negating the minimum would be.
+/// The magnitude of a negative `std::int64_t`, without the overflow of negating the minimum.
 [[nodiscard]] constexpr std::uint64_t magnitude(std::int64_t negative) noexcept { return static_cast<std::uint64_t>(-(negative + 1LL)) + 1ULL; }
 
 } // namespace detail
 
-/// The whole sample and the exact fraction of one, as `indexOf` reads a time.
+/// The whole sample and the exact fraction of one, as `indexOf` returns them for a time.
 struct IndexAt {
     std::uint64_t index{0ULL};         ///< the last sample at or before the given time
     std::uint64_t remainder_num{0ULL}; ///< how far past that sample the time falls, in [0, remainder_den)
     std::uint64_t remainder_den{1ULL}; ///< 10^9 * rate_den, the exact denominator of that fraction
 
-    /// The fraction as a `double`, for a consumer whose own arithmetic is already floating point. It is a
-    /// number in [0, 1) rather than an index or a nanosecond count, so it carries none of the range the
-    /// integers above exist to protect.
+    /// The fraction as a `double`, for a caller whose arithmetic is already floating point. It is a number in
+    /// [0, 1) and not an index or a nanosecond count. It needs none of the range the integers above protect.
     [[nodiscard]] double fraction() const noexcept { return static_cast<double>(remainder_num) / static_cast<double>(remainder_den); }
 
     [[nodiscard]] bool operator==(const IndexAt&) const noexcept = default;
@@ -108,46 +107,44 @@ struct IndexAt {
 /**
  * @brief The map between a sample index and a wall-clock time, exact in integers.
  *
- * A stream's sample index is the only thing that counts samples without drifting, and a timestamp is the only
- * thing two streams can be compared on; this type is the conversion between them and holds it exactly. The rate
- * is an exact rational `rate_num/rate_den` — 250 kS/s is `250000/1`, and an audio rate trimmed by 1 ppm is
- * `44100044100/1000000`, which no `double` sample rate expresses. Neither an index nor a nanosecond count ever
- * passes through a `double` here: at `2^53 + 1` a `double` index is already short by one, and every conversion
- * below is integer arithmetic carried in 128 bits.
+ * A stream's sample index counts samples without drift. A timestamp is the common scale on which two streams
+ * compare. This type converts between the two, exactly. The rate is an exact rational `rate_num/rate_den`. For
+ * example, 250 kS/s is `250000/1`. An audio rate trimmed by 1 ppm is `44100044100/1000000`, which no `double`
+ * sample rate can express. No index or nanosecond count passes through a `double` here. At `2^53 + 1` a `double`
+ * index is already short by one. Every conversion below is integer arithmetic in 128 bits.
  *
  * The exact map is
  *
  *     t(index) = anchor_ns + ((index - anchor_index) * 10^9 * rate_den + anchor_rem) / rate_num
  *
- * as a rational, and `timeOf` is its **floor** — the last whole nanosecond at or before that sample, on both
- * sides of the anchor, so a sample one before the anchor at 250 kS/s reads `anchor_ns - 4000` and a rate whose
- * period is not a whole number of nanoseconds rounds down rather than toward the anchor. `indexOf` is the same
- * floor read the other way: the last sample at or before a time, with the sub-sample remainder returned exactly
- * beside it rather than left for the caller to re-derive.
+ * is the map as a rational. `timeOf` is its **floor**, the last whole nanosecond at or before that sample. The
+ * floor holds on both sides of the anchor. At 250 kS/s the sample one before the anchor reads `anchor_ns - 4000`.
+ * A rate whose period is not a whole number of nanoseconds rounds down and not toward the anchor. `indexOf` is
+ * the same floor in the other direction. It returns the last sample at or before a time. The sub-sample
+ * remainder is returned exactly beside it, and the caller need not derive it again.
  *
- * `anchor_rem` is the anchor's own position within its nanosecond, a numerator over `rate_num`. That remainder
- * makes `rebase` exact: without it, moving the anchor to an index whose time is not a whole nanosecond would
- * shift every later conversion by up to one nanosecond, and `rebase` exists to keep long runs inside the
- * 128-bit domain without changing the map at all. A clock built by hand leaves it zero, which says the anchor
- * sits exactly on its nanosecond.
+ * `anchor_rem` is the anchor's position within its nanosecond, a numerator over `rate_num`. That remainder makes
+ * `rebase` exact. Without it, moving the anchor to an index whose time is not a whole nanosecond would shift
+ * every later conversion by up to one nanosecond. `rebase` keeps long runs inside the 128-bit domain and does
+ * not change the map. A clock built by hand leaves `anchor_rem` at zero, which places the anchor exactly on its
+ * nanosecond.
  *
- * A clock is an immutable value. `rebase` moves the anchor and `withRate` starts a new rate at a stated index,
- * both returning new clocks: a rate change is a new anchor at the change point, which lets a
- * discontinuity be represented rather than smeared across the samples on either side of it.
+ * A clock is an immutable value. `rebase` moves the anchor and returns a new clock. `withRate` starts a new rate
+ * at a stated index and returns a new clock. A rate change is a new anchor at the change point. The clock then
+ * represents the discontinuity at that sample. It does not spread the change over the samples on either side.
  *
- * Time is nanoseconds since the Unix epoch and nothing else: this kernel never interprets a calendar, so leap
- * seconds, time zones and any smearing policy belong to whatever produced the timestamps and are stated in
- * metadata, not here.
+ * Time is nanoseconds since the Unix epoch. This kernel does not interpret a calendar. Leap seconds, time zones
+ * and any leap-second smoothing policy belong to the producer of the timestamps. They are stated in metadata.
  *
  * Domain. Every product below is exact while `|index - anchor_index| * 10^9 * rate_den` and
- * `|t_ns - anchor_ns| * rate_num` stay under `2^127`, which the rate bounds and the `std::int64_t` nanosecond
- * range together guarantee. The nanosecond result must itself fit `std::int64_t` — about +/-292 years around the
- * epoch — so a run that spans more than that rebases; that is the second reason `rebase` is here.
+ * `|t_ns - anchor_ns| * rate_num` stay under `2^127`. The rate bounds and the `std::int64_t` nanosecond range
+ * together guarantee this. The nanosecond result must itself fit `std::int64_t`, about +/-292 years around the
+ * epoch. A run longer than that rebases. That is the second use of `rebase`.
  */
 struct SampleClock {
-    /// `10^9 * rate_den` is the numerator of a sample period in nanoseconds and is `indexOf`'s divisor, and
-    /// `rate_num` is `timeOf`'s. Both must stay below `2^63` for `detail::divide` to need no 65th bit, which
-    /// caps the denominator at `(2^63 - 1) / 10^9`.
+    /// `10^9 * rate_den` is the numerator of a sample period in nanoseconds and the divisor of `indexOf`.
+    /// `rate_num` is the divisor of `timeOf`. Both must stay below `2^63`, and `detail::divide` then needs no
+    /// 65th bit. This caps the denominator at `(2^63 - 1) / 10^9`.
     static constexpr std::uint64_t kNsPerSecond = 1'000'000'000ULL;
     static constexpr std::uint64_t kMaxRateNum  = (1ULL << 63) - 1ULL;
     static constexpr std::uint64_t kMaxRateDen  = kMaxRateNum / kNsPerSecond;
@@ -156,7 +153,7 @@ struct SampleClock {
     std::int64_t  anchor_ns{0LL};     ///< nanoseconds since the Unix epoch, floored
     std::uint64_t rate_num{1ULL};     ///< samples per second, numerator
     std::uint64_t rate_den{1ULL};     ///< samples per second, denominator
-    std::uint64_t anchor_rem{0ULL};   ///< the anchor's position within `anchor_ns`, over `rate_num`; in [0, rate_num)
+    std::uint64_t anchor_rem{0ULL};   ///< the anchor's position within `anchor_ns` as a numerator over `rate_num`, in [0, rate_num)
 
     constexpr SampleClock() noexcept = default;
 
@@ -174,17 +171,17 @@ struct SampleClock {
 
     [[nodiscard]] bool operator==(const SampleClock&) const noexcept = default;
 
-    /// The numerator of one sample period in nanoseconds; the denominator is `rate_num`.
+    /// The numerator of one sample period in nanoseconds. The denominator is `rate_num`.
     [[nodiscard]] constexpr std::uint64_t periodNsNum() const noexcept { return kNsPerSecond * rate_den; }
 
-    /// The rate as a `double`, for radian arithmetic that is floating point anyway. Never for an index or a
-    /// nanosecond count; the rational above serves those.
+    /// The rate as a `double`, for radian arithmetic that is floating point anyway. It is not for an index or
+    /// a nanosecond count. The rational above serves those.
     [[nodiscard]] constexpr double rateHz() const noexcept { return static_cast<double>(rate_num) / static_cast<double>(rate_den); }
 
     /// The offset from `anchor_ns` split into whole nanoseconds and the exact remainder within the last one.
     struct NsSplit {
         std::int64_t  whole{0LL}; ///< nanoseconds relative to `anchor_ns`, floored
-        std::uint64_t rem{0ULL};  ///< the position within that nanosecond, over `rate_num`; in [0, rate_num)
+        std::uint64_t rem{0ULL};  ///< the position within the nanosecond as a numerator over `rate_num`, in [0, rate_num)
     };
 
     [[nodiscard]] NsSplit offsetFrom(std::uint64_t index) const noexcept {
@@ -194,9 +191,9 @@ struct SampleClock {
             return NsSplit{static_cast<std::int64_t>(split.quotient.lo), split.remainder};
         }
 
-        // Below the anchor the numerator is negative, and a floor is not a truncation: the quotient rounds away
-        // from zero whenever the division leaves anything behind, and the remainder gives the distance left to
-        // the next whole nanosecond up.
+        // Below the anchor the numerator is negative, and a floor is not a truncation. The quotient rounds away
+        // from zero whenever the division leaves a remainder. The remainder gives the distance to the next whole
+        // nanosecond up.
         const detail::U128 product = detail::mul(anchor_index - index, period);
         if (detail::less(product, anchor_rem)) {
             return NsSplit{0LL, anchor_rem - product.lo};
@@ -211,7 +208,7 @@ struct SampleClock {
     /// The last whole nanosecond at or before sample `index`.
     [[nodiscard]] std::int64_t timeOf(std::uint64_t index) const noexcept { return anchor_ns + offsetFrom(index).whole; }
 
-    /// The last sample at or before `t_ns`, with the exact fraction of a sample by which the time overshoots it.
+    /// The last sample at or before `t_ns`, with the exact fraction of a sample by which the time passes it.
     [[nodiscard]] IndexAt indexOf(std::int64_t t_ns) const noexcept {
         const std::uint64_t period = periodNsNum();
         const std::int64_t  dt     = t_ns - anchor_ns;
@@ -241,7 +238,7 @@ struct SampleClock {
         return IndexAt{anchor_index - split.quotient.lo - 1ULL, period - split.remainder, period};
     }
 
-    /// The same map anchored at `index` instead. Exact, because `anchor_rem` carries what the floor drops.
+    /// The same map anchored at `index`. It is exact, because `anchor_rem` keeps what the floor drops.
     [[nodiscard]] SampleClock rebase(std::uint64_t index) const {
         const NsSplit at = offsetFrom(index);
         return SampleClock(index, anchor_ns + at.whole, rate_num, rate_den, at.rem);
@@ -249,11 +246,11 @@ struct SampleClock {
 
     /// @brief A new clock running at `rateNum/rateDen` from sample `atIndex`, anchored at that sample's time.
     ///
-    /// The change index is required rather than defaulted: a rate change belongs at the sample it happens on,
-    /// and a caller who silently kept the old anchor would smear the change back across every sample since.
-    /// The anchor's sub-nanosecond position is re-expressed over the new numerator, so the anchor time moves by
-    /// less than `1/rateNum` nanoseconds — the only inexactness anywhere in this type, and it is bounded by one
-    /// period of the new rate rather than by a nanosecond.
+    /// The change index is a required argument. A rate change takes effect at the sample where it happens.
+    /// Keeping the old anchor would apply the new rate to every sample since that anchor. The anchor's
+    /// sub-nanosecond position is re-expressed over the new numerator. The anchor time therefore moves by less
+    /// than `1/rateNum` nanoseconds. That is the one inexact step in this type. It is bounded by one period of
+    /// the new rate and not by a nanosecond.
     [[nodiscard]] SampleClock withRate(std::uint64_t rateNum, std::uint64_t rateDen, std::uint64_t atIndex) const {
         const NsSplit at = offsetFrom(atIndex);
         if (rateNum == 0ULL) {
@@ -266,18 +263,18 @@ struct SampleClock {
     /**
      * @brief A forward walk over consecutive sample times, exact and division-free.
      *
-     * `timeOf` costs a 128-bit division, and a consumer stepping through a span of samples wants the same
-     * answers without paying it per sample. Writing the period as `period = whole * rate_num + carry`, the time
-     * of sample `index + k` is `timeOf(index) + k * whole` plus one nanosecond for each time an accumulator of
-     * `carry` passes `rate_num` — so a step is an addition and at most one subtraction. `advance()` reproduces
-     * `timeOf(index + k)` exactly, which the QA pins; a chunked consumer therefore reads the same times as an
-     * unchunked one because both are the same function of the absolute index.
+     * `timeOf` costs a 128-bit division. A walk gives the same times over a span of samples without that
+     * division per sample. Write the period as `period = whole * rate_num + carry`. The time of sample
+     * `index + k` is then `timeOf(index) + k * whole`, plus one nanosecond each time an accumulator of `carry`
+     * passes `rate_num`. A step is one addition and at most one subtraction. `advance()` reproduces
+     * `timeOf(index + k)` exactly. A caller that splits a span into chunks reads the same times as one that
+     * does not, because both are the same function of the absolute index.
      */
     struct NsWalk {
         std::int64_t  t_ns{0LL};     ///< `timeOf` of the sample the walk stands on
         std::uint64_t rem{0ULL};     ///< that sample's position within `t_ns`, over `modulus`
         std::uint64_t whole{0ULL};   ///< whole nanoseconds a sample advances
-        std::uint64_t carry{0ULL};   ///< what it advances beyond those, over `modulus`
+        std::uint64_t carry{0ULL};   ///< the advance beyond those, over `modulus`
         std::uint64_t modulus{1ULL}; ///< `rate_num`
 
         void advance() noexcept {
@@ -302,11 +299,11 @@ static_assert(SampleClock::kMaxRateDen * SampleClock::kNsPerSecond <= SampleCloc
 /**
  * @brief A clock at @p rateHz on the microhertz grid, anchored at (@p anchorIndex, @p anchorNs).
  *
- * The one place a floating rate touches the exact time axis: the rate lands on a 10^-6 Hz grid, whose
- * half-microhertz residual moves a sample's time by under a nanosecond across ten hours of stream —
- * far inside the resolution any trajectory or schedule is stated to. A rate outside
- * `[1e-6, kMaxRateNum / 1e6]` Hz, or one that is not finite and positive, throws
- * `std::invalid_argument`; the callers that hold a settings name wrap the message under it.
+ * This function brings a floating rate onto the exact time axis. The rate is rounded to a 10^-6 Hz grid.
+ * The half-microhertz residual moves a sample's time by under a nanosecond across ten hours of stream. That
+ * is far finer than the resolution of any trajectory or schedule. A rate outside
+ * `[1e-6, kMaxRateNum / 1e6]` Hz, or a rate that is not finite and positive, throws
+ * `std::invalid_argument`. A caller can wrap the message with the name of its setting.
  */
 [[nodiscard]] inline SampleClock clockForRateHz(double rateHz, std::uint64_t anchorIndex, std::int64_t anchorNs) {
     constexpr std::uint64_t kDenominator = 1'000'000ULL;

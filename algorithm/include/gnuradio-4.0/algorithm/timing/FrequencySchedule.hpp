@@ -16,26 +16,26 @@
 
 namespace gr::timing {
 
-/// The speed of light in vacuum, exact: the meter is defined from it.
+/// The speed of light in vacuum, exact, because the meter is defined from it.
 inline constexpr double kSpeedOfLight = 299'792'458.;
 
 /**
- * @brief The Doppler offset a radial velocity puts on a carrier: `-f_carrier * v_radial / c`.
+ * @brief The Doppler offset a radial velocity puts on a carrier, `-f_carrier * v_radial / c`.
  *
- * `v_radial` is the rate of change of range, so a closing pass has it negative and the offset comes out
- * positive: an approaching transmitter reads high. That is the whole sign convention, and it is the one thing
- * about Doppler that silently inverts, so the QA anchors it on a worked case rather than on this sentence.
+ * `v_radial` is the rate of change of range. A closing pass has a negative `v_radial` and a positive offset. An
+ * approaching transmitter reads high. That is the whole sign convention. A sign error in Doppler inverts the
+ * offset without any other symptom.
  *
- * This is the only step between a trajectory and a schedule. Orbit propagation, TLEs and station geometry stay
- * with whatever produced the velocity; the schedule takes frequencies.
+ * This function converts a trajectory's velocity into a schedule's frequency. Orbit propagation, TLEs and station
+ * geometry belong to the code that produced the velocity. The schedule takes frequencies.
  */
 [[nodiscard]] constexpr double offsetFor(double vRadialMetersPerSecond, double fCarrierHz) noexcept { return -fCarrierHz * vRadialMetersPerSecond / kSpeedOfLight; }
 
 /**
- * @brief The one-way propagation delay a slant range costs: `range / c`, in seconds.
+ * @brief The one-way propagation delay of a slant range, `range / c`, in seconds.
  *
- * The companion of `offsetFor` and the other half of the same physics: a trajectory shifts the carrier by the
- * first and moves the envelope by the second. Both are written here so that `c` appears once in this tree.
+ * This is the companion of `offsetFor`. A trajectory shifts the carrier by the offset and moves the envelope by
+ * the delay. Both functions are in this file and share one definition of `c`.
  */
 [[nodiscard]] constexpr double delayFor(double rangeMeters) noexcept { return rangeMeters / kSpeedOfLight; }
 
@@ -50,26 +50,25 @@ struct ScheduleNaming {
 /**
  * @brief An immutable table of knots on a `SampleClock`'s time axis, read piecewise linearly.
  *
- * A curve arrives as a handful of points and has to become one number per sample. The table is `(t_ns, value)`
- * knots, strictly increasing in time, and the value between two knots is the straight line between them.
- * Outside the table the end values **hold**: a schedule that has run out does not extrapolate into a value
- * nobody asked for, it keeps the last one it was given.
+ * A curve arrives as a few points and must become one number per sample. The table holds `(t_ns, value)`
+ * knots, strictly increasing in time. The value between two knots lies on the straight line between them.
+ * Outside the table the end values **hold**. The schedule does not extrapolate past its last knot. It keeps
+ * the last value it was given.
  *
- * The segment walk is a cursor, not a search. Sample times only increase, so the cursor advances at most once
- * per knot over a whole span and the per-sample cost does not depend on how many knots the table holds — the
- * bench measures that against 100, 1000 and 10000 knots. A per-sample binary search would make a dense table
- * cost more per sample than a sparse one for the same curve, which is exactly backwards.
+ * The segment walk uses a cursor and not a search. Sample times only increase. The cursor therefore advances at
+ * most once per knot over a whole span. The per-sample cost does not depend on the number of knots. A benchmark
+ * measures this at 100, 1000 and 10000 knots. A per-sample binary search would make a dense table cost more per
+ * sample than a sparse one for the same curve.
  *
- * The table is a value: nothing here is mutable, and nothing is carried between calls. What a block does with
- * a schedule — the sign of it, refusing a value out of range, swapping one table for another — belongs to the
- * block. The two schedules that derive from this differ only in what their values mean and in the one
- * consumer-facing form each adds; the knot table, the validation and the cursor are shared so that a
- * divergence between them cannot exist to be found.
+ * The table is a value. Nothing here is mutable, and nothing is carried between calls. The caller decides what
+ * to do with a schedule, such as its sign, the refusal of an out-of-range value or the swap of one table for
+ * another. The two derived schedules differ only in the meaning of their values and in the one output form each
+ * adds. They share the knot table, the validation and the cursor. The two cannot diverge in those parts.
  */
 class PiecewiseLinearSchedule {
 public:
-    /// Two knots make a line; below that there is nothing to interpolate. The ceiling is the spec's, and it is
-    /// there so a caller wanting a smoother curve than piecewise-linear can simply supply denser knots.
+    /// Two knots make a line. With fewer there is nothing to interpolate. The ceiling on the knot count leaves
+    /// room for a caller that wants a smoother curve than piecewise-linear to supply denser knots.
     static constexpr std::size_t kMinKnots = 2UZ;
     static constexpr std::size_t kMaxKnots = std::size_t{1} << 20;
 
@@ -79,27 +78,27 @@ public:
     [[nodiscard]] std::int64_t                  firstTime() const noexcept { return _times.front(); }
     [[nodiscard]] std::int64_t                  lastTime() const noexcept { return _times.back(); }
 
-    /// The value at a time: linear between knots, and held at the end values outside the table.
+    /// The value at a time, linear between knots and held at the end values outside the table.
     [[nodiscard]] double valueAt(std::int64_t t_ns) const noexcept { return evaluate(locate(t_ns), t_ns); }
 
     /**
      * @brief The slope, in value units per second, of the segment @p t_ns falls in.
      *
-     * The derivative does not exist at a knot and does not exist outside the table, so this is not a
-     * derivative: it is the slope of the one segment the time belongs to, clamped to a real segment at both
-     * ends the way `valueAt` clamps its value. A caller comparing a table against a rate — `worstRangeRateMismatch`
-     * does exactly that — needs the segment slope, and would otherwise have to reach into the knots and
-     * re-derive it.
+     * The derivative does not exist at a knot or outside the table. This value is therefore not a derivative.
+     * The function returns the slope of the segment that holds the time. At both ends it clamps to a real segment,
+     * as `valueAt` clamps its value. A caller that compares a table against a rate needs the segment slope. One
+     * example is `worstRangeRateMismatch`. Without this function the caller would have to derive the slope from the
+     * knots again.
      */
     [[nodiscard]] double segmentSlopePerSecond(std::int64_t t_ns) const noexcept { return _slopes[locate(t_ns)] * 1e9; }
 
     /**
      * @brief The value at each of `out.size()` samples starting at `firstIndex` on `clock`.
      *
-     * The point-evaluation twin of `FrequencySchedule::phaseIncrementsFor`, walking the same `NsWalk` cursor
-     * and evaluating the line at each sample's own time. One compare, one subtract and one multiply-add per
-     * sample, and every value is a pure function of its absolute index, so a caller that asks for a span in
-     * one call and a caller that asks for it in a hundred get bit-identical values.
+     * This is the point-evaluation counterpart of `FrequencySchedule::phaseIncrementsFor`. It walks the same
+     * `NsWalk` cursor and evaluates the line at each sample's own time. Each sample costs one compare, one
+     * subtract and one multiply-add. Every value is a pure function of its absolute index. A caller that asks
+     * for a span in one call and a caller that asks in a hundred calls get bit-identical values.
      */
     void valuesFor(const SampleClock& clock, std::uint64_t firstIndex, std::span<double> out) const noexcept {
         if (out.empty()) {
@@ -136,15 +135,15 @@ protected:
             }
         }
 
-        // One slope per segment, so evaluating a point is a multiply rather than a divide, and the divide that
-        // could differ between two evaluations of the same point happens once here instead.
+        // One slope per segment. Evaluating a point is then a multiply and not a divide. The divide, which could
+        // differ between two evaluations of the same point, happens once here.
         _slopes.resize(_times.size() - 1UZ);
         for (std::size_t i = 0UZ; i + 1UZ < _times.size(); ++i) {
             _slopes[i] = (_values[i + 1UZ] - _values[i]) / static_cast<double>(_times[i + 1UZ] - _times[i]);
         }
     }
 
-    /// The segment a time falls in: the last knot at or before it, clamped to a real segment at both ends.
+    /// The segment that holds a time, the last knot at or before it, clamped to a real segment at both ends.
     [[nodiscard]] std::size_t locate(std::int64_t t_ns) const noexcept {
         const std::size_t upper = static_cast<std::size_t>(std::upper_bound(_times.begin(), _times.end(), t_ns) - _times.begin());
         if (upper == 0UZ) {
@@ -153,9 +152,9 @@ protected:
         return std::min(upper - 1UZ, _times.size() - 2UZ);
     }
 
-    /// The value at a time already known to belong to `segment`. The two knot times are answered with the knot
-    /// values themselves rather than through the line, so a point evaluated as the end of one segment and as the
-    /// start of the next gives the same bits, which lets the cursor walk replace a fresh search.
+    /// The value at a time already known to lie in `segment`. At the two knot times it returns the knot values
+    /// themselves and not a point on the line. A point evaluated as the end of one segment and as the start of
+    /// the next then gives the same bits. The cursor walk can therefore replace a fresh search.
     [[nodiscard]] double evaluate(std::size_t segment, std::int64_t t_ns) const noexcept {
         if (t_ns <= _times.front()) {
             return _values.front();
@@ -180,18 +179,18 @@ protected:
 /**
  * @brief A table of frequency-offset knots, and the radian increments a phasor consumes.
  *
- * A pass's Doppler curve arrives as a handful of points and has to become one radian increment per sample.
- * `phaseIncrementsFor` is the consumer-facing form and gives `Phasor::mixModulated` exactly what it takes: one
- * `double` radian increment per sample. Each increment is `2*pi` times the **integral** of the offset across
- * that sample's own interval, not `2*pi*offset(t_k)/fs` sampled at its start. The offset is piecewise linear, so
- * that integral is a trapezoid per segment in closed form and costs no more than the sampled version; what it
- * buys is that the accumulated phase is the schedule's true integral. A coherent demodulator downstream rides
- * the phase, not the frequency, and a sampled increment leaves it with an error that grows with the run.
+ * A pass's Doppler curve arrives as a few points and must become one radian increment per sample.
+ * `phaseIncrementsFor` produces that form. It gives `Phasor::mixModulated` its input, one `double` radian
+ * increment per sample. Each increment is `2*pi` times the **integral** of the offset across that sample's own
+ * interval. It is not `2*pi*offset(t_k)/fs` sampled at the interval's start. The offset is piecewise linear.
+ * Its integral is a trapezoid per segment in closed form and costs no more than the sampled form. The
+ * accumulated phase is then the schedule's true integral. A coherent demodulator tracks the phase and not the
+ * frequency. A sampled increment would give it an error that grows over the run.
  *
- * The sample interval boundaries come from `SampleClock::NsWalk`, so they are the exact `timeOf` of the absolute
+ * The sample interval boundaries come from `SampleClock::NsWalk`. They are the exact `timeOf` of the absolute
  * sample index and cost no division per sample. Every increment is therefore a pure function of its absolute
- * index, and a caller that asks for a span in one call and a caller that asks for it in a hundred get
- * bit-identical values.
+ * index. A caller that asks for a span in one call and a caller that asks in a hundred calls get bit-identical
+ * values.
  */
 class FrequencySchedule : public PiecewiseLinearSchedule {
 public:
@@ -199,10 +198,10 @@ public:
 
     FrequencySchedule(std::span<const std::int64_t> timesNs, std::span<const double> offsetsHz) : PiecewiseLinearSchedule(timesNs, offsetsHz, ScheduleNaming{"gr::timing::FrequencySchedule", "offsets", "offset", "a finite frequency"}) {}
 
-    /// The knot values, in hertz. `values()` names them without their unit; this names the unit.
+    /// The knot values, in hertz. `values()` returns the same values under a name without the unit.
     [[nodiscard]] std::span<const double> offsets() const noexcept { return _values; }
 
-    /// The offset at a time, in hertz: `valueAt` under the name that carries the unit.
+    /// The offset at a time, in hertz. This is `valueAt` under a name that carries the unit.
     [[nodiscard]] double offsetAt(std::int64_t t_ns) const noexcept { return valueAt(t_ns); }
 
     /**
@@ -232,11 +231,11 @@ private:
     /**
      * @brief The integral of the offset from `a` to `b`, in cycles, advancing the cursor as it goes.
      *
-     * The offset is linear on each segment and constant beyond the ends, so the trapezoid over a stretch that
-     * crosses no knot is not an approximation but the integral itself. A sample interval that does cross knots
-     * is split at each of them, which is the only thing the loop is for: at any usable sample rate it runs once.
-     * The cursor enters at or behind the segment holding `a` and leaves at the one holding `b`, so a whole span
-     * moves it at most once per knot.
+     * The offset is linear on each segment and constant beyond the ends. The trapezoid over a stretch that
+     * crosses no knot is therefore the exact integral. A sample interval that crosses knots is split at each of
+     * them. The loop exists for that case. At any usable sample rate it runs once. The cursor enters at or
+     * before the segment that holds `a` and leaves at the segment that holds `b`. A whole span moves it at most
+     * once per knot.
      */
     [[nodiscard]] double integrateCycles(std::int64_t a, std::int64_t b, std::size_t& segment) const noexcept {
         constexpr double kSecondsPerNs = 1e-9;
@@ -247,9 +246,9 @@ private:
             while (segment + 2UZ < _times.size() && _times[segment + 1UZ] <= x) {
                 ++segment;
             }
-            // The next knot strictly after `x`. Before the table that is its first knot, where the held value
-            // gives way to the first line — a breakpoint like any other, and one a walk that only ever looked at
-            // the segment's far end would step straight over.
+            // The next knot strictly after `x`. Before the table that is the first knot. There the held value
+            // changes to the first line. That point is a breakpoint like any other. A walk that looked only at
+            // the far end of the segment would miss it.
             const std::int64_t nextKnot = (x < _times.front()) ? _times.front() : _times[segment + 1UZ];
             const std::int64_t end      = (nextKnot > x && nextKnot < b) ? nextKnot : b;
             cycles += 0.5 * (evaluate(segment, x) + evaluate(segment, end)) * static_cast<double>(end - x) * kSecondsPerNs;
@@ -262,11 +261,10 @@ private:
 /**
  * @brief A table of propagation-delay knots, in seconds, on the same axis and with the same reading rule.
  *
- * The other half of what a trajectory does: `FrequencySchedule` carries what the pass does to the carrier and
- * this carries what it does to the envelope. `valuesFor` is the consumer-facing form — one delay per sample —
- * and the two extremes are exposed because a delay line has to size its history from the largest delay the
- * table ever asks for, and the table clamps at its ends, so the maximum over the table is the maximum over all
- * time.
+ * `FrequencySchedule` holds the effect of a pass on the carrier. This class holds its effect on the envelope.
+ * `valuesFor` gives one delay per sample. The two extremes are exposed. A delay line sizes its history from the
+ * largest delay in the table. The table clamps at its ends. The maximum over the table is therefore the maximum
+ * over all time.
  */
 class DelaySchedule : public PiecewiseLinearSchedule {
 public:
@@ -278,7 +276,7 @@ public:
     /// The delay at a time, in seconds.
     [[nodiscard]] double delayAt(std::int64_t t_ns) const noexcept { return valueAt(t_ns); }
 
-    /// The largest delay the table reaches, and therefore the largest it reaches at any time at all.
+    /// The largest delay in the table, which is also the largest delay at any time.
     [[nodiscard]] double maxValue() const noexcept { return *std::ranges::max_element(_values); }
     [[nodiscard]] double minValue() const noexcept { return *std::ranges::min_element(_values); }
 };
