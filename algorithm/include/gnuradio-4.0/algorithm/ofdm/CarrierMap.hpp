@@ -14,48 +14,48 @@
 
 namespace gr::ofdm {
 
-/// The role a carrier plays. Guards are everything the numerology did not claim, so the three are disjoint
-/// and complete over the transform by construction rather than by a check that could be forgotten.
+/// The role of a carrier. A guard is every carrier the numerology does not name. The three roles are therefore
+/// disjoint and cover the transform by construction, with no separate check.
 enum class Occupancy : std::uint8_t { Guard, Data, Pilot };
 
 /**
- * @brief One OFDM numerology: the signed carrier indices a human writes, resolved into FFT bin order once.
+ * @brief One OFDM numerology, with signed carrier indices resolved once into FFT bin order.
  *
- * Two conventions meet in every OFDM implementation and are the source of most of its off-by-one bugs. A
- * published numerology names carriers by **signed logical index**: DC is 0, the carrier one spacing above it is
- * +1, the one below is -1, and the range is `-fft_len/2 … fft_len/2-1`. A transform holds the same symbol in
- * **bin order**: DC at index 0, the positive carriers ascending from index 1, and the negative ones in the upper
- * half. The map between them is `bin = carrier` for a non-negative carrier and `bin = carrier + fft_len` for a
- * negative one, and this class is the only place it is written. Everything downstream reads bins.
+ * Two conventions meet in every OFDM implementation. They cause most of its off-by-one errors. A published
+ * numerology names carriers by **signed logical index**. DC is 0, the carrier one spacing above it is +1, and
+ * the one below is -1. The range is `-fft_len/2 … fft_len/2-1`. A transform holds the same symbol in **bin
+ * order**. DC is at index 0, the positive carriers ascend from index 1, and the negative carriers fill the upper
+ * half. The map is `bin = carrier` for a non-negative carrier and `bin = carrier + fft_len` for a negative one.
+ * This class applies the map.
  *
- * `fft_len/2` is the asymmetry the range makes explicit: `-fft_len/2` is a real carrier and lands on the Nyquist
- * bin `fft_len/2`, while `+fft_len/2` does not exist. A numerology that names it is refused rather than folded,
- * because folding it would silently move a carrier to the other side of the band.
+ * The range is asymmetric at `fft_len/2`. `-fft_len/2` is a real carrier and falls on the Nyquist bin
+ * `fft_len/2`. `+fft_len/2` does not exist. A numerology that names it is refused and not folded. Folding would
+ * move a carrier to the other side of the band without any sign.
  *
- * A numerology is the data set and the pilot set. Everything else is guard, which makes the three disjoint and
- * complete over `fft_len` without a completeness check: guards are computed as the complement, so there is
- * nothing for the caller to get wrong and nothing for the class to have to reject. The constructor checks that
- * no carrier falls outside the range, that neither set repeats a carrier, and that the two sets do not
- * share one. DC is a carrier like any other here — a numerology may use it or leave it guarded — and
- * `dcOccupied()` says which, so a consumer never has to infer it from a set it did not build.
+ * A numerology is the data set and the pilot set. Every other carrier is a guard. The guards are computed as the
+ * complement. The three sets are therefore disjoint and cover `fft_len` without a completeness check. The caller
+ * cannot get the guards wrong, and the class has nothing to reject for them. The constructor checks that no
+ * carrier falls outside the range. It checks that neither set repeats a carrier and that the two sets share
+ * none. DC is an ordinary carrier here. A numerology may use it or leave it as a guard. `dcOccupied()` reports
+ * which, and a caller need not infer it from the sets.
  *
- * The class holds no symbol and no transform. It is the addressing, and it is const once constructed.
+ * The class holds no symbol and no transform. It holds the addressing and is const once constructed.
  */
 class CarrierMap {
 public:
-    /// Nothing in the tiers asks for a longer transform, and the ceiling keeps the per-bin tables a numerology
-    /// builds bounded by something stated rather than by available memory.
+    /// The longest transform accepted. The ceiling bounds a numerology's per-bin tables by a stated size and not
+    /// by available memory.
     static constexpr std::size_t kMaxFftLength = std::size_t{1} << 16;
 
-    /// The signed logical index of a carrier, as an FFT bin. Static because the mapping is a property of the
-    /// transform length alone and a caller often has one before it has a numerology.
+    /// The signed logical index of a carrier, as an FFT bin. The function is static. The mapping depends on the
+    /// transform length alone, and a caller often has the length before it has a numerology.
     [[nodiscard]] static std::size_t binOf(std::size_t fftLength, int carrier) {
         requireLength(fftLength);
         requireCarrier(fftLength, carrier);
         return (carrier < 0) ? static_cast<std::size_t>(carrier + static_cast<int>(fftLength)) : static_cast<std::size_t>(carrier);
     }
 
-    /// The inverse: which signed logical carrier a bin holds.
+    /// The inverse, the signed logical carrier a bin holds.
     [[nodiscard]] static int carrierOf(std::size_t fftLength, std::size_t bin) {
         requireLength(fftLength);
         if (bin >= fftLength) {
@@ -97,17 +97,17 @@ public:
     [[nodiscard]] std::span<const int> dataCarriers() const noexcept { return _data; }
     [[nodiscard]] std::span<const int> pilotCarriers() const noexcept { return _pilot; }
 
-    /// The guard carriers, ascending in signed index. They are the complement of the two occupied sets, which is
-    /// what makes the three complete over `fftLength()`.
+    /// The guard carriers, ascending in signed index. They are the complement of the two occupied sets. The three
+    /// sets therefore cover `fftLength()`.
     [[nodiscard]] std::span<const int> guardCarriers() const noexcept { return _guard; }
 
-    /// The bin each data carrier occupies, in `dataCarriers()` order — the gather a symbol assembler applies.
+    /// The bin each data carrier occupies, in `dataCarriers()` order. A symbol assembler gathers by this list.
     [[nodiscard]] std::span<const std::size_t> dataBins() const noexcept { return _dataBins; }
     [[nodiscard]] std::span<const std::size_t> pilotBins() const noexcept { return _pilotBins; }
     [[nodiscard]] std::span<const std::size_t> guardBins() const noexcept { return _guardBins; }
 
-    /// What a bin carries. Bounds-checked, because a caller indexing this with a bin it computed itself is
-    /// exactly the mistake the class exists to catch.
+    /// The role of a bin. The index is bounds-checked. A caller that computes its own bin index makes the
+    /// mistake this class exists to catch.
     [[nodiscard]] Occupancy occupancyOfBin(std::size_t bin) const {
         if (bin >= _fftLength) {
             throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: bin {} is outside a transform of {} bins", bin, _fftLength));
@@ -117,16 +117,16 @@ public:
 
     [[nodiscard]] Occupancy occupancyOf(int carrier) const { return _occupancy[binOf(_fftLength, carrier)]; }
 
-    /// A sync word is a whole symbol, emitted verbatim, so the only thing to check about it is its length —
-    /// and that is worth checking loudly, because a short one would be read as a symbol with silent carriers.
+    /// A sync word is a whole symbol, emitted verbatim. Its length is therefore the one property to check. The
+    /// check throws, because a short word would read as a symbol with silent carriers.
     void validateSyncWord(std::span<const std::complex<float>> word, std::size_t index = 0UZ) const {
         if (word.size() != _fftLength) {
             throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: sync word {} holds {} carriers, not the {} a symbol has", index, word.size(), _fftLength));
         }
     }
 
-    /// Refuses a pilot-symbol cycle that cannot be indexed. Called once at configure, so that
-    /// `pilotSymbolIndex` can be arithmetic with no check in it.
+    /// Refuses a pilot-symbol cycle that cannot be indexed. It runs once at configuration.
+    /// `pilotSymbolIndex` is then plain arithmetic with no check.
     void validatePilotCycle(std::size_t cycleLength) const {
         if (_pilot.empty()) {
             return;
@@ -139,15 +139,14 @@ public:
     /**
      * @brief Which entry of the pilot-symbol vector symbol `symbolIndex` reads for its pilot slot `pilotSlot`.
      *
-     * The rule is one cycle read at two levels: the slots of a symbol take consecutive entries, and the next
-     * symbol carries on where the last one stopped — `pilot_symbols[(s * n_pilots + p) % len]`. A cycle whose
-     * length is a multiple of `n_pilots` therefore gives every symbol the same pilots, and one that is not
-     * rotates them from symbol to symbol, which is the whole point of stating the rule rather than leaving each
-     * block to invent it.
+     * The rule reads one cycle at two levels. The slots of a symbol take consecutive entries. The next symbol
+     * continues where the previous one stopped, `pilot_symbols[(s * n_pilots + p) % len]`. A cycle whose length
+     * is a multiple of `n_pilots` gives every symbol the same pilots. Any other cycle rotates them from symbol to
+     * symbol. This function is the single definition of the rule.
      *
-     * `symbolIndex` is reduced before the multiply. A symbol index is stream-absolute and a long run makes it
-     * large, and `s * n_pilots` would overflow long before `s` itself did; `(s mod len) * n_pilots` is congruent
-     * to it and cannot.
+     * `symbolIndex` is reduced before the multiply. A symbol index counts from the stream start and grows large
+     * over a long run. `s * n_pilots` would overflow long before `s` itself. `(s mod len) * n_pilots` is
+     * congruent to it and cannot overflow.
      */
     [[nodiscard]] static constexpr std::size_t pilotSymbolIndex(std::size_t symbolIndex, std::size_t pilotSlot, std::size_t nPilots, std::size_t cycleLength) noexcept { return ((symbolIndex % cycleLength) * nPilots + pilotSlot) % cycleLength; }
 
@@ -173,8 +172,8 @@ private:
         }
     }
 
-    /// The range is asymmetric because bin order is: `-fft_len/2` is the Nyquist bin and `+fft_len/2` is not a
-    /// carrier at all.
+    /// The range is asymmetric, as bin order is. `-fft_len/2` is the Nyquist bin, and `+fft_len/2` is not a
+    /// carrier.
     static void requireCarrier(std::size_t fftLength, int carrier) {
         const int half = static_cast<int>(fftLength / 2UZ);
         if (carrier < -half || carrier >= half) {
@@ -196,30 +195,28 @@ private:
 };
 
 /**
- * @brief A Schmidl-Cox preamble: one full-length frequency-domain symbol whose time-domain form repeats its
- * lower half in its upper half.
+ * @brief A Schmidl-Cox preamble, one frequency-domain symbol whose time-domain upper half repeats its lower half.
  *
- * The repeat is not a property of the values, it is a property of which carriers hold them. Writing the inverse
- * transform out,
+ * The repeat depends on which carriers hold values and not on the values. Write out the inverse transform.
  *
  *     x[n + N/2] = (1/N) * sum_k X[k] * exp(j*2*pi*k*n/N) * exp(j*pi*k)
  *
- * and `exp(j*pi*k)` is `+1` on every even `k` and `-1` on every odd one. So a symbol whose odd bins are all
- * zero has `x[n + N/2] = x[n]` exactly, for every `n`, with no approximation and no dependence on what the even
- * carriers hold. That is the whole construction: occupy the even carriers, leave the odd ones empty, and the
- * time-domain half-repeat that `SchmidlCoxSync`'s correlator looks for follows. `fftLength` is even, so a
- * carrier's parity and its bin's parity are the same and "even carrier" and "even bin" name the same set.
+ * `exp(j*pi*k)` is `+1` on every even `k` and `-1` on every odd `k`. A symbol whose odd bins are all zero
+ * therefore has `x[n + N/2] = x[n]` exactly, for every `n`. The result is exact and does not depend on the
+ * values of the even carriers. The construction follows. Occupy the even carriers and leave the odd ones empty.
+ * The time-domain half-repeat that a Schmidl-Cox correlator looks for then follows. `fftLength` is even. A
+ * carrier's parity and its bin's parity are then the same, and "even carrier" and "even bin" name one set.
  *
- * The occupied band is the `occupied` carriers closest to DC, DC itself excluded: `-occupied/2 … -1` and
- * `1 … occupied/2`. DC carries nothing, because a receiver measures its own frequency error against the
- * preamble and a DC term is the one component a residual offset cannot be seen against. The even members of that
- * band each take a QPSK point scaled by `sqrt(2)`, so each holds twice the power a fully occupied symbol would
- * put on a carrier and the preamble's total energy comes to `2 * evenCarrierCount`, which is `occupied` itself
- * whenever `occupied/2` is even — the case every published numerology is in.
+ * The occupied band is the `occupied` carriers closest to DC, with DC excluded. They are `-occupied/2 … -1`
+ * and `1 … occupied/2`. DC carries nothing. A receiver measures its frequency error against the preamble, and a
+ * residual offset cannot be seen against a DC term. Each even member of the band takes a QPSK point scaled by
+ * `sqrt(2)`. Each then holds twice the power a fully occupied symbol puts on a carrier. The total energy of the
+ * preamble is `2 * evenCarrierCount`. That equals `occupied` whenever `occupied/2` is even, as it is in every
+ * published numerology.
  *
- * The points come from a seeded PRNG rather than a published sequence: what the correlator needs is that the
- * lower half looks like noise to a timing metric, not that it matches any standard's table. A standard's
- * preamble is a sync word the caller supplies verbatim; this is the helper for when there is no standard.
+ * The points come from a seeded PRNG and not from a published sequence. The correlator needs the lower half to
+ * look like noise to a timing metric. It does not need a match to any standard's table. A standard's preamble is
+ * a sync word the caller supplies verbatim. This helper serves when there is no standard.
  */
 [[nodiscard]] inline std::vector<std::complex<float>> schmidlCoxPreamble(std::size_t fftLength, std::size_t occupied, std::uint64_t seed) {
     if (fftLength < 4UZ || fftLength > CarrierMap::kMaxFftLength || fftLength % 2UZ != 0UZ) {
