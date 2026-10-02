@@ -8,10 +8,10 @@
 #include <format>
 #include <numbers>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/timing/SampleClock.hpp>
 
 namespace gr::timing {
@@ -63,7 +63,8 @@ struct ScheduleNaming {
  * The table is a value. Nothing here is mutable, and nothing is carried between calls. The caller decides what
  * to do with a schedule, such as its sign, the refusal of an out-of-range value or the swap of one table for
  * another. The two derived schedules differ only in the meaning of their values and in the one output form each
- * adds. They share the knot table, the validation and the cursor. The two cannot diverge in those parts.
+ * adds. They share the knot table, the validation and the cursor. The two cannot diverge in those parts. The
+ * constructor throws `gr::exception` for a table it refuses.
  */
 class PiecewiseLinearSchedule {
 public:
@@ -118,19 +119,19 @@ public:
 protected:
     PiecewiseLinearSchedule(std::span<const std::int64_t> timesNs, std::span<const double> values, const ScheduleNaming& naming) : _times(timesNs.begin(), timesNs.end()), _values(values.begin(), values.end()) {
         if (timesNs.size() != values.size()) {
-            throw std::invalid_argument(std::format("{}: {} times against {} {} — the two must be paired", naming.type, timesNs.size(), values.size(), naming.plural));
+            throw gr::exception(std::format("{}: {} times against {} {} — the two must be paired", naming.type, timesNs.size(), values.size(), naming.plural));
         }
         if (_times.size() < kMinKnots || _times.size() > kMaxKnots) {
-            throw std::invalid_argument(std::format("{}: {} knots — the table holds between {} and {}", naming.type, _times.size(), kMinKnots, kMaxKnots));
+            throw gr::exception(std::format("{}: {} knots — the table holds between {} and {}", naming.type, _times.size(), kMinKnots, kMaxKnots));
         }
         for (std::size_t i = 0UZ; i < _values.size(); ++i) {
             if (!std::isfinite(_values[i])) {
-                throw std::invalid_argument(std::format("{}: knot {} has {} {}, which is not {}", naming.type, i, naming.singular, _values[i], naming.finite));
+                throw gr::exception(std::format("{}: knot {} has {} {}, which is not {}", naming.type, i, naming.singular, _values[i], naming.finite));
             }
         }
         for (std::size_t i = 1UZ; i < _times.size(); ++i) {
             if (_times[i] <= _times[i - 1UZ]) {
-                throw std::invalid_argument(std::format("{}: knot {} is at {} ns, at or before knot {} at {} ns — times must strictly increase", naming.type, i, _times[i], i - 1UZ, _times[i - 1UZ]));
+                throw gr::exception(std::format("{}: knot {} is at {} ns, at or before knot {} at {} ns — times must strictly increase", naming.type, i, _times[i], i - 1UZ, _times[i - 1UZ]));
             }
         }
 

@@ -10,7 +10,6 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/signal/Phasor.hpp>
@@ -205,27 +204,27 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
 
         expect(nothrow([&] { (void)FrequencySchedule(two, twoOffsets); })) << "two knots make a line";
 
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<std::int64_t> times{0LL};
             const std::vector<double>       offsets{0.};
             (void)FrequencySchedule(times, offsets);
         })) << "one knot is not a schedule";
-        expect(throws<std::invalid_argument>([] { (void)FrequencySchedule(std::span<const std::int64_t>{}, std::span<const double>{}); })) << "no knots at all";
-        expect(throws<std::invalid_argument>([&] { (void)FrequencySchedule(two, std::span<const double>(twoOffsets).first(1UZ)); })) << "the two vectors must be paired";
+        expect(throws<gr::exception>([] { (void)FrequencySchedule(std::span<const std::int64_t>{}, std::span<const double>{}); })) << "no knots at all";
+        expect(throws<gr::exception>([&] { (void)FrequencySchedule(two, std::span<const double>(twoOffsets).first(1UZ)); })) << "the two vectors must be paired";
 
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<std::int64_t> times{0LL, 1'000LL, 1'000LL};
             const std::vector<double>       offsets{0., 1., 2.};
             (void)FrequencySchedule(times, offsets);
         })) << "two knots at the same time";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<std::int64_t> times{0LL, 2'000LL, 1'000LL};
             const std::vector<double>       offsets{0., 1., 2.};
             (void)FrequencySchedule(times, offsets);
         })) << "time running backwards";
 
         for (const double bad : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
-            expect(throws<std::invalid_argument>([bad] {
+            expect(throws<gr::exception>([bad] {
                 const std::vector<std::int64_t> times{0LL, 1'000LL};
                 const std::vector<double>       offsets{0., bad};
                 (void)FrequencySchedule(times, offsets);
@@ -245,7 +244,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         for (std::size_t i = 0UZ; i < tooMany.size(); ++i) {
             tooMany[i] = static_cast<std::int64_t>(i);
         }
-        expect(throws<std::invalid_argument>([&] { (void)FrequencySchedule(tooMany, tooManyOffsets); }));
+        expect(throws<gr::exception>([&] { (void)FrequencySchedule(tooMany, tooManyOffsets); }));
     };
 
     // A constant schedule is the degenerate case, and the arithmetic must still get it right. Every increment is the
@@ -385,7 +384,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         expect(std::abs(schedule.segmentSlopePerSecond(500'000'000LL) - (delays[1] - delays[0])) < 1e-18) << "the first segment falls 2.339 ms in one second";
         expect(schedule.segmentSlopePerSecond(9'000'000'000LL) == schedule.segmentSlopePerSecond(2'000'000'000LL)) << "past the table the last segment's slope stands";
 
-        expect(throws<std::invalid_argument>([&] {
+        expect(throws<gr::exception>([&] {
             const std::vector<double> broken{1., std::numeric_limits<double>::infinity(), 2.};
             (void)DelaySchedule(times, broken);
         })) << "a non-finite delay is refused, in the delay schedule's own words";
