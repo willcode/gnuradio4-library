@@ -55,9 +55,9 @@ const boost::ut::suite<"CyclicSyndrome"> cyclicSyndromeTests = [] {
     };
 
     "refusals fire by name"_test = [] {
-        expect(throws([] { CyclicSyndrome code(0x1B9U, 10U, 16U); })) << "a generator without its degree term";
-        expect(throws([] { CyclicSyndrome code(0x5B9U, 10U, 40U); })) << "data past one word";
-        expect(throws([] { CyclicSyndrome code(0x5B9U, 0U, 16U); })) << "no checkword";
+        expect(throws<gr::exception>([] { CyclicSyndrome code(0x1B9U, 10U, 16U); })) << "a generator without its degree term";
+        expect(throws<gr::exception>([] { CyclicSyndrome code(0x5B9U, 10U, 40U); })) << "data past one word";
+        expect(throws<gr::exception>([] { CyclicSyndrome code(0x5B9U, 0U, 16U); })) << "no checkword";
     };
 };
 

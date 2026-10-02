@@ -3,8 +3,8 @@
 
 #include <cstdint>
 #include <format>
-#include <stdexcept>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/fec/Gf2Polynomial.hpp>
 
 /**
@@ -16,7 +16,8 @@
  * is not a CRC configuration. Each block's checkword is xored with an offset word that labels the
  * block's position. The syndrome of a valid block equals its offset word. A valid block with no
  * offset has a remainder of zero. A valid block with an offset therefore has its offset word as the
- * remainder. Framing recovery is one reduction and one lookup, with no trial per offset.
+ * remainder. Framing recovery is one reduction and one lookup, with no trial per offset. The constructor
+ * throws `gr::exception` for a shape the registers cannot hold.
  */
 namespace gr::digital {
 
@@ -27,10 +28,10 @@ struct CyclicSyndrome {
 
     constexpr CyclicSyndrome(std::uint32_t poly, unsigned nCheck, unsigned nData) : polynomial(poly), checkBits(nCheck), dataBits(nData) {
         if (nCheck == 0U || nCheck > 16U || nData == 0U || nData > 32U) {
-            throw std::invalid_argument(std::format("CyclicSyndrome: {} data and {} check bits; the offset scheme's registers are one word (data <= 32, check in 1..16)", nData, nCheck));
+            throw gr::exception(std::format("CyclicSyndrome: {} data and {} check bits; the offset scheme's registers are one word (data <= 32, check in 1..16)", nData, nCheck));
         }
         if (((poly >> nCheck) & 1U) == 0U || (poly >> nCheck) > 1U) {
-            throw std::invalid_argument(std::format("CyclicSyndrome: the generator {:#x} must carry its degree-{} term and nothing above it", poly, nCheck));
+            throw gr::exception(std::format("CyclicSyndrome: the generator {:#x} must carry its degree-{} term and nothing above it", poly, nCheck));
         }
     }
 
