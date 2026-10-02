@@ -27,19 +27,42 @@ enum class MetaInfo : std::uint8_t {
 
 namespace detail {
 
+/// @brief the checked upper index: max_size selects the axis length; an index or signal out of range is an error
 template<typename T>
-std::size_t checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = 0UZ, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] std::expected<std::size_t, gr::Error> checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = 0UZ, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     const std::size_t maxDataSetIndex = ds.axisValues(dim::X).size();
     if (maxIndex == max_size) { // renormalise default range
         maxIndex = maxDataSetIndex;
     }
     if (minIndex > maxIndex || minIndex >= maxDataSetIndex || maxIndex > maxDataSetIndex || signalIndex >= ds.size()) {
-        throw gr::exception(std::format("DataSet<{}> ({}/{}: \"{}\") indices [{}, {}] out of range [0, {}]",                                    //
-                                gr::meta::type_name<T>(), signalIndex, ds.size(), signalIndex < ds.size() ? ds.signalName(signalIndex) : "???", //
-                                minIndex, maxIndex, maxDataSetIndex),
-            location);
+        return std::unexpected(gr::Error(std::format("DataSet<{}> ({}/{}: \"{}\") indices [{}, {}] out of range [0, {}]",                                    //
+                                             gr::meta::type_name<T>(), signalIndex, ds.size(), signalIndex < ds.size() ? ds.signalName(signalIndex) : "???", //
+                                             minIndex, maxIndex, maxDataSetIndex),
+            location));
     }
     return maxIndex;
+}
+
+/// @brief the X-axis value at @p sampleIndex, NaN past the axis end
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] constexpr T xValue(const DataSet<T>& dataSet, std::size_t sampleIndex) {
+    if (dataSet.axisCount() == 0UZ || dataSet.axisValues(0UZ).size() <= sampleIndex) {
+        return std::numeric_limits<TValue>::quiet_NaN();
+    }
+    return static_cast<T>(dataSet.axisValues(dim::X)[sampleIndex]);
+}
+
+/// @brief the value of signal @p signalIndex at @p sampleIndex, NaN for a signal or sample out of range
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] constexpr T yValue(const DataSet<T>& dataSet, std::size_t sampleIndex, std::size_t signalIndex = 0UZ) {
+    if (signalIndex >= dataSet.size()) {
+        return std::numeric_limits<TValue>::quiet_NaN();
+    }
+    std::span<const T> vals = dataSet.signalValues(signalIndex);
+    if (vals.size() <= sampleIndex) {
+        return std::numeric_limits<TValue>::quiet_NaN();
+    }
+    return static_cast<T>(vals[sampleIndex]);
 }
 
 template<typename T, typename U>
@@ -57,108 +80,112 @@ template<typename T>
 
 } // namespace detail
 
-template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getIndexValue(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t sampleIndex, std::size_t signalIndex = 0UZ) {
+/// @brief the X value (dim::X) or the signal value (dim::Y) at @p sampleIndex, NaN past the end; another dimIndex is an error
+template<typename T>
+[[nodiscard]] constexpr std::expected<T, gr::Error> getIndexValue(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t sampleIndex, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     if (dimIndex == dim::X) {
-        if (dataSet.axisCount() == 0UZ || dataSet.axisValues(0UZ).size() <= sampleIndex) {
-            return std::numeric_limits<TValue>::quiet_NaN();
-        }
-        return static_cast<T>(dataSet.axisValues(dim::X)[sampleIndex]);
+        return detail::xValue(dataSet, sampleIndex);
     }
-
     if (dimIndex == dim::Y) {
-        if (signalIndex >= dataSet.size()) {
-            return std::numeric_limits<TValue>::quiet_NaN();
-        }
-        std::span<const T> vals = dataSet.signalValues(signalIndex);
-        if (vals.size() <= sampleIndex) {
-            return std::numeric_limits<TValue>::quiet_NaN();
-        }
-        return static_cast<T>(vals[sampleIndex]);
+        return detail::yValue(dataSet, sampleIndex, signalIndex);
     }
-
-    throw gr::exception(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
+    return std::unexpected(gr::Error(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()), location));
 }
 
 template<typename T>
-T getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ) {
+[[nodiscard]] std::expected<T, gr::Error> getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     if (indexMax == max_size) { // renormalise default range
         indexMax = dataSet.axisValues(dim::X).size() - 1UZ;
     }
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex);
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
-    if (dimIndex == dim::X || dimIndex == dim::Y) {
-        return getIndexValue(dataSet, dimIndex, indexMax, signalIndex) - getIndexValue(dataSet, dimIndex, indexMin, signalIndex);
+    if (dimIndex == dim::X) {
+        return detail::xValue(dataSet, indexMax) - detail::xValue(dataSet, indexMin);
+    }
+    if (dimIndex == dim::Y) {
+        return detail::yValue(dataSet, indexMax, signalIndex) - detail::yValue(dataSet, indexMin, signalIndex);
+    }
+    return std::unexpected(gr::Error(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()), location));
+}
+
+namespace detail {
+/// @brief signal @p signalIndex interpolated linearly at @p xValue, clamped to the end values, NaN without data
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>, std::convertible_to<TValue> U>
+[[nodiscard]] constexpr T interpolateY(const DataSet<T>& dataSet, U xValue, std::size_t signalIndex = 0) {
+    if (dataSet.axisCount() == 0) {
+        return std::numeric_limits<TValue>::quiet_NaN();
+    }
+    const auto& xAxis = dataSet.axisValues(dim::X);
+    const auto  ySpan = dataSet.signalValues(signalIndex);
+
+    if (xAxis.empty() || ySpan.empty()) {
+        return std::numeric_limits<TValue>::quiet_NaN();
     }
 
-    throw gr::exception(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
+    // clamp
+    if (xValue <= static_cast<T>(xAxis.front())) {
+        return static_cast<T>(ySpan.front());
+    } else if (xValue >= static_cast<T>(xAxis.back())) {
+        return static_cast<T>(ySpan.back());
+    }
+
+    // binary-search for interval
+    auto it = std::lower_bound(xAxis.begin(), xAxis.end(), T(xValue));
+    if (it == xAxis.end()) {
+        return static_cast<T>(ySpan.back());
+    }
+    auto idxHigh = std::distance(xAxis.begin(), it);
+    if (idxHigh == 0) {
+        return static_cast<T>(ySpan.front());
+    }
+    std::size_t iHigh = static_cast<std::size_t>(idxHigh);
+    std::size_t iLow  = iHigh - 1;
+
+    T xLow  = static_cast<T>(xAxis[iLow]);
+    T xHigh = static_cast<T>(xAxis[iHigh]);
+    T yLow  = static_cast<T>(ySpan[iLow]);
+    T yHigh = static_cast<T>(ySpan[iHigh]);
+
+    // linear interpolation
+    T dx = xHigh - xLow;
+    if (std::abs(gr::value(dx)) == T(0)) {
+        return yLow;
+    }
+    const T t = (xValue - xLow) / dx;
+    return yLow + t * (yHigh - yLow);
 }
+} // namespace detail
 
 /*!
  * \brief Interpolate in Y dimension at a given X coordinate xValue.
- *        If out of range, we clamp or return NaN.
+ *        If out of range, we clamp or return NaN. Another dimIndex than dim::X or dim::Y is an error.
  */
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>, std::convertible_to<TValue> U>
-[[nodiscard]] constexpr T getValue(const DataSet<T>& dataSet, std::size_t dimIndex, U xValue, std::size_t signalIndex = 0) {
+[[nodiscard]] constexpr std::expected<T, gr::Error> getValue(const DataSet<T>& dataSet, std::size_t dimIndex, U xValue, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
     if (dimIndex == dim::X) {
         return xValue; // if user requests X dimension at xValue, that’s basically identity
     }
-
     if (dimIndex == dim::Y) { // linear interpolation in X-axis=0
-        if (dataSet.axisCount() == 0) {
-            return std::numeric_limits<TValue>::quiet_NaN();
-        }
-        const auto& xAxis = dataSet.axisValues(dim::X);
-        const auto  ySpan = dataSet.signalValues(signalIndex);
-
-        if (xAxis.empty() || ySpan.empty()) {
-            return std::numeric_limits<TValue>::quiet_NaN();
-        }
-
-        // clamp
-        if (xValue <= static_cast<T>(xAxis.front())) {
-            return static_cast<T>(ySpan.front());
-        } else if (xValue >= static_cast<T>(xAxis.back())) {
-            return static_cast<T>(ySpan.back());
-        }
-
-        // binary-search for interval
-        auto it = std::lower_bound(xAxis.begin(), xAxis.end(), T(xValue));
-        if (it == xAxis.end()) {
-            return static_cast<T>(ySpan.back());
-        }
-        auto idxHigh = std::distance(xAxis.begin(), it);
-        if (idxHigh == 0) {
-            return static_cast<T>(ySpan.front());
-        }
-        std::size_t iHigh = static_cast<std::size_t>(idxHigh);
-        std::size_t iLow  = iHigh - 1;
-
-        T xLow  = static_cast<T>(xAxis[iLow]);
-        T xHigh = static_cast<T>(xAxis[iHigh]);
-        T yLow  = static_cast<T>(ySpan[iLow]);
-        T yHigh = static_cast<T>(ySpan[iHigh]);
-
-        // linear interpolation
-        T dx = xHigh - xLow;
-        if (std::abs(gr::value(dx)) == T(0)) {
-            return yLow;
-        }
-        const T t = (xValue - xLow) / dx;
-        return yLow + t * (yHigh - yLow);
+        return detail::interpolateY(dataSet, xValue, signalIndex);
     }
-
-    throw gr::exception(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
+    return std::unexpected(gr::Error(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()), location));
 }
 
 template<typename T>
-std::vector<T> getSubArrayCopy(const DataSet<T>& ds, std::size_t indexMin, std::size_t indexMax, std::size_t signalIndex = 0) {
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> getSubArrayCopy(const DataSet<T>& ds, std::size_t indexMin, std::size_t indexMax, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
     if (indexMax <= indexMin) {
-        return {};
+        return std::vector<T>{};
     }
-    indexMax                  = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex);
+    auto checkedMax = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
     std::span<const T> values = ds.signalValues(signalIndex);
-    return std::vector<T>(values.begin() + static_cast<std::ptrdiff_t>(indexMin), values.begin() + static_cast<std::ptrdiff_t>(indexMax));
+    return std::vector<T>(values.begin() + static_cast<std::ptrdiff_t>(indexMin), values.begin() + static_cast<std::ptrdiff_t>(*checkedMax));
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>

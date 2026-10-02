@@ -81,9 +81,9 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     bool needsInterpolation = !sameHorizontalBase(ds1, ds2);
 
     for (std::size_t i = 0; i < dataCount; i++) {
-        TValue x             = gr::value(getIndexValue(ds1, dim::X, i));
-        T      Y1            = getIndexValue(ds1, dim::Y, i);
-        T      Y2            = needsInterpolation ? getValue(ds2, dim::Y, x) : getIndexValue(ds2, dim::Y, i);
+        TValue x             = gr::value(detail::xValue(ds1, i));
+        T      Y1            = detail::yValue(ds1, i);
+        T      Y2            = needsInterpolation ? detail::interpolateY(ds2, x) : detail::yValue(ds2, i);
         T      result        = detail::applyMathOperation<T>(op, Y1, Y2);
         ret.signal_values[i] = static_cast<T>(result);
     }
@@ -96,7 +96,7 @@ template<typename T, std::convertible_to<T> U, typename TValue = gr::meta::funda
     DataSet<T> ret       = ds; // copy
     auto       dataCount = ds.axis_values.empty() ? 0UZ : ds.axis_values[0].size();
     for (std::size_t i = 0; i < dataCount; i++) {
-        T Y1     = getIndexValue(ds, dim::Y, i);
+        T Y1     = detail::yValue(ds, i);
         T result = 0;
         switch (op) {
         case MathOp::ADD: result = Y1 + value; break;

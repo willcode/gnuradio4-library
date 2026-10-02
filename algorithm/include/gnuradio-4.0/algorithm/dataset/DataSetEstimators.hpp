@@ -2,13 +2,16 @@
 #define DATASETESTIMATORS_HPP
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <expected>
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <source_location>
 #include <stdexcept>
 #include <string>
@@ -56,14 +59,18 @@ template<typename T, typename TAcc>
 }
 
 template<typename T>
-[[nodiscard]] constexpr T computeCentreOfMass(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = max_size, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
-    maxIndex = detail::checkIndexRange(ds, minIndex, maxIndex, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> computeCentreOfMass(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = max_size, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(ds, minIndex, maxIndex, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    maxIndex = *checkedMax;
     T com    = T(0);
     T mass   = T(0);
 
     for (std::size_t i = minIndex; i < maxIndex; i++) {
-        const T x     = getIndexValue(ds, dim::X, i);
-        const T value = getIndexValue(ds, dim::Y, i, signalIndex);
+        const T x     = detail::xValue(ds, i);
+        const T value = detail::yValue(ds, i, signalIndex);
         if (gr::math::isfinite(x) && gr::math::isfinite(value)) {
             com += x * value;
             mass += value;
@@ -124,18 +131,22 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
-[[nodiscard]] constexpr std::optional<Point<T>> getMaximum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<std::optional<Point<T>>, gr::Error> getMaximum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
-    indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    auto           checkedMax     = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
     if (indexMin == indexMax) {
-        return Point<T>{indexMin, gr::dataset::getIndexValue(dataSet, dim::Y, indexMin, signalIndex)};
+        return Point<T>{indexMin, detail::yValue(dataSet, indexMin, signalIndex)};
     }
 
     int locMax = -1;
     T   maxVal = std::numeric_limits<TValue>::lowest();
     for (std::size_t i = indexMin; i < indexMax; i++) {
-        if (T actual = getIndexValue(dataSet, dim::Y, i, signalIndex); gr::math::isfinite(actual) && actual > maxVal) {
+        if (T actual = detail::yValue(dataSet, i, signalIndex); gr::math::isfinite(actual) && actual > maxVal) {
             maxVal = actual;
             locMax = static_cast<int>(i);
         }
@@ -150,18 +161,22 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
-[[nodiscard]] constexpr std::optional<Point<T>> getMinimum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<std::optional<Point<T>>, gr::Error> getMinimum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
-    indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    auto           checkedMax     = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
     if (indexMin == indexMax) {
-        return Point<T>{indexMin, gr::dataset::getIndexValue(dataSet, dim::Y, indexMin, signalIndex)};
+        return Point<T>{indexMin, detail::yValue(dataSet, indexMin, signalIndex)};
     }
 
     T   minVal = +std::numeric_limits<TValue>::max();
     int locMin = -1;
     for (std::size_t i = indexMin; i < indexMax; i++) {
-        if (T actual = gr::dataset::getIndexValue(dataSet, dim::Y, i, signalIndex); gr::math::isfinite(actual) && actual < minVal) {
+        if (T actual = detail::yValue(dataSet, i, signalIndex); gr::math::isfinite(actual) && actual < minVal) {
             minVal = actual;
             locMin = static_cast<int>(i);
         }
@@ -176,8 +191,12 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getMean(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getMean(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
     auto signalRange  = dataSet.signalValues(signalIndex) | std::views::drop(indexMin) | std::views::take(indexMax - indexMin);
     auto finiteValues = signalRange | std::views::filter(gr::math::isfinite<T>);
@@ -196,8 +215,12 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getMedian(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getMedian(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
     std::span<const T> values = dataSet.signalValues(signalIndex).subspan(indexMin, indexMax - indexMin);
 
@@ -223,8 +246,12 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T>
-[[nodiscard]] constexpr T getRange(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getRange(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
     auto signalRange  = dataSet.signalValues(signalIndex) | std::views::drop(indexMin) | std::views::take(indexMax - indexMin);
     auto finiteValues = signalRange | std::views::filter(gr::math::isfinite<T>);
@@ -239,8 +266,12 @@ template<typename T>
 
 /// @brief population standard deviation, computed by Welford accumulation.
 template<typename T>
-[[nodiscard]] constexpr T getStdDev(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getStdDev(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
     auto signalRange  = dataSet.signalValues(signalIndex) | std::views::drop(indexMin) | std::views::take(indexMax - indexMin);
     auto finiteValues = signalRange | std::views::filter(gr::math::isfinite<T>);
@@ -268,13 +299,17 @@ template<typename T>
 /// @brief The standard deviation, i.e. the RMS of the mean-subtracted signal, despite the name.
 /// Retained under this name for source compatibility; prefer getStdDev.
 template<typename T>
-[[nodiscard]] constexpr T getRms(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<T, gr::Error> getRms(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     return getStdDev(dataSet, indexMin, indexMax, signalIndex, location);
 }
 
 template<typename T>
-[[nodiscard]] constexpr T getIntegral(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getIntegral(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
     // sign if reversed
     const T           sign_ = detail::sign(T(1), int(indexMax) - int(indexMin));
@@ -289,10 +324,10 @@ template<typename T>
     auto idxRange = std::views::iota(start, stop - 1);
     TAcc integral = std::transform_reduce(std::ranges::begin(idxRange), std::ranges::end(idxRange), TAcc(0), std::plus<>{}, //
         [&](std::size_t i) -> TAcc {
-            TAcc x0 = static_cast<TAcc>(getIndexValue(dataSet, dim::X, i, signalIndex));
-            TAcc x1 = static_cast<TAcc>(getIndexValue(dataSet, dim::X, i + 1, signalIndex));
-            TAcc y0 = static_cast<TAcc>(getIndexValue(dataSet, dim::Y, i, signalIndex));
-            TAcc y1 = static_cast<TAcc>(getIndexValue(dataSet, dim::Y, i + 1, signalIndex));
+            TAcc x0 = static_cast<TAcc>(detail::xValue(dataSet, i));
+            TAcc x1 = static_cast<TAcc>(detail::xValue(dataSet, i + 1));
+            TAcc y0 = static_cast<TAcc>(detail::yValue(dataSet, i, signalIndex));
+            TAcc y1 = static_cast<TAcc>(detail::yValue(dataSet, i + 1, signalIndex));
 
             TAcc area = TAcc(0.5) * (x1 - x0) * (y0 + y1);
             return gr::math::isfinite(area) ? area : TAcc(0);
@@ -302,29 +337,33 @@ template<typename T>
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getEdgeDetect(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getEdgeDetect(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
-    T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex).value().value;
-    T maxVal = getMaximum(dataSet, indexMin, indexMax, signalIndex).value().value;
-    T range  = maxVal > minVal ? maxVal - minVal : minVal - maxVal; // abs
+    T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
+    T maxVal = getMaximum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
+    T range  = maxVal > minVal ? maxVal - minVal : minVal - maxVal;                 // abs
     if (!gr::math::isfinite(range) || range == TValue(0)) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
     // check if falling or rising
-    T    startVal  = getIndexValue(dataSet, dim::Y, indexMin, signalIndex);
-    T    endVal    = getIndexValue(dataSet, dim::Y, indexMax - 1, signalIndex);
+    T    startVal  = detail::yValue(dataSet, indexMin, signalIndex);
+    T    endVal    = detail::yValue(dataSet, indexMax - 1, signalIndex);
     bool inverted  = (startVal > endVal);
-    T    startTime = getIndexValue(dataSet, dim::X, indexMin, signalIndex);
+    T    startTime = detail::xValue(dataSet, indexMin);
 
     T halfCross = inverted ? (maxVal - TValue(0.5) * range) : (minVal + TValue(0.5) * range);
     for (std::size_t i = indexMin; i < indexMax; i++) {
-        T actual = getIndexValue(dataSet, dim::Y, i, signalIndex);
+        T actual = detail::yValue(dataSet, i, signalIndex);
         if (!gr::math::isfinite(actual)) {
             continue;
         }
         if ((!inverted && actual > halfCross) || (inverted && actual < halfCross)) {
-            T xNow = getIndexValue(dataSet, dim::X, i, signalIndex);
+            T xNow = detail::xValue(dataSet, i);
             return xNow - startTime;
         }
     }
@@ -332,11 +371,15 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getDutyCycle(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+[[nodiscard]] constexpr std::expected<T, gr::Error> getDutyCycle(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
-    T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex).value().value;
-    T maxVal = getMaximum(dataSet, indexMin, indexMax, signalIndex).value().value;
+    T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
+    T maxVal = getMaximum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
 
     if (!gr::math::isfinite(minVal) || !gr::math::isfinite(maxVal) || minVal == maxVal) {
         return std::numeric_limits<TValue>::quiet_NaN();
@@ -362,12 +405,16 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getFrequencyEstimate(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<T, gr::Error> getFrequencyEstimate(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     // getFrequencyEstimate => naive/simple approach counting edges
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
-    T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex).value().value;
-    T maxVal = getMaximum(dataSet, indexMin, indexMax, signalIndex).value().value;
+    T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
+    T maxVal = getMaximum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
     if (!gr::math::isfinite(minVal) || !gr::math::isfinite(maxVal) || maxVal == minVal) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
@@ -383,11 +430,11 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     // 0 => below threshold, 1 => above threshold
     float actualState = 0.f;
     for (std::size_t i = indexMin; i < indexMax; i++) {
-        T actual = getIndexValue(dataSet, dim::Y, i, signalIndex);
+        T actual = detail::yValue(dataSet, i, signalIndex);
         if (!gr::math::isfinite(actual)) {
             continue;
         }
-        T x = getIndexValue(dataSet, dim::X, i, signalIndex);
+        T x = detail::xValue(dataSet, i);
 
         if (actualState < 0.5f) {
             // was low, check if we cross thresholdMax => rising edge
@@ -450,45 +497,53 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getLocationMaximumGaussInterpolated(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<T, gr::Error> getLocationMaximumGaussInterpolated(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     // getFrequencyEstimate => naive/simple approach counting edges
-    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    auto checkedMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
-    const auto locMax_ = getMaximum(dataSet, indexMin, indexMax, signalIndex);
+    const auto locMax_ = *getMaximum(dataSet, indexMin, indexMax, signalIndex); // the range is checked above
     if (!locMax_.has_value()) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
     const std::size_t locMax = locMax_.value().index;
 
     T refinedIndex = interpolateGaussian(dataSet.signalValues(signalIndex), locMax);
-    T x0           = getIndexValue(dataSet, dim::X, locMax, signalIndex);
+    T x0           = detail::xValue(dataSet, locMax);
     // approximate step
     // we’ll do a naive approach: X_{locMax+1} - X_{locMax}
     if (locMax + 1UZ >= static_cast<std::size_t>(dataSet.axisValues(dim::X).size())) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
-    T x1       = getIndexValue(dataSet, dim::X, locMax + 1UZ, signalIndex);
+    T x1       = detail::xValue(dataSet, locMax + 1UZ);
     T diff     = x1 - x0;
     T deltaBin = refinedIndex - static_cast<TValue>(locMax);
     return x0 + deltaBin * diff;
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getZeroCrossing(D&& dataSet, TValue threshold, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<T, gr::Error> getZeroCrossing(D&& dataSet, TValue threshold, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
-    indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    auto           checkedMax     = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
-    T    initial  = getIndexValue(dataSet, dim::Y, 0UZ, signalIndex);
+    T    initial  = detail::yValue(dataSet, 0UZ, signalIndex);
     int  index    = -1;
     T    value    = std::numeric_limits<TValue>::quiet_NaN();
     bool isRising = initial < threshold;
     if (isRising) { // rising edge
         for (std::size_t i = indexMin + 1UZ; i < indexMax; ++i) {
-            T yPrev = getIndexValue(dataSet, dim::Y, i - 1UZ, signalIndex);
-            T yCurr = getIndexValue(dataSet, dim::Y, i, signalIndex);
+            T yPrev = detail::yValue(dataSet, i - 1UZ, signalIndex);
+            T yCurr = detail::yValue(dataSet, i, signalIndex);
             if (gr::math::isfinite(yPrev) && gr::math::isfinite(yCurr) && yCurr >= threshold) {
-                T xPrev = getIndexValue(dataSet, dim::X, i - 1UZ, signalIndex);
-                T xCurr = getIndexValue(dataSet, dim::X, i, signalIndex);
+                T xPrev = detail::xValue(dataSet, i - 1UZ);
+                T xCurr = detail::xValue(dataSet, i);
                 index   = static_cast<int>(i);
                 value   = gr::dataset::detail::linearInterpolate(xPrev, xCurr, yPrev, yCurr, T(threshold));
                 break;
@@ -496,11 +551,11 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         }
     } else { // falling edge
         for (std::size_t i = indexMin + 1UZ; i < indexMax; ++i) {
-            T yPrev = getIndexValue(dataSet, dim::Y, i - 1UZ, signalIndex);
-            T yCurr = getIndexValue(dataSet, dim::Y, i, signalIndex);
+            T yPrev = detail::yValue(dataSet, i - 1UZ, signalIndex);
+            T yCurr = detail::yValue(dataSet, i, signalIndex);
             if (gr::math::isfinite(yPrev) && gr::math::isfinite(yCurr) && yCurr <= threshold) {
-                T xPrev = getIndexValue(dataSet, dim::X, i - 1UZ, signalIndex);
-                T xCurr = getIndexValue(dataSet, dim::X, i, signalIndex);
+                T xPrev = detail::xValue(dataSet, i - 1UZ);
+                T xCurr = detail::xValue(dataSet, i);
                 index   = static_cast<int>(i);
                 value   = gr::dataset::detail::linearInterpolate(xPrev, xCurr, yPrev, yCurr, T(threshold));
                 break;
@@ -509,7 +564,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
     }
     if (index < 0) {
         index = static_cast<int>(indexMax); // chose end-of-range
-        value = getIndexValue(dataSet, dim::Y, indexMax - 1UZ, signalIndex);
+        value = detail::yValue(dataSet, indexMax - 1UZ, signalIndex);
     }
 
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
@@ -537,23 +592,27 @@ struct StepStartDetectionResult {
 };
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue threshold = TValue(0.5), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] std::expected<std::optional<StepStartDetectionResult<T>>, gr::Error> detectStepStart(D& ds, TValue threshold = TValue(0.5), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
 
     std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds, "", location);
     if (!dsCheck.has_value()) {
-        throw gr::exception(std::format("Invalid DataSet for step/pulse start detection: {}", dsCheck.error()), location);
+        return std::unexpected(gr::Error(std::format("Invalid DataSet for step/pulse start detection: {}", dsCheck.error()), location));
     }
-    indexMax = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
+    auto checkedMax = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
 
     auto signal = ds.signalValues(signalIndex);
     if (signal.empty()) {
-        throw gr::exception("Signal is empty.");
+        return std::unexpected(gr::Error("Signal is empty.", location));
     }
 
     T initial = signal.front();
-    T max_val = estimators::getMaximum(ds, indexMin, indexMax, signalIndex).value().value;
-    T min_val = estimators::getMinimum(ds, indexMin, indexMax, signalIndex).value().value;
+    T max_val = estimators::getMaximum(ds, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
+    T min_val = estimators::getMinimum(ds, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
         ds.meta_information[signalIndex]["gr:minimum"] = gr::value(min_val);
         ds.meta_information[signalIndex]["gr:maximum"] = gr::value(max_val);
@@ -567,7 +626,7 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
     }
 
     T thresholdCrossing = isRising ? initial + threshold * (max_val - initial) : initial - threshold * (initial - min_val);
-    T triggerTime       = estimators::getZeroCrossing<MetaInfo::None>(ds, thresholdCrossing, indexMin, indexMax, signalIndex);
+    T triggerTime       = *estimators::getZeroCrossing<MetaInfo::None>(ds, thresholdCrossing, indexMin, indexMax, signalIndex); // the range is checked above
     if (std::isnan(gr::value(triggerTime))) {
         return std::nullopt; // failed to compute trigger time
     }
@@ -599,22 +658,26 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr std::optional<Point<T>> getSettingTime(D&& dataSet, std::size_t windowSize, TValue tolerance = TValue(0), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<std::optional<Point<T>>, gr::Error> getSettingTime(D&& dataSet, std::size_t windowSize, TValue tolerance = TValue(0), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
-    indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    auto           checkedMax     = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
     if (windowSize == 0UZ || (indexMax - indexMin) < windowSize) {
         return std::nullopt;
     }
     if (tolerance == TValue(0)) {
-        T minVal  = getMinimum(dataSet, indexMin, indexMax, signalIndex).value().value;
-        T maxVal  = getMaximum(dataSet, indexMin, indexMax, signalIndex).value().value;
+        T minVal  = getMinimum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
+        T maxVal  = getMaximum(dataSet, indexMin, indexMax, signalIndex)->value().value; // the range is checked above
         tolerance = TValue(0.02) * gr::value(gr::math::abs(maxVal - minVal));
     }
 
     // estimate settling time by shifting RMS window until the RMS is below the required threshold
     int settlingTime = -1;
     for (std::size_t i = indexMin; i + windowSize <= indexMax; ++i) {
-        T localRMS = estimators::getRms(dataSet, i, i + windowSize, signalIndex);
+        T localRMS = *estimators::getRms(dataSet, i, i + windowSize, signalIndex); // i + windowSize <= indexMax
         if (gr::math::abs(localRMS) <= tolerance) {
             settlingTime = static_cast<int>(i);
             break;
@@ -626,16 +689,16 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
 
     // estimate flat-top level by increasing the window as long as RMS is getting smaller
     const std::size_t settlingTimeIdx = static_cast<std::size_t>(settlingTime);
-    T                 prevRMS         = estimators::getRms(dataSet, settlingTimeIdx, settlingTimeIdx + windowSize, signalIndex);
+    T                 prevRMS         = *estimators::getRms(dataSet, settlingTimeIdx, settlingTimeIdx + windowSize, signalIndex); // within the checked range
     std::size_t       maxIndex;
     for (maxIndex = settlingTimeIdx; maxIndex + windowSize < indexMax; ++maxIndex) {
-        T localRMS = estimators::getRms(dataSet, settlingTimeIdx, maxIndex + windowSize, signalIndex);
+        T localRMS = *estimators::getRms(dataSet, settlingTimeIdx, maxIndex + windowSize, signalIndex);
         if (localRMS >= prevRMS) {
             break;
         }
         prevRMS = localRMS;
     }
-    T settlingLevel = estimators::getMean(dataSet, settlingTimeIdx, maxIndex + windowSize, signalIndex);
+    T settlingLevel = *estimators::getMean(dataSet, settlingTimeIdx, maxIndex + windowSize, signalIndex);
     settlingTime += static_cast<int>(windowSize) / 2;
     if (settlingTime < 0) {
         return std::nullopt;
@@ -673,24 +736,33 @@ struct StepPulseResponseMetrics {
 };
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
-StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] std::expected<StepPulseResponseMetrics<T>, gr::Error> analyzeStepPulseResponse(D&& ds, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
-    indexMax                      = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
+    auto           checkedMax     = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
+    if (!checkedMax) {
+        return std::unexpected(checkedMax.error());
+    }
+    indexMax = *checkedMax;
     if (indexMax - indexMin < 2UZ) {
-        throw gr::exception("Not enough data points for step/pulse analysis.");
+        return std::unexpected(gr::Error("Not enough data points for step/pulse analysis.", location));
     }
 
     // Step 1: detect initial rough edge
-    auto firstRoughEdgeOpt = estimators::detectStepStart<MetaInfo::None>(ds, TValue(0.5), indexMin, indexMax, signalIndex);
-    if (!firstRoughEdgeOpt.has_value()) {
-        throw gr::exception("no step detected in the signal.");
+    std::array<StepStartDetectionResult<T>, 3UZ> roughEdges{};
+    for (const auto& [edge, level] : std::views::zip(roughEdges, std::array{TValue(0.5), TValue(0.2), TValue(0.8)})) {
+        auto detected = estimators::detectStepStart<MetaInfo::None>(ds, level, indexMin, indexMax, signalIndex, location);
+        if (!detected) {
+            return std::unexpected(detected.error());
+        }
+        if (!detected->has_value()) {
+            return std::unexpected(gr::Error(std::format("no step detected in the signal at level {}.", level), location));
+        }
+        edge = **detected;
     }
-    const StepStartDetectionResult<T>& firstRoughEdge    = firstRoughEdgeOpt.value();
-    const StepStartDetectionResult<T>  firstRoughLevel20 = estimators::detectStepStart<MetaInfo::None>(ds, TValue(0.2), indexMin, indexMax, signalIndex).value();
-    const StepStartDetectionResult<T>  firstRoughLevel80 = estimators::detectStepStart<MetaInfo::None>(ds, TValue(0.8), indexMin, indexMax, signalIndex).value();
-    const std::size_t                  roughRiseTime     = firstRoughLevel80.index - firstRoughLevel20.index;
-    const TValue                       roughMinThreshold = gr::value(TValue(0.02) * (firstRoughEdge.maxValue - firstRoughEdge.minValue));
+    const auto& [firstRoughEdge, firstRoughLevel20, firstRoughLevel80] = roughEdges;
+    const std::size_t roughRiseTime                                    = firstRoughLevel80.index - firstRoughLevel20.index;
+    const TValue      roughMinThreshold                                = gr::value(TValue(0.02) * (firstRoughEdge.maxValue - firstRoughEdge.minValue));
 
     StepPulseResponseMetrics<T> metrics;
     metrics.triggerTime = gr::cast<T>(firstRoughEdge.index);
@@ -700,17 +772,33 @@ StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMi
     const bool         isRising     = firstRoughEdge.isRising;
 
     // Step 2: compute V1 using rough detected edge
-    const std::size_t V1Start      = 0UZ;
-    const std::size_t V1End        = firstRoughEdge.index > roughRiseTime ? firstRoughEdge.index - roughRiseTime : 4UZ; // based on 20%-80% rise-time around ~50% level
-    const TValue      rmsEstimate  = std::max(gr::value(estimators::getRms(ds, V1Start, V1End, signalIndex)), roughMinThreshold);
-    const TValue      meanEstimate = gr::value(estimators::getMean(ds, V1Start, V1End, signalIndex));
-    const T           rampStart    = estimators::getZeroCrossing<MetaInfo::None>(ds, meanEstimate + TValue(2.5) * (isRising ? +rmsEstimate : -rmsEstimate), V1Start, firstRoughEdge.index, signalIndex);
+    const std::size_t V1Start = 0UZ;
+    const std::size_t V1End   = firstRoughEdge.index > roughRiseTime ? firstRoughEdge.index - roughRiseTime : 4UZ; // based on 20%-80% rise-time around ~50% level
+    const auto        rms     = estimators::getRms(ds, V1Start, V1End, signalIndex, location);
+    const auto        mean    = estimators::getMean(ds, V1Start, V1End, signalIndex, location);
+    if (!rms || !mean) {
+        return std::unexpected(rms ? mean.error() : rms.error());
+    }
+    const TValue rmsEstimate  = std::max(gr::value(*rms), roughMinThreshold);
+    const TValue meanEstimate = gr::value(*mean);
+    const auto   rampStart    = estimators::getZeroCrossing<MetaInfo::None>(ds, meanEstimate + TValue(2.5) * (isRising ? +rmsEstimate : -rmsEstimate), V1Start, firstRoughEdge.index, signalIndex, location);
+    if (!rampStart) {
+        return std::unexpected(rampStart.error());
+    }
 
-    metrics.V1 = estimators::getMean(ds, V1Start, std::min(static_cast<std::size_t>(gr::value(rampStart)), firstRoughEdge.index), signalIndex); // should be bias-free from over- and under-shoot
+    const auto V1 = estimators::getMean(ds, V1Start, std::min(static_cast<std::size_t>(gr::value(*rampStart)), firstRoughEdge.index), signalIndex, location); // should be bias-free from over- and under-shoot
+    if (!V1) {
+        return std::unexpected(V1.error());
+    }
+    metrics.V1 = *V1;
 
     // Step 3: detect peak position
     const std::size_t peakMaxIndex = std::min(firstRoughEdge.index + 2UZ * roughRiseTime, indexMax);
-    auto              peakIndex    = isRising ? estimators::getMaximum(ds, firstRoughEdge.index, peakMaxIndex) : estimators::getMinimum(ds, firstRoughEdge.index, peakMaxIndex);
+    const auto        peak         = isRising ? estimators::getMaximum(ds, firstRoughEdge.index, peakMaxIndex, 0UZ, location) : estimators::getMinimum(ds, firstRoughEdge.index, peakMaxIndex, 0UZ, location);
+    if (!peak) {
+        return std::unexpected(peak.error());
+    }
+    const auto& peakIndex = *peak;
     if (!peakIndex.has_value()) { // no peak detected
         metrics.peakAmplitude = std::numeric_limits<TValue>::quiet_NaN();
         metrics.peakTime      = std::numeric_limits<TValue>::quiet_NaN();
@@ -718,7 +806,11 @@ StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMi
         metrics.peakAmplitude = ds.signalValues(signalIndex)[peakIndex.value().index] - metrics.V1;
         metrics.peakTime      = ds.axisValues(dim::X)[peakIndex.value().index];
 
-        auto settlingTimeOpt = getSettingTime(ds, 4UZ * roughRiseTime, roughMinThreshold, peakIndex.value().index, indexMax, signalIndex);
+        const auto settling = getSettingTime(ds, 4UZ * roughRiseTime, roughMinThreshold, peakIndex.value().index, indexMax, signalIndex, location);
+        if (!settling) {
+            return std::unexpected(settling.error());
+        }
+        const auto& settlingTimeOpt = *settling;
         if (settlingTimeOpt.has_value()) {
             metrics.isEstimate   = false;
             metrics.settlingTime = gr::cast<T>(settlingTimeOpt.value().index);
@@ -737,13 +829,13 @@ StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMi
 
     // Step 5: compute bias-free trigger time and 10%->90% rise-time
     const T riseLevel   = isRising ? metrics.V1 + TValue(0.5) * (metrics.V2 - metrics.V1) : metrics.V1 - TValue(0.5) * (metrics.V1 - metrics.V2);
-    const T firstEdge   = estimators::getZeroCrossing<MetaInfo::Apply>(ds, riseLevel, indexMin, indexMax, signalIndex);
+    const T firstEdge   = *estimators::getZeroCrossing<MetaInfo::Apply>(ds, riseLevel, indexMin, indexMax, signalIndex); // the range is checked above
     metrics.triggerTime = firstEdge;
 
     const T riseStart    = isRising ? metrics.V1 + TValue(0.1) * (metrics.V2 - metrics.V1) : metrics.V1 - TValue(0.1) * (metrics.V1 - metrics.V2);
     const T riseEnd      = isRising ? metrics.V1 + TValue(0.9) * (metrics.V2 - metrics.V1) : metrics.V1 - TValue(0.9) * (metrics.V1 - metrics.V2);
-    const T firstLevel10 = estimators::getZeroCrossing<MetaInfo::Apply>(ds, riseStart, indexMin, indexMax, signalIndex);
-    const T firstLevel90 = estimators::getZeroCrossing<MetaInfo::Apply>(ds, riseEnd, indexMin, indexMax, signalIndex);
+    const T firstLevel10 = *estimators::getZeroCrossing<MetaInfo::Apply>(ds, riseStart, indexMin, indexMax, signalIndex); // the range is checked above
+    const T firstLevel90 = *estimators::getZeroCrossing<MetaInfo::Apply>(ds, riseEnd, indexMin, indexMax, signalIndex);   // the range is checked above
     metrics.riseTime     = firstLevel90 - firstLevel10;
 
     // Step 5: Determine if it's a pulse by checking for a falling or rising edge after the step
