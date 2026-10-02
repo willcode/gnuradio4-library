@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
-#include <stdexcept>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -238,7 +238,7 @@ const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
     // everything after it runs at the new rate.
     "withRate anchors the new rate at the change index"_test = [] {
         const SampleClock before(1'000ULL, kEpochNs, 250'000ULL, 1ULL);
-        const SampleClock after = before.withRate(500'000ULL, 1ULL, 2'000ULL);
+        const SampleClock after = before.withRate(500'000ULL, 1ULL, 2'000ULL).value();
 
         expect(eq(after.anchor_index, 2'000ULL));
         expect(eq(after.timeOf(2'000ULL), before.timeOf(2'000ULL)));
@@ -250,14 +250,32 @@ const boost::ut::suite<"SampleClock"> sampleClockTests = [] {
     };
 
     "a clock refuses a rate it cannot hold exactly"_test = [] {
-        expect(throws<std::invalid_argument>([] { (void)SampleClock(0ULL, 0LL, 0ULL, 1ULL); })) << "a zero numerator";
-        expect(throws<std::invalid_argument>([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, 0ULL); })) << "a zero denominator";
-        expect(throws<std::invalid_argument>([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, SampleClock::kMaxRateDen + 1ULL); })) << "10^9 * rate_den would pass 2^63";
-        expect(throws<std::invalid_argument>([] { (void)SampleClock(0ULL, 0LL, SampleClock::kMaxRateNum + 1ULL, 1ULL); })) << "the numerator would pass 2^63";
-        expect(throws<std::invalid_argument>([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, 1ULL, 48'000ULL); })) << "the anchor remainder must be a proper fraction";
+        expect(throws<gr::exception>([] { (void)SampleClock(0ULL, 0LL, 0ULL, 1ULL); })) << "a zero numerator";
+        expect(throws<gr::exception>([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, 0ULL); })) << "a zero denominator";
+        expect(throws<gr::exception>([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, SampleClock::kMaxRateDen + 1ULL); })) << "10^9 * rate_den would pass 2^63";
+        expect(throws<gr::exception>([] { (void)SampleClock(0ULL, 0LL, SampleClock::kMaxRateNum + 1ULL, 1ULL); })) << "the numerator would pass 2^63";
+        expect(throws<gr::exception>([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, 1ULL, 48'000ULL); })) << "the anchor remainder must be a proper fraction";
 
         expect(nothrow([] { (void)SampleClock(0ULL, 0LL, 48'000ULL, 1ULL, 47'999ULL); }));
         expect(nothrow([] { (void)SampleClock(0ULL, 0LL, SampleClock::kMaxRateNum, SampleClock::kMaxRateDen); }));
+    };
+
+    "a rate change and a floating rate return a refused rate as the error"_test = [] {
+        const SampleClock clock(0ULL, kEpochNs, 48'000ULL, 1ULL);
+        const auto        zero = clock.withRate(0ULL, 1ULL, 100ULL);
+        expect(fatal(!zero.has_value()));
+        expect(zero.error().message.contains("neither term may be zero")) << zero.error().message;
+        expect(!clock.withRate(48'000ULL, SampleClock::kMaxRateDen + 1ULL, 100ULL).has_value()) << "a denominator the constructor would refuse";
+
+        const auto tooSlow = gr::timing::clockForRateHz(1e-7, 0ULL, kEpochNs);
+        expect(fatal(!tooSlow.has_value()));
+        expect(tooSlow.error().message.contains("outside the")) << tooSlow.error().message;
+        expect(!gr::timing::clockForRateHz(std::numeric_limits<double>::quiet_NaN(), 0ULL, kEpochNs).has_value());
+
+        const auto rounded = gr::timing::clockForRateHz(48'000.0000004, 7ULL, kEpochNs);
+        expect(fatal(rounded.has_value()));
+        expect(eq(rounded->rate_num, 48'000'000'000ULL) && eq(rounded->rate_den, 1'000'000ULL)) << "the microhertz grid";
+        expect(eq(rounded->anchor_index, 7ULL));
     };
 
     "a default clock is one sample per second at the epoch"_test = [] {

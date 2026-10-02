@@ -3,8 +3,11 @@
 
 #include <cmath>
 #include <cstdint>
+#include <expected>
 #include <format>
-#include <stdexcept>
+#include <source_location>
+
+#include <gnuradio-4.0/Message.hpp>
 
 namespace gr::timing {
 
@@ -158,13 +161,13 @@ struct SampleClock {
 
     SampleClock(std::uint64_t anchorIndex, std::int64_t anchorNs, std::uint64_t rateNum, std::uint64_t rateDen, std::uint64_t anchorRem = 0ULL) : anchor_index(anchorIndex), anchor_ns(anchorNs), rate_num(rateNum), rate_den(rateDen), anchor_rem(anchorRem) {
         if (rateNum == 0ULL || rateDen == 0ULL) {
-            throw std::invalid_argument(std::format("gr::timing::SampleClock: rate {}/{} — neither term may be zero", rateNum, rateDen));
+            throw gr::exception(std::format("gr::timing::SampleClock: rate {}/{} — neither term may be zero", rateNum, rateDen));
         }
         if (rateNum > kMaxRateNum || rateDen > kMaxRateDen) {
-            throw std::invalid_argument(std::format("gr::timing::SampleClock: rate {}/{} is outside the exact domain — the numerator must not exceed {} and the denominator not {}", rateNum, rateDen, kMaxRateNum, kMaxRateDen));
+            throw gr::exception(std::format("gr::timing::SampleClock: rate {}/{} is outside the exact domain — the numerator must not exceed {} and the denominator not {}", rateNum, rateDen, kMaxRateNum, kMaxRateDen));
         }
         if (anchorRem >= rateNum) {
-            throw std::invalid_argument(std::format("gr::timing::SampleClock: anchor remainder {} must be below the rate numerator {}", anchorRem, rateNum));
+            throw gr::exception(std::format("gr::timing::SampleClock: anchor remainder {} must be below the rate numerator {}", anchorRem, rateNum));
         }
     }
 
@@ -249,12 +252,15 @@ struct SampleClock {
     /// Keeping the old anchor would apply the new rate to every sample since that anchor. The anchor's
     /// sub-nanosecond position is re-expressed over the new numerator. The anchor time therefore moves by less
     /// than `1/rateNum` nanoseconds. That is the one inexact step in this type. It is bounded by one period of
-    /// the new rate and not by a nanosecond.
-    [[nodiscard]] SampleClock withRate(std::uint64_t rateNum, std::uint64_t rateDen, std::uint64_t atIndex) const {
-        const NsSplit at = offsetFrom(atIndex);
-        if (rateNum == 0ULL) {
-            throw std::invalid_argument("gr::timing::SampleClock::withRate: the rate numerator may not be zero");
+    /// the new rate and not by a nanosecond. A rate the constructor refuses is an error here.
+    [[nodiscard]] std::expected<SampleClock, gr::Error> withRate(std::uint64_t rateNum, std::uint64_t rateDen, std::uint64_t atIndex, std::source_location loc = std::source_location::current()) const {
+        if (rateNum == 0ULL || rateDen == 0ULL) {
+            return std::unexpected(gr::Error(std::format("gr::timing::SampleClock::withRate: rate {}/{} — neither term may be zero", rateNum, rateDen), loc));
         }
+        if (rateNum > kMaxRateNum || rateDen > kMaxRateDen) {
+            return std::unexpected(gr::Error(std::format("gr::timing::SampleClock::withRate: rate {}/{} is outside the exact domain — the numerator must not exceed {} and the denominator not {}", rateNum, rateDen, kMaxRateNum, kMaxRateDen), loc));
+        }
+        const NsSplit       at       = offsetFrom(atIndex);
         const std::uint64_t rescaled = detail::divide(detail::mul(at.rem, rateNum), rate_num).quotient.lo;
         return SampleClock(atIndex, anchor_ns + at.whole, rateNum, rateDen, rescaled);
     }
@@ -301,14 +307,14 @@ static_assert(SampleClock::kMaxRateDen * SampleClock::kNsPerSecond <= SampleCloc
  * This function brings a floating rate onto the exact time axis. The rate is rounded to a 10^-6 Hz grid.
  * The half-microhertz residual moves a sample's time by under a nanosecond across ten hours of stream. That
  * is far finer than the resolution of any trajectory or schedule. A rate outside
- * `[1e-6, kMaxRateNum / 1e6]` Hz, or a rate that is not finite and positive, throws
- * `std::invalid_argument`. A caller can wrap the message with the name of its setting.
+ * `[1e-6, kMaxRateNum / 1e6]` Hz, or a rate that is not finite and positive, is an error. A caller can wrap
+ * the message with the name of its setting.
  */
-[[nodiscard]] inline SampleClock clockForRateHz(double rateHz, std::uint64_t anchorIndex, std::int64_t anchorNs) {
+[[nodiscard]] inline std::expected<SampleClock, gr::Error> clockForRateHz(double rateHz, std::uint64_t anchorIndex, std::int64_t anchorNs, std::source_location loc = std::source_location::current()) {
     constexpr std::uint64_t kDenominator = 1'000'000ULL;
     constexpr double        kMaxRateHz   = static_cast<double>(SampleClock::kMaxRateNum / kDenominator);
     if (!(rateHz >= 1. / static_cast<double>(kDenominator)) || !(rateHz <= kMaxRateHz)) {
-        throw std::invalid_argument(std::format("gr::timing::clockForRateHz: {} Hz is outside the [{:g}, {:g}] Hz the exact time axis allows", rateHz, 1. / static_cast<double>(kDenominator), kMaxRateHz));
+        return std::unexpected(gr::Error(std::format("gr::timing::clockForRateHz: {} Hz is outside the [{:g}, {:g}] Hz the exact time axis allows", rateHz, 1. / static_cast<double>(kDenominator), kMaxRateHz), loc));
     }
     return SampleClock(anchorIndex, anchorNs, static_cast<std::uint64_t>(std::llround(rateHz * static_cast<double>(kDenominator))), kDenominator);
 }
