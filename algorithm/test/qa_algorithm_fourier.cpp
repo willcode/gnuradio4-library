@@ -990,7 +990,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             // designs lengths from it. Nothing else reads the two tables against each other, and they are
             // written independently, so a row that drifts from the other is caught here.
             if (std::isnan(row.param) && row.window != Exponential) {
-                expect(approx(gr::filter::fir::design::windowFigures(row.window).attenuationDb, row.attenuationDb, dbTolerance)) << std::format("{} attenuation as the FIR design header tables it", label);
+                expect(approx(gr::filter::fir::design::windowFigures(row.window).value().attenuationDb, row.attenuationDb, dbTolerance)) << std::format("{} attenuation as the FIR design header tables it", label);
             }
         }
     };

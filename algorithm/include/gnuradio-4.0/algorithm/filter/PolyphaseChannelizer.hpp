@@ -62,7 +62,7 @@ struct ChannelizerDesignKey {
 
 /// @brief `fir::design::scanEdges` on the design grid, as a pair of stopband peak and passband ripple, in dB.
 [[nodiscard]] inline std::pair<double, double> channelizerEdgeScan(const std::vector<float>& taps, double passEdge, double stopEdge) {
-    const gr::filter::fir::design::LowpassScan scan = gr::filter::fir::design::scanEdges(taps, passEdge, stopEdge);
+    const gr::filter::fir::design::LowpassScan scan = gr::filter::fir::design::detail::scanEdges(taps, passEdge, stopEdge);
     return {scan.stopbandDb, scan.rippleDb};
 }
 
@@ -142,8 +142,12 @@ struct ChannelizerDesignKey {
         // sixty or eighty decibels a lowpass reaches, at any length worth building. Searching it against
         // attenuationDb would run to the cap and hand back a prototype of thousands of taps for a target it cannot
         // meet, so the span is taken as given and what it achieves is measured and reported instead.
-        out.span = span;
-        out.taps = gr::filter::fir::design::rootRaisedCosine(span * channels - 1UZ, static_cast<double>(channels), transition, 1.);
+        out.span                                          = span;
+        std::expected<std::vector<float>, gr::Error> taps = gr::filter::fir::design::rootRaisedCosine(span * channels - 1UZ, static_cast<double>(channels), transition, 1., location);
+        if (!taps) {
+            return std::unexpected(taps.error());
+        }
+        out.taps = std::move(*taps);
     } else if (family == "lowpass") {
         const auto build    = [&](std::size_t n) { return gr::filter::fir::design::kaiserLowpass(n, 0.5 * spacing, attenuationDb); };
         const auto delivers = [&](std::size_t n) {

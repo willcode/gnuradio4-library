@@ -5,15 +5,18 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <numbers>
-#include <stdexcept>
+#include <source_location>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/algorithm/math/Decibel.hpp>
@@ -32,6 +35,10 @@
  * The cost is O(N) transcendental calls for a design and O(N * grid) for a scan. The hot path is
  * whatever consumes the taps, where every extra tap is a multiply-accumulate per output sample.
  * All internal evaluation is `double`; the returned taps are `float`, rounded once.
+ *
+ * A call that can fail returns `std::expected` with a `gr::Error`. A design normalized at a frequency where
+ * its response is zero fails. So does a response read on a grid that is not a power of two. The `detail`
+ * readers take a grid the caller has already checked.
  */
 namespace gr::filter::fir::design {
 
@@ -116,33 +123,38 @@ struct WindowFigures {
     double attenuationDb      = 0.0;
 };
 
-/// @brief The measured figures of a window whose shape is fixed. Throws for the four that take a shape parameter.
-[[nodiscard]] inline WindowFigures windowFigures(gr::algorithm::window::Type type) {
+/// @brief The measured figures of a window whose shape is fixed. The four that take a shape parameter are an error.
+[[nodiscard]] inline std::expected<WindowFigures, gr::Error> windowFigures(gr::algorithm::window::Type type, std::source_location location = std::source_location::current()) {
     using enum gr::algorithm::window::Type;
     switch (type) {
     case None:
-    case Rectangular: return {0.920, 20.96};
-    case Bartlett: return {3.762, 26.26};
-    case Welch: return {1.866, 31.38};
-    case Hann: return {3.127, 43.94};
-    case Hamming: return {3.319, 53.40};
-    case Parzen: return {7.860, 56.64};
-    case Blackman: return {5.593, 75.29};
-    case FlatTop: return {9.150, 95.70};
-    case BlackmanHarris: return {7.838, 109.29};
-    case Nuttall: return {7.757, 111.96};
-    case BlackmanNuttall: return {7.819, 114.90};
+    case Rectangular: return WindowFigures{0.920, 20.96};
+    case Bartlett: return WindowFigures{3.762, 26.26};
+    case Welch: return WindowFigures{1.866, 31.38};
+    case Hann: return WindowFigures{3.127, 43.94};
+    case Hamming: return WindowFigures{3.319, 53.40};
+    case Parzen: return WindowFigures{7.860, 56.64};
+    case Blackman: return WindowFigures{5.593, 75.29};
+    case FlatTop: return WindowFigures{9.150, 95.70};
+    case BlackmanHarris: return WindowFigures{7.838, 109.29};
+    case Nuttall: return WindowFigures{7.757, 111.96};
+    case BlackmanNuttall: return WindowFigures{7.819, 114.90};
     default: break;
     }
-    throw std::invalid_argument("FilterDesign: Kaiser, Tukey, Gaussian and Exponential have a shape-dependent transition constant — state the tap count, or use kaiserLength for Kaiser");
+    return std::unexpected(gr::Error("FilterDesign: Kaiser, Tukey, Gaussian and Exponential have a shape-dependent transition constant; state the tap count, or use kaiserLength for Kaiser", location));
 }
 
-/// @brief The length a fixed-shape window needs for a transition @p width cycles per sample wide.
-[[nodiscard]] inline std::size_t windowLength(gr::algorithm::window::Type type, double width) {
+/// @brief The length a fixed-shape window needs for a transition @p width cycles per sample wide. A window that takes a
+/// shape parameter is an error.
+[[nodiscard]] inline std::expected<std::size_t, gr::Error> windowLength(gr::algorithm::window::Type type, double width, std::source_location location = std::source_location::current()) {
+    const std::expected<WindowFigures, gr::Error> figures = windowFigures(type, location);
+    if (!figures) {
+        return std::unexpected(figures.error());
+    }
     if (width <= 0.0) {
         return 3UZ;
     }
-    const double estimate = std::ceil(windowFigures(type).transitionConstant / width);
+    const double estimate = std::ceil(figures->transitionConstant / width);
     return estimate > 3.0 ? static_cast<std::size_t>(estimate) : 3UZ;
 }
 
@@ -270,7 +282,18 @@ template<std::size_t Capacity, typename Key, typename Value>
     return memo.back().second;
 }
 
+/// @brief An error for a @p grid that is not a power of two. The response readers step their table index modulo the
+/// grid by mask.
+[[nodiscard]] inline std::expected<void, gr::Error> checkGrid(std::size_t grid, std::source_location location) {
+    if (grid == 0UZ || (grid & (grid - 1UZ)) != 0UZ) {
+        return std::unexpected(gr::Error(std::format("FilterDesign: the index step is taken modulo the grid by mask, so the grid must be a power of two, got {}", grid), location));
+    }
+    return {};
+}
+
 } // namespace detail
+
+namespace detail {
 
 /**
  * @brief The signed zero-phase amplitude A at i / grid cycles per sample, for i over half a turn.
@@ -284,15 +307,12 @@ template<std::size_t Capacity, typename Key, typename Value>
  * steps, which is inside the depth a search has to resolve.
  *
  * The index step is taken modulo the grid by mask, so the grid must be a power of two, and one that is not
- * is refused.
+ * is an error.
  *
  * A tap set of no taps has no center tap to read and no amplitude anywhere: the result is the grid
  * filled with zero, which is the reading `halfResponseOdd` already gives an empty tap set.
  */
-inline void halfAmplitude(const std::vector<float>& taps, std::vector<double>& amp, std::size_t grid = kDesignGrid) {
-    if (grid == 0UZ || (grid & (grid - 1UZ)) != 0UZ) {
-        throw std::invalid_argument(std::format("FilterDesign: the index step is taken modulo the grid by mask, so the grid must be a power of two, got {}", grid));
-    }
+inline void halfAmplitude(const std::vector<float>& taps, std::vector<double>& amp, std::size_t grid) {
     const std::size_t n    = taps.size();
     const std::size_t half = grid / 2UZ;
     if (n == 0UZ) {
@@ -315,11 +335,31 @@ inline void halfAmplitude(const std::vector<float>& taps, std::vector<double>& a
 }
 
 /// @brief |A| at i / grid cycles per sample, for i over half a turn.
-inline void halfResponse(const std::vector<float>& taps, std::vector<double>& mag, std::size_t grid = kDesignGrid) {
+inline void halfResponse(const std::vector<float>& taps, std::vector<double>& mag, std::size_t grid) {
     halfAmplitude(taps, mag, grid);
     for (double& v : mag) {
         v = std::abs(v);
     }
+}
+
+} // namespace detail
+
+/// @brief `detail::halfAmplitude` on a checked @p grid. A grid that is not a power of two is an error.
+[[nodiscard]] inline std::expected<void, gr::Error> halfAmplitude(const std::vector<float>& taps, std::vector<double>& amp, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
+    detail::halfAmplitude(taps, amp, grid);
+    return {};
+}
+
+/// @brief |A| at i / grid cycles per sample, for i over half a turn. A grid that is not a power of two is an error.
+[[nodiscard]] inline std::expected<void, gr::Error> halfResponse(const std::vector<float>& taps, std::vector<double>& mag, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
+    detail::halfResponse(taps, mag, grid);
+    return {};
 }
 
 /**
@@ -339,6 +379,8 @@ requires std::is_floating_point_v<T>
     return gr::filter::signedAmplitudeAt(coefficients, f);
 }
 
+namespace detail {
+
 /**
  * @brief |B| at i / grid cycles per sample, for i over half a turn, for antisymmetric taps.
  *
@@ -347,10 +389,7 @@ requires std::is_floating_point_v<T>
  * `sin(x) = cos(x - pi/2)`, which on a power-of-two grid is an integer index offset, so this keeps
  * the same drift-free integer index stepping.
  */
-inline void halfResponseOdd(const std::vector<float>& taps, std::vector<double>& mag, std::size_t grid = kDesignGrid) {
-    if (grid == 0UZ || (grid & (grid - 1UZ)) != 0UZ) {
-        throw std::invalid_argument(std::format("FilterDesign: the index step is taken modulo the grid by mask, so the grid must be a power of two, got {}", grid));
-    }
+inline void halfResponseOdd(const std::vector<float>& taps, std::vector<double>& mag, std::size_t grid) {
     const std::size_t n       = taps.size();
     const std::size_t mid     = n == 0UZ ? 0UZ : (n - 1UZ) / 2UZ;
     const std::size_t half    = grid / 2UZ;
@@ -372,6 +411,17 @@ inline void halfResponseOdd(const std::vector<float>& taps, std::vector<double>&
     }
 }
 
+} // namespace detail
+
+/// @brief `detail::halfResponseOdd` on a checked @p grid. A grid that is not a power of two is an error.
+[[nodiscard]] inline std::expected<void, gr::Error> halfResponseOdd(const std::vector<float>& taps, std::vector<double>& mag, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
+    detail::halfResponseOdd(taps, mag, grid);
+    return {};
+}
+
 /// @brief B(2*pi*f) at one stated frequency, by the sine sum, for antisymmetric taps of odd length.
 template<typename T>
 requires std::is_floating_point_v<T>
@@ -387,14 +437,15 @@ requires std::is_floating_point_v<T>
     return b;
 }
 
-/// @brief Scale @p taps so that `A(2*pi*fRef) == gain`. Throws where the reference value is zero.
-inline void normalizeAt(std::vector<double>& taps, double fRef, double gain) {
+/// @brief Scale @p taps so that `A(2*pi*fRef) == gain`. A zero reference value is an error and leaves @p taps unchanged.
+[[nodiscard]] inline std::expected<void, gr::Error> normalizeAt(std::vector<double>& taps, double fRef, double gain, std::source_location location = std::source_location::current()) {
     gr::filter::FilterCoefficients<double> coefficients{taps};
     const std::pair<bool, double>          normalized = gr::filter::normaliseFilterCoefficients(coefficients, fRef, gain, gr::filter::NormalizationReference::SignedAmplitude);
     if (!normalized.first) {
-        throw std::invalid_argument("FilterDesign: the normalization reference is zero — a design cannot be normalized at one of its own nulls");
+        return std::unexpected(gr::Error("FilterDesign: the normalization reference is zero; a design cannot be normalized at one of its own nulls", location));
     }
     taps = std::move(coefficients.b);
+    return {};
 }
 
 /// @brief The response of one tap set across its own passband and its own stopband.
@@ -403,8 +454,10 @@ struct LowpassScan {
     double rippleDb   = 0.0; /// peak to trough across the passband
 };
 
+namespace detail {
+
 /// @brief Measure @p taps between DC and @p passEdge, and from @p stopEdge to Nyquist.
-[[nodiscard]] inline LowpassScan scanLowpass(const std::vector<float>& taps, double passEdge, double stopEdge, std::size_t grid = kDesignGrid) {
+[[nodiscard]] inline LowpassScan scanLowpass(const std::vector<float>& taps, double passEdge, double stopEdge, std::size_t grid) {
     std::vector<double> mag;
     halfResponse(taps, mag, grid);
 
@@ -428,6 +481,16 @@ struct LowpassScan {
     return s;
 }
 
+} // namespace detail
+
+/// @brief `detail::scanLowpass` on a checked @p grid. A grid that is not a power of two is an error.
+[[nodiscard]] inline std::expected<LowpassScan, gr::Error> scanLowpass(const std::vector<float>& taps, double passEdge, double stopEdge, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
+    return detail::scanLowpass(taps, passEdge, stopEdge, grid);
+}
+
 /// @brief The response of one tap set over one closed band.
 struct BandLevels {
     double minMag = 0.0;
@@ -438,6 +501,8 @@ struct BandLevels {
     /// @brief Peak to trough across the band, in dB; the figure a passband is judged by.
     [[nodiscard]] double rippleDb() const { return gr::math::amplitudeToDb(maxMag) - gr::math::amplitudeToDb(minMag); }
 };
+
+namespace detail {
 
 /**
  * @brief |A| over the closed band [@p lowEdge, @p highEdge], on the design grid and at both exact edges.
@@ -451,7 +516,7 @@ struct BandLevels {
  * `scanLowpass` keeps its grid-only reading: it is what `searchLowpass` compares lengths with, and
  * changing it would change every length that search returns.
  */
-[[nodiscard]] inline BandLevels scanBand(const std::vector<float>& taps, double lowEdge, double highEdge, std::size_t grid = kDesignGrid) {
+[[nodiscard]] inline BandLevels scanBand(const std::vector<float>& taps, double lowEdge, double highEdge, std::size_t grid) {
     BandLevels out;
     out.minMag = std::min(std::abs(amplitudeAt(taps, lowEdge)), std::abs(amplitudeAt(taps, highEdge)));
     out.maxMag = std::max(std::abs(amplitudeAt(taps, lowEdge)), std::abs(amplitudeAt(taps, highEdge)));
@@ -487,6 +552,24 @@ struct BandLevels {
     return s;
 }
 
+} // namespace detail
+
+/// @brief `detail::scanBand` on a checked @p grid. A grid that is not a power of two is an error.
+[[nodiscard]] inline std::expected<BandLevels, gr::Error> scanBand(const std::vector<float>& taps, double lowEdge, double highEdge, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
+    return detail::scanBand(taps, lowEdge, highEdge, grid);
+}
+
+/// @brief `detail::scanEdges` on a checked @p grid. A grid that is not a power of two is an error.
+[[nodiscard]] inline std::expected<LowpassScan, gr::Error> scanEdges(const std::vector<float>& taps, double passEdge, double stopEdge, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
+    return detail::scanEdges(taps, passEdge, stopEdge, grid);
+}
+
 /**
  * @brief |B| over the usable band of a Hilbert transformer, `[lowEdge, 0.5 - lowEdge]`.
  *
@@ -497,8 +580,13 @@ struct BandLevels {
  *
  * At short lengths there is no usable band: eleven taps span 0.51 to 1.01 over `0.05 .. 0.45`,
  * which is not a passband a test can pin.
+ *
+ * A grid that is not a power of two is an error.
  */
-[[nodiscard]] inline BandLevels scanHilbert(const std::vector<float>& taps, double lowEdge, std::size_t grid = kDesignGrid) {
+[[nodiscard]] inline std::expected<BandLevels, gr::Error> scanHilbert(const std::vector<float>& taps, double lowEdge, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
     const double highEdge = 0.5 - lowEdge;
 
     BandLevels   out;
@@ -516,7 +604,7 @@ struct BandLevels {
     }
 
     std::vector<double> mag;
-    halfResponseOdd(taps, mag, grid);
+    detail::halfResponseOdd(taps, mag, grid);
     for (std::size_t i = first; i <= last; ++i) {
         out.minMag = std::min(out.minMag, mag[i]);
         out.maxMag = std::max(out.maxMag, mag[i]);
@@ -564,21 +652,24 @@ struct LowpassSearch {
  * keeps the length odd, which keeps the group delay a whole sample.
  *
  * The cost is a response scan per candidate, and a scan is proportional to the length times the
- * grid.
+ * grid. A grid that is not a power of two is an error.
  */
-[[nodiscard]] inline LowpassSearch searchLowpass(double passEdge, double stopEdge, double attenDb, double maxRippleDb, std::size_t maxTaps, std::size_t grid = kDesignGrid) {
+[[nodiscard]] inline std::expected<LowpassSearch, gr::Error> searchLowpass(double passEdge, double stopEdge, double attenDb, double maxRippleDb, std::size_t maxTaps, std::size_t grid = kDesignGrid, std::source_location location = std::source_location::current()) {
+    if (const std::expected<void, gr::Error> valid = detail::checkGrid(grid, location); !valid) {
+        return std::unexpected(valid.error());
+    }
     const double cutoff = 0.5 * (passEdge + stopEdge);
 
     LowpassSearch out;
     const auto    delivers = [&](std::size_t len) {
-        const LowpassScan r = scanLowpass(kaiserLowpass(len, cutoff, attenDb), passEdge, stopEdge, grid);
+        const LowpassScan r = detail::scanLowpass(kaiserLowpass(len, cutoff, attenDb), passEdge, stopEdge, grid);
         return r.stopbandDb <= -attenDb && r.rippleDb <= maxRippleDb;
     };
 
     const std::size_t use = shortestOddLength(kaiserLength(attenDb, stopEdge - passEdge), maxTaps, delivers);
 
     out.taps = use;
-    out.scan = scanLowpass(kaiserLowpass(use, cutoff, attenDb), passEdge, stopEdge, grid);
+    out.scan = detail::scanLowpass(kaiserLowpass(use, cutoff, attenDb), passEdge, stopEdge, grid);
     out.ok   = out.scan.stopbandDb <= -attenDb && out.scan.rippleDb <= maxRippleDb;
     return out;
 }
@@ -685,9 +776,11 @@ template<typename Term>
 }
 
 /// @brief A windowed-sinc low-pass, normalized to `A(0) = gain`. @p cutoff is the -6 dB point in cycles per sample.
-[[nodiscard]] inline std::vector<float> lowpass(std::size_t n, double cutoff, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> lowpass(std::size_t n, double cutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     std::vector<double> h = lowpassKernel(n, cutoff, window);
-    normalizeAt(h, 0.0, gain);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.0, gain, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
     return detail::narrow(h);
 }
 
@@ -702,9 +795,11 @@ template<typename Term>
  * Odd length is mandatory: a type-II design has `A(pi) = 0` identically and the normalization
  * would divide by zero.
  */
-[[nodiscard]] inline std::vector<float> highpass(std::size_t n, double cutoff, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> highpass(std::size_t n, double cutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     std::vector<double> h = highpassKernel(n, cutoff, window);
-    normalizeAt(h, 0.5, gain);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.5, gain, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
     return detail::narrow(h);
 }
 
@@ -716,9 +811,11 @@ template<typename Term>
  *
  * @p transitionWidth, where a caller sizes from one, applies to both edges and is taken once.
  */
-[[nodiscard]] inline std::vector<float> bandpass(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> bandpass(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     std::vector<double> h = bandpassKernel(n, lowCutoff, highCutoff, window);
-    normalizeAt(h, 0.5 * (lowCutoff + highCutoff), gain);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.5 * (lowCutoff + highCutoff), gain, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
     return detail::narrow(h);
 }
 
@@ -728,9 +825,11 @@ template<typename Term>
  * The center term sits inside the window multiply. That is identical to adding it afterwards
  * whenever the window is one at its own center, and it degrades gracefully where a window is not.
  */
-[[nodiscard]] inline std::vector<float> bandstop(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> bandstop(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     std::vector<double> h = bandstopKernel(n, lowCutoff, highCutoff, window);
-    normalizeAt(h, 0.0, gain);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.0, gain, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
     return detail::narrow(h);
 }
 
@@ -750,9 +849,11 @@ template<typename Term>
  * @param lowCutoff  lower -6 dB point in cycles per sample, within [-0.5, 0.5]
  * @param highCutoff upper -6 dB point in cycles per sample, greater than @p lowCutoff
  */
-[[nodiscard]] inline std::vector<std::complex<float>> complexBandpass(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> complexBandpass(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     std::vector<double> proto = lowpassKernel(oddLength(n, 5), 0.5 * (highCutoff - lowCutoff), window);
-    normalizeAt(proto, 0.0, gain);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(proto, 0.0, gain, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
     return detail::narrow(detail::rotate(proto, 0.5 * (lowCutoff + highCutoff)));
 }
 
@@ -769,13 +870,15 @@ template<typename Term>
  * to is the length the container was reserved at. A band-pass of no taps has no center tap to place
  * the delta on, and the band-stop is empty in turn.
  */
-[[nodiscard]] inline std::vector<std::complex<float>> complexBandstop(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> complexBandstop(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     std::vector<double> proto = lowpassKernel(oddLength(n, 5), 0.5 * (highCutoff - lowCutoff), window);
-    normalizeAt(proto, 0.0, 1.0);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(proto, 0.0, 1.0, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
 
     std::vector<std::complex<double>> h = detail::rotate(proto, 0.5 * (lowCutoff + highCutoff));
     if (h.empty()) {
-        return {};
+        return std::vector<std::complex<float>>{};
     }
     const std::size_t mid = (h.size() - 1UZ) / 2UZ;
     for (std::complex<double>& v : h) {
@@ -839,7 +942,7 @@ template<typename Term>
  * @param samplesPerSymbol sample rate over symbol rate; need not be an integer
  * @param alpha            excess bandwidth in [0, 1]
  */
-[[nodiscard]] inline std::vector<float> rootRaisedCosine(std::size_t n, double samplesPerSymbol, double alpha, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> rootRaisedCosine(std::size_t n, double samplesPerSymbol, double alpha, double gain = 1.0, std::source_location location = std::source_location::current()) {
     const std::size_t len = oddLength(n);
     const std::size_t mid = (len - 1UZ) / 2UZ;
 
@@ -849,12 +952,14 @@ template<typename Term>
         h[i]             = v;
         h[len - 1UZ - i] = v;
     }
-    normalizeAt(h, 0.0, gain);
+    if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.0, gain, location); !normalized) {
+        return std::unexpected(normalized.error());
+    }
     return detail::narrow(h);
 }
 
 /// @brief A root-raised-cosine from rates in Hz rather than a ratio.
-[[nodiscard]] inline std::vector<float> designRootRaisedCosine(std::size_t nTaps, double sampleRate, double symbolRate, double alpha, double gain = 1.0) { return rootRaisedCosine(nTaps, sampleRate / symbolRate, alpha, gain); }
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> designRootRaisedCosine(std::size_t nTaps, double sampleRate, double symbolRate, double alpha, double gain = 1.0, std::source_location location = std::source_location::current()) { return rootRaisedCosine(nTaps, sampleRate / symbolRate, alpha, gain, location); }
 
 /**
  * @brief The matched filter for a Manchester (biphase) symbol: a root-raised-cosine differenced
@@ -869,19 +974,22 @@ template<typename Term>
  * RDS's 57 kHz biphase at 16 samples per symbol is the driving consumer, alpha 1 as annex C
  * shapes it.
  */
-[[nodiscard]] inline std::vector<float> manchesterMatchedFilter(std::size_t nTaps, double sampleRate, double symbolRate, double alpha) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> manchesterMatchedFilter(std::size_t nTaps, double sampleRate, double symbolRate, double alpha, std::source_location location = std::source_location::current()) {
     const double half = sampleRate / (2.0 * symbolRate);
     if (!(half > 0.0) || std::floor(half) != half) {
-        throw std::invalid_argument(std::format("manchesterMatchedFilter: half a symbol is {} samples; the difference is a shift and needs a whole number", half));
+        return std::unexpected(gr::Error(std::format("manchesterMatchedFilter: half a symbol is {} samples; the difference is a shift and needs a whole number", half), location));
     }
     const auto hop = static_cast<std::size_t>(half);
     if (nTaps <= hop) {
-        throw std::invalid_argument(std::format("manchesterMatchedFilter: {} taps do not span the {}-sample half-symbol offset", nTaps, hop));
+        return std::unexpected(gr::Error(std::format("manchesterMatchedFilter: {} taps do not span the {}-sample half-symbol offset", nTaps, hop), location));
     }
-    const auto         pulse = designRootRaisedCosine(nTaps, sampleRate, symbolRate, alpha);
-    std::vector<float> taps(pulse.size() - hop);
+    const std::expected<std::vector<float>, gr::Error> pulse = designRootRaisedCosine(nTaps, sampleRate, symbolRate, alpha, 1.0, location);
+    if (!pulse) {
+        return std::unexpected(pulse.error());
+    }
+    std::vector<float> taps(pulse->size() - hop);
     for (std::size_t n = 0UZ; n < taps.size(); ++n) {
-        taps[n] = pulse[n] - pulse[n + hop];
+        taps[n] = (*pulse)[n] - (*pulse)[n + hop];
     }
     return taps;
 }
@@ -915,7 +1023,8 @@ template<typename Term>
         h[i]             = v;
         h[len - 1UZ - i] = v;
     }
-    normalizeAt(h, 0.0, gain);
+    // The center tap is one and no tap is negative, so the sum the normalization divides by is never zero.
+    std::ignore = normalizeAt(h, 0.0, gain);
     return detail::narrow(h);
 }
 
@@ -1015,8 +1124,9 @@ struct FilterSpec {
     return {spec.window, spec.windowParam};
 }
 
-/// @brief The odd length @p spec asks for, estimated from the transition width where none is stated.
-[[nodiscard]] inline std::size_t tapCountOf(const FilterSpec& spec, std::size_t floorTaps = 3UZ) {
+/// @brief The odd length @p spec asks for, estimated from the transition width where none is stated. An estimate for a
+/// window that takes a shape parameter, other than Kaiser, is an error.
+[[nodiscard]] inline std::expected<std::size_t, gr::Error> tapCountOf(const FilterSpec& spec, std::size_t floorTaps = 3UZ, std::source_location location = std::source_location::current()) {
     if (spec.taps > 0UZ) {
         return oddLength(spec.taps, floorTaps);
     }
@@ -1024,26 +1134,66 @@ struct FilterSpec {
     if (spec.window == gr::algorithm::window::Type::Kaiser) {
         return oddLength(kaiserLength(spec.attenuationDb, width), floorTaps);
     }
-    return oddLength(windowLength(spec.window, width), floorTaps);
+    const std::expected<std::size_t, gr::Error> length = windowLength(spec.window, width, location);
+    if (!length) {
+        return std::unexpected(length.error());
+    }
+    return oddLength(*length, floorTaps);
 }
 
 /// @brief A low-pass from @p spec: `cutoff` is the -6 dB point.
-[[nodiscard]] inline std::vector<float> designLowpass(const FilterSpec& spec) { return lowpass(tapCountOf(spec), spec.cutoff / spec.sampleRate, windowOf(spec), spec.gain); }
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> designLowpass(const FilterSpec& spec, std::source_location location = std::source_location::current()) {
+    const std::expected<std::size_t, gr::Error> n = tapCountOf(spec, 3UZ, location);
+    if (!n) {
+        return std::unexpected(n.error());
+    }
+    return lowpass(*n, spec.cutoff / spec.sampleRate, windowOf(spec), spec.gain, location);
+}
 
 /// @brief A high-pass from @p spec: `cutoff` is the -6 dB point.
-[[nodiscard]] inline std::vector<float> designHighpass(const FilterSpec& spec) { return highpass(tapCountOf(spec), spec.cutoff / spec.sampleRate, windowOf(spec), spec.gain); }
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> designHighpass(const FilterSpec& spec, std::source_location location = std::source_location::current()) {
+    const std::expected<std::size_t, gr::Error> n = tapCountOf(spec, 3UZ, location);
+    if (!n) {
+        return std::unexpected(n.error());
+    }
+    return highpass(*n, spec.cutoff / spec.sampleRate, windowOf(spec), spec.gain, location);
+}
 
 /// @brief A band-pass from @p spec: `cutoff` and `highCutoff` are the two -6 dB points.
-[[nodiscard]] inline std::vector<float> designBandpass(const FilterSpec& spec) { return bandpass(tapCountOf(spec, 5), spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain); }
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> designBandpass(const FilterSpec& spec, std::source_location location = std::source_location::current()) {
+    const std::expected<std::size_t, gr::Error> n = tapCountOf(spec, 5, location);
+    if (!n) {
+        return std::unexpected(n.error());
+    }
+    return bandpass(*n, spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain, location);
+}
 
 /// @brief A band-stop from @p spec: `cutoff` and `highCutoff` are the two -6 dB points.
-[[nodiscard]] inline std::vector<float> designBandstop(const FilterSpec& spec) { return bandstop(tapCountOf(spec, 5), spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain); }
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> designBandstop(const FilterSpec& spec, std::source_location location = std::source_location::current()) {
+    const std::expected<std::size_t, gr::Error> n = tapCountOf(spec, 5, location);
+    if (!n) {
+        return std::unexpected(n.error());
+    }
+    return bandstop(*n, spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain, location);
+}
 
 /// @brief A complex band-pass from @p spec: either edge may be negative.
-[[nodiscard]] inline std::vector<std::complex<float>> designComplexBandpass(const FilterSpec& spec) { return complexBandpass(tapCountOf(spec, 5), spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain); }
+[[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> designComplexBandpass(const FilterSpec& spec, std::source_location location = std::source_location::current()) {
+    const std::expected<std::size_t, gr::Error> n = tapCountOf(spec, 5, location);
+    if (!n) {
+        return std::unexpected(n.error());
+    }
+    return complexBandpass(*n, spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain, location);
+}
 
 /// @brief A complex band-stop from @p spec: either edge may be negative.
-[[nodiscard]] inline std::vector<std::complex<float>> designComplexBandstop(const FilterSpec& spec) { return complexBandstop(tapCountOf(spec, 5), spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain); }
+[[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> designComplexBandstop(const FilterSpec& spec, std::source_location location = std::source_location::current()) {
+    const std::expected<std::size_t, gr::Error> n = tapCountOf(spec, 5, location);
+    if (!n) {
+        return std::unexpected(n.error());
+    }
+    return complexBandstop(*n, spec.cutoff / spec.sampleRate, spec.highCutoff / spec.sampleRate, windowOf(spec), spec.gain, location);
+}
 
 /**
  * @brief Split a prototype into `arms` branches, branch-major and reversed.
@@ -1056,9 +1206,9 @@ struct FilterSpec {
  * branch on every step and reads the prototype in its natural `h[j*M + r]` order instead, which is contiguous in
  * both the taps and the history and needs no separate copy.
  */
-[[nodiscard]] inline std::vector<float> polyphasePartition(std::span<const float> prototype, std::size_t arms) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> polyphasePartition(std::span<const float> prototype, std::size_t arms, std::source_location location = std::source_location::current()) {
     if (arms == 0UZ) {
-        throw std::invalid_argument("gr::filter::fir::design::polyphasePartition: a polyphase bank needs at least one branch");
+        return std::unexpected(gr::Error("gr::filter::fir::design::polyphasePartition: a polyphase bank needs at least one branch", location));
     }
     std::size_t branchLength = std::max((prototype.size() + arms - 1UZ) / arms, 2UZ);
     branchLength += branchLength % 2UZ;

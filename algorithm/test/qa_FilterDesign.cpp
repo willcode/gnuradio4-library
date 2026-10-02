@@ -93,7 +93,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
     "halfResponse is the tap set read back"_test = [] {
         const std::vector<float> taps = kaiserLowpass(101, 0.225, 80.0);
         std::vector<double>      mag;
-        halfResponse(taps, mag);
+        halfResponse(taps, mag).value();
 
         expect(eq(mag.size(), kDesignGrid / 2UZ + 1UZ));
         expect(approx(mag[0UZ], tapSum(taps), 1e-12)) << "DC is the sum of the taps";
@@ -110,17 +110,17 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         // edge's position rather than a flatness the design does not claim.
         constexpr double         cutoff = 0.225;
         const std::vector<float> taps   = kaiserLowpass(101, cutoff, 80.0);
-        expect(approx(scanLowpass(taps, cutoff, 0.25).rippleDb, 6.02, 0.05));
-        expect(lt(scanLowpass(taps, 0.15, 0.25).rippleDb, 1.0)) << "flat to a dB over the inner two thirds";
+        expect(approx(scanLowpass(taps, cutoff, 0.25).value().rippleDb, 6.02, 0.05));
+        expect(lt(scanLowpass(taps, 0.15, 0.25).value().rippleDb, 1.0)) << "flat to a dB over the inner two thirds";
     };
 
     "scanLowpass measures what the design was asked for"_test = [] {
         for (const double attenDb : {60.0, 80.0}) {
             constexpr double         passEdge = 0.20;
             constexpr double         stopEdge = 0.25;
-            const LowpassSearch      found    = searchLowpass(passEdge, stopEdge, attenDb, 0.1, 501);
+            const LowpassSearch      found    = searchLowpass(passEdge, stopEdge, attenDb, 0.1, 501).value();
             const std::vector<float> taps     = kaiserLowpass(found.taps, 0.5 * (passEdge + stopEdge), attenDb);
-            const LowpassScan        scan     = scanLowpass(taps, passEdge, stopEdge);
+            const LowpassScan        scan     = scanLowpass(taps, passEdge, stopEdge).value();
 
             expect(that % found.ok) << "a length under the cap delivers " << attenDb << " dB";
             expect(le(scan.stopbandDb, -attenDb)) << "stopband measured at " << scan.stopbandDb << " dB";
@@ -136,21 +136,21 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         constexpr double attenDb     = 60.0;
         constexpr double maxRippleDb = 0.1;
 
-        const LowpassSearch found = searchLowpass(passEdge, stopEdge, attenDb, maxRippleDb, 501);
+        const LowpassSearch found = searchLowpass(passEdge, stopEdge, attenDb, maxRippleDb, 501).value();
         expect(that % found.ok);
         expect(eq(found.taps % 2UZ, 1UZ)) << "odd, so the group delay stays a whole sample";
         expect(lt(found.taps, 501UZ));
         expect(gt(found.taps, 5UZ));
 
         const double      cutoff  = 0.5 * (passEdge + stopEdge);
-        const LowpassScan shorter = scanLowpass(kaiserLowpass(found.taps - 2UZ, cutoff, attenDb), passEdge, stopEdge);
+        const LowpassScan shorter = scanLowpass(kaiserLowpass(found.taps - 2UZ, cutoff, attenDb), passEdge, stopEdge).value();
         expect(that % (shorter.stopbandDb > -attenDb || shorter.rippleDb > maxRippleDb)) << "two taps shorter must miss a target";
 
         expect(le(found.taps, kaiserLength(attenDb, stopEdge - passEdge) * 2UZ)) << "the search stays within twice the estimate";
     };
 
     "searchLowpass reports failure when no length meets the target"_test = [] {
-        const LowpassSearch found = searchLowpass(0.20, 0.25, 60.0, 0.0, 101);
+        const LowpassSearch found = searchLowpass(0.20, 0.25, 60.0, 0.0, 101).value();
         expect(that % !found.ok) << "a windowed design always has some passband ripple";
         expect(eq(found.taps, 101UZ)) << "the longest length tried is reported";
         expect(gt(found.scan.rippleDb, 0.0));
@@ -184,19 +184,19 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         constexpr double cutoff      = 0.5 * (passEdge + stopEdge);
 
         const auto delivers = [&](std::size_t n) {
-            const LowpassScan r = scanLowpass(kaiserLowpass(n, cutoff, attenDb), passEdge, stopEdge);
+            const LowpassScan r = scanLowpass(kaiserLowpass(n, cutoff, attenDb), passEdge, stopEdge).value();
             return r.stopbandDb <= -attenDb && r.rippleDb <= maxRippleDb;
         };
-        expect(eq(searchLowpass(passEdge, stopEdge, attenDb, maxRippleDb, 501).taps, shortestOddLength(kaiserLength(attenDb, stopEdge - passEdge), 501UZ, delivers)));
+        expect(eq(searchLowpass(passEdge, stopEdge, attenDb, maxRippleDb, 501).value().taps, shortestOddLength(kaiserLength(attenDb, stopEdge - passEdge), 501UZ, delivers)));
     };
 
     "scanEdges is scanBand over the stopband and over the passband"_test = [] {
         const std::vector<float> taps  = kaiserLowpass(87, 0.125, 60.0);
-        const LowpassScan        edges = scanEdges(taps, 0.10, 0.15);
+        const LowpassScan        edges = scanEdges(taps, 0.10, 0.15).value();
 
-        expect(eq(edges.stopbandDb, scanBand(taps, 0.15, 0.5).peakDb()));
-        expect(eq(edges.rippleDb, scanBand(taps, 0.0, 0.10).rippleDb()));
-        expect(ge(edges.stopbandDb, scanLowpass(taps, 0.10, 0.15).stopbandDb)) << "the exact edge never reads better than the grid";
+        expect(eq(edges.stopbandDb, scanBand(taps, 0.15, 0.5).value().peakDb()));
+        expect(eq(edges.rippleDb, scanBand(taps, 0.0, 0.10).value().rippleDb()));
+        expect(ge(edges.stopbandDb, scanLowpass(taps, 0.10, 0.15).value().stopbandDb)) << "the exact edge never reads better than the grid";
     };
 
     "oddLength rounds up and respects the floor"_test = [] {
@@ -218,7 +218,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
     "amplitudeAt is the tap set read back at one frequency"_test = [] {
         const std::vector<float> taps = kaiserLowpass(101, 0.225, 80.0);
         std::vector<double>      amp;
-        halfAmplitude(taps, amp);
+        halfAmplitude(taps, amp).value();
 
         expect(approx(amplitudeAt(taps, 0.0), tapSum(taps), 1e-12)) << "DC is the sum of the taps";
         expect(approx(amplitudeAt(taps, 0.0), amp[0UZ], 1e-12));
@@ -231,7 +231,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         expect(lt(worst, 1e-12)) << "the cosine sum and the table-stepped grid agree to " << worst;
 
         std::vector<double> mag;
-        halfResponse(taps, mag);
+        halfResponse(taps, mag).value();
         bool signChanges = false;
         for (std::size_t i = 0UZ; i < amp.size(); ++i) {
             expect(eq(mag[i], std::abs(amp[i])));
@@ -247,19 +247,19 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         const std::vector<float> nothing;
 
         std::vector<double> amp;
-        halfAmplitude(nothing, amp);
+        halfAmplitude(nothing, amp).value();
         expect(eq(amp.size(), kDesignGrid / 2UZ + 1UZ)) << "the grid is the grid, whatever the tap set";
         expect(that % std::ranges::all_of(amp, [](double v) { return v == 0.0; })) << "no taps, no amplitude anywhere";
 
         std::vector<double> mag;
-        halfResponse(nothing, mag);
+        halfResponse(nothing, mag).value();
         std::vector<double> odd;
-        halfResponseOdd(nothing, odd);
+        halfResponseOdd(nothing, odd).value();
         expect(that % identical(mag, amp));
         expect(that % identical(mag, odd)) << "the cosine sum and the sine sum agree on an empty tap set";
 
         std::vector<double> coarse;
-        halfAmplitude(nothing, coarse, 64UZ);
+        halfAmplitude(nothing, coarse, 64UZ).value();
         expect(eq(coarse.size(), 33UZ));
         expect(eq(amplitudeAt(std::vector<double>{}, 0.25), 0.0)) << "the one-frequency reading says the same";
     };
@@ -270,24 +270,24 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
             for (std::size_t i = 0UZ; i < taps.size(); ++i) {
                 taps[i] = static_cast<double>(kaiserLowpass(31, 0.25, 60.0)[i]);
             }
-            normalizeAt(taps, 0.1, gain);
+            normalizeAt(taps, 0.1, gain).value();
             expect(approx(amplitudeAt(taps, 0.1), gain, 1e-12 * gain));
         }
         std::vector<double> nulled{1.0, -2.0, 1.0};
-        expect(throws<std::invalid_argument>([&] { normalizeAt(nulled, 0.0, 1.0); })) << "a design cannot be normalized at one of its own nulls";
+        expect(!normalizeAt(nulled, 0.0, 1.0).has_value()) << "a design cannot be normalized at one of its own nulls";
     };
 
     "scanBand reads the exact edges the grid steps over"_test = [] {
         // A stopband edge sits at the foot of the transition, where the response moves fastest, so a
         // grid that never lands on the stated edge reports a stopband better than the design has.
         const std::vector<float> taps  = kaiserLowpass(87, 0.125, 60.0);
-        const BandLevels         band  = scanBand(taps, 0.15, 0.5);
-        const LowpassScan        plain = scanLowpass(taps, 0.10, 0.15);
+        const BandLevels         band  = scanBand(taps, 0.15, 0.5).value();
+        const LowpassScan        plain = scanLowpass(taps, 0.10, 0.15).value();
 
         expect(gt(band.peakDb(), plain.stopbandDb)) << "the exact edge is worse than anything the grid found: " << band.peakDb() << " against " << plain.stopbandDb;
         expect(lt(band.peakDb() - plain.stopbandDb, 0.5)) << "and only by the response's move over one grid step";
 
-        const BandLevels point = scanBand(taps, 0.125, 0.125);
+        const BandLevels point = scanBand(taps, 0.125, 0.125).value();
         expect(approx(20.0 * std::log10(point.maxMag), 20.0 * std::log10(0.5), 0.01)) << "a band of zero width is the design's own cutoff, 6 dB down";
 
         const BandLevels silent{};
@@ -304,16 +304,19 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         constexpr double width  = 0.02;
         constexpr double cutoff = 0.25;
         for (const Type type : {Type::Rectangular, Type::Bartlett, Type::Welch, Type::Hann, Type::Hamming, Type::Parzen, Type::Blackman, Type::FlatTop, Type::BlackmanHarris, Type::Nuttall, Type::BlackmanNuttall}) {
-            const WindowFigures      figures  = windowFigures(type);
-            const std::size_t        n        = oddLength(windowLength(type, width));
-            const std::vector<float> taps     = lowpass(n, cutoff, {type, std::numeric_limits<double>::quiet_NaN()});
-            const double             measured = -scanBand(taps, cutoff + 0.5 * width, 0.5).peakDb();
+            const WindowFigures      figures  = windowFigures(type).value();
+            const std::size_t        n        = oddLength(windowLength(type, width).value());
+            const std::vector<float> taps     = lowpass(n, cutoff, {type, std::numeric_limits<double>::quiet_NaN()}).value();
+            const double             measured = -scanBand(taps, cutoff + 0.5 * width, 0.5).value().peakDb();
 
             expect(gt(figures.transitionConstant, 0.0));
             expect(approx(measured, figures.attenuationDb, 1.5)) << "window " << static_cast<int>(type) << " at " << n << " taps delivers " << measured << " dB against a tabled " << figures.attenuationDb;
         }
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const WindowFigures unused = windowFigures(Type::Kaiser); })) << "asking a shape-parameter window for a fixed figure is a category error";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const WindowFigures unused = windowFigures(Type::Gaussian); }));
+        const auto kaiser = windowFigures(Type::Kaiser);
+        expect(fatal(!kaiser.has_value())) << "asking a shape-parameter window for a fixed figure is a category error";
+        expect(kaiser.error().message.contains("shape-dependent")) << kaiser.error().message;
+        expect(!windowFigures(Type::Gaussian).has_value());
+        expect(!windowLength(Type::Tukey, 0.01).has_value()) << "the length estimate inherits the window's error";
     };
 
     "the tabled attenuation is the figure at the length it was measured at"_test = [] {
@@ -329,9 +332,9 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         constexpr std::size_t grid   = 1UZ << 18;
         constexpr double      cutoff = 0.25;
 
-        const std::vector<float> taps = lowpass(1023UZ, cutoff, {Type::FlatTop, std::numeric_limits<double>::quiet_NaN()});
+        const std::vector<float> taps = lowpass(1023UZ, cutoff, {Type::FlatTop, std::numeric_limits<double>::quiet_NaN()}).value();
         std::vector<double>      mag;
-        halfResponse(taps, mag, grid);
+        halfResponse(taps, mag, grid).value();
 
         std::size_t firstNull = static_cast<std::size_t>(cutoff * static_cast<double>(grid));
         while (firstNull + 1UZ < mag.size() && mag[firstNull + 1UZ] < mag[firstNull]) {
@@ -343,7 +346,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         }
 
         const double measured = -20.0 * std::log10(worst);
-        expect(approx(measured, windowFigures(Type::FlatTop).attenuationDb, 0.3)) << "FlatTop at 1023 taps delivers " << measured << " dB against a tabled " << windowFigures(Type::FlatTop).attenuationDb;
+        expect(approx(measured, windowFigures(Type::FlatTop).value().attenuationDb, 0.3)) << "FlatTop at 1023 taps delivers " << measured << " dB against a tabled " << windowFigures(Type::FlatTop).value().attenuationDb;
     };
 
     "the tap-count estimate and the search pin each other"_test = [] {
@@ -366,10 +369,10 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         for (const Row& row : table) {
             expect(eq(oddLength(kaiserLength(row.attenDb, row.width)), row.estimated)) << "estimate at " << row.attenDb << " dB";
 
-            const double delivered = scanBand(kaiserLowpass(row.estimated, cutoff, row.attenDb), cutoff + 0.5 * row.width, 0.5).peakDb();
+            const double delivered = scanBand(kaiserLowpass(row.estimated, cutoff, row.attenDb), cutoff + 0.5 * row.width, 0.5).value().peakDb();
             expect(approx(delivered, row.deliveredDb, 0.05)) << "the estimated length delivers " << delivered << " dB against a requested " << row.attenDb;
 
-            const LowpassSearch found = searchLowpass(cutoff - 0.5 * row.width, cutoff + 0.5 * row.width, row.attenDb, 1.0, 701);
+            const LowpassSearch found = searchLowpass(cutoff - 0.5 * row.width, cutoff + 0.5 * row.width, row.attenDb, 1.0, 701).value();
             expect(that % found.ok);
             expect(eq(found.taps, row.shortest)) << "shortest length that measurably meets " << row.attenDb << " dB";
         }
@@ -379,8 +382,8 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         // The warning kDesignGrid documents, made a check: a coarse grid steps over the stopband
         // peaks it is meant to find, and reports a filter as clearing a target it does not meet.
         const std::vector<float> taps   = kaiserLowpass(101, 0.225, 80.0);
-        const double             fine   = scanLowpass(taps, 0.20, 0.25).stopbandDb;
-        const double             coarse = scanLowpass(taps, 0.20, 0.25, 256).stopbandDb;
+        const double             fine   = scanLowpass(taps, 0.20, 0.25).value().stopbandDb;
+        const double             coarse = scanLowpass(taps, 0.20, 0.25, 256).value().stopbandDb;
         expect(lt(coarse, fine)) << "coarse " << coarse << " dB flatters the design against fine " << fine << " dB";
         expect(gt(fine, -80.0)) << "the fine grid finds that 101 taps does not in fact reach 80 dB here";
         expect(lt(coarse, -80.0)) << "the coarse grid would have passed it";
@@ -395,30 +398,30 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
 
     "every design returns an odd count, and respects its floor"_test = [&] {
         for (const std::size_t requested : {1UZ, 2UZ, 3UZ, 4UZ, 30UZ, 31UZ, 32UZ}) {
-            expect(eq(lowpass(requested, 0.2, kaiser60).size() % 2UZ, 1UZ));
-            expect(eq(highpass(requested, 0.2, kaiser60).size() % 2UZ, 1UZ));
-            expect(eq(bandpass(requested, 0.1, 0.2, kaiser60).size() % 2UZ, 1UZ));
-            expect(eq(bandstop(requested, 0.1, 0.2, kaiser60).size() % 2UZ, 1UZ));
+            expect(eq(lowpass(requested, 0.2, kaiser60).value().size() % 2UZ, 1UZ));
+            expect(eq(highpass(requested, 0.2, kaiser60).value().size() % 2UZ, 1UZ));
+            expect(eq(bandpass(requested, 0.1, 0.2, kaiser60).value().size() % 2UZ, 1UZ));
+            expect(eq(bandstop(requested, 0.1, 0.2, kaiser60).value().size() % 2UZ, 1UZ));
         }
-        expect(eq(lowpass(32, 0.2, kaiser60).size(), 33UZ)) << "an even request is rounded up";
-        expect(eq(highpass(1, 0.2, kaiser60).size(), 3UZ)) << "three taps is the floor";
-        expect(eq(bandpass(1, 0.1, 0.2, kaiser60).size(), 5UZ)) << "a band design needs a center tap and one pair";
-        expect(eq(bandstop(4, 0.1, 0.2, kaiser60).size(), 5UZ));
+        expect(eq(lowpass(32, 0.2, kaiser60).value().size(), 33UZ)) << "an even request is rounded up";
+        expect(eq(highpass(1, 0.2, kaiser60).value().size(), 3UZ)) << "three taps is the floor";
+        expect(eq(bandpass(1, 0.1, 0.2, kaiser60).value().size(), 5UZ)) << "a band design needs a center tap and one pair";
+        expect(eq(bandstop(4, 0.1, 0.2, kaiser60).value().size(), 5UZ));
     };
 
     "real designs are symmetric to the bit"_test = [&] {
-        expect(eq(worstAsymmetry(lowpass(87, 0.125, kaiser60)), 0.0));
-        expect(eq(worstAsymmetry(highpass(87, 0.125, kaiser60)), 0.0));
-        expect(eq(worstAsymmetry(bandpass(101, 0.1, 0.2, kaiser60)), 0.0));
-        expect(eq(worstAsymmetry(bandstop(101, 0.1, 0.2, kaiser60)), 0.0));
+        expect(eq(worstAsymmetry(lowpass(87, 0.125, kaiser60).value()), 0.0));
+        expect(eq(worstAsymmetry(highpass(87, 0.125, kaiser60).value()), 0.0));
+        expect(eq(worstAsymmetry(bandpass(101, 0.1, 0.2, kaiser60).value()), 0.0));
+        expect(eq(worstAsymmetry(bandstop(101, 0.1, 0.2, kaiser60).value()), 0.0));
     };
 
     "each design carries its gain to its own reference frequency"_test = [&] {
         for (const double gain : {1.0, 0.5, 1000.0}) {
-            const std::vector<float> low  = lowpass(87, 0.125, kaiser60, gain);
-            const std::vector<float> high = highpass(87, 0.125, kaiser60, gain);
-            const std::vector<float> pass = bandpass(101, 0.1, 0.2, kaiser60, gain);
-            const std::vector<float> stop = bandstop(101, 0.1, 0.2, kaiser60, gain);
+            const std::vector<float> low  = lowpass(87, 0.125, kaiser60, gain).value();
+            const std::vector<float> high = highpass(87, 0.125, kaiser60, gain).value();
+            const std::vector<float> pass = bandpass(101, 0.1, 0.2, kaiser60, gain).value();
+            const std::vector<float> stop = bandstop(101, 0.1, 0.2, kaiser60, gain).value();
 
             expect(approx(amplitudeAt(low, 0.0), gain, 1e-6 * gain)) << "low-pass at DC";
             expect(approx(std::abs(amplitudeAt(high, 0.5)), gain, 1e-6 * gain)) << "high-pass at Nyquist";
@@ -426,7 +429,7 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
             expect(approx(amplitudeAt(stop, 0.0), gain, 1e-6 * gain)) << "band-stop at DC";
 
             // the taps scale exactly linearly, gain being one multiply at the end
-            const std::vector<float> unit  = lowpass(87, 0.125, kaiser60, 1.0);
+            const std::vector<float> unit  = lowpass(87, 0.125, kaiser60, 1.0).value();
             double                   worst = 0.0;
             for (std::size_t i = 0UZ; i < unit.size(); ++i) {
                 worst = std::max(worst, std::abs(static_cast<double>(low[i]) - gain * static_cast<double>(unit[i])));
@@ -439,7 +442,7 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
         // A(pi) is the reference, so the alternating sum is (-1)^M times the gain: the check takes
         // the absolute value, since asserting the raw sum would fail on parity alone.
         for (const std::size_t n : {87UZ, 89UZ}) {
-            const std::vector<float> taps        = highpass(n, 0.125, kaiser60);
+            const std::vector<float> taps        = highpass(n, 0.125, kaiser60).value();
             double                   alternating = 0.0;
             for (std::size_t i = 0UZ; i < taps.size(); ++i) {
                 alternating += ((i % 2UZ) == 0UZ ? 1.0 : -1.0) * static_cast<double>(taps[i]);
@@ -480,8 +483,8 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
         };
         // low-pass against high-pass, at one cutoff
         for (const Pair& p : std::array<Pair, 3>{{{87, 0.125, 0.0, 7.703e-05}, {175, 0.25, 0.0, 6.007e-05}, {31, 0.1, 0.0, 2.073e-04}}}) {
-            const std::vector<float> low   = lowpass(p.taps, p.lowEdge, kaiser60);
-            const std::vector<float> high  = highpass(p.taps, p.lowEdge, kaiser60);
+            const std::vector<float> low   = lowpass(p.taps, p.lowEdge, kaiser60).value();
+            const std::vector<float> high  = highpass(p.taps, p.lowEdge, kaiser60).value();
             double                   worst = 0.0;
             for (std::size_t i = 0UZ; i < low.size(); ++i) {
                 const double sum = static_cast<double>(low[i]) + static_cast<double>(high[i]) - (i == (p.taps - 1UZ) / 2UZ ? 1.0 : 0.0);
@@ -491,8 +494,8 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
         }
         // band-pass against band-stop, over one pair of edges
         for (const Pair& p : std::array<Pair, 2>{{{175, 5000.0 / 48000.0, 9000.0 / 48000.0, 1.470e-04}, {101, 0.1, 0.2, 8.017e-05}}}) {
-            const std::vector<float> pass  = bandpass(p.taps, p.lowEdge, p.highEdge, kaiser60);
-            const std::vector<float> stop  = bandstop(p.taps, p.lowEdge, p.highEdge, kaiser60);
+            const std::vector<float> pass  = bandpass(p.taps, p.lowEdge, p.highEdge, kaiser60).value();
+            const std::vector<float> stop  = bandstop(p.taps, p.lowEdge, p.highEdge, kaiser60).value();
             double                   worst = 0.0;
             for (std::size_t i = 0UZ; i < pass.size(); ++i) {
                 const double sum = static_cast<double>(pass[i]) + static_cast<double>(stop[i]) - (i == (p.taps - 1UZ) / 2UZ ? 1.0 : 0.0);
@@ -507,17 +510,17 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
         const FilterSpec spec{.sampleRate = fs, .cutoff = 6000.0, .transitionWidth = 2000.0, .attenuationDb = 60.0};
 
         expect(approx(gr::filter::fir::kaiserBeta(60.0), 5.65326, 1e-5));
-        expect(eq(tapCountOf(spec), 87UZ));
+        expect(eq(tapCountOf(spec).value(), 87UZ));
 
-        const std::vector<float> taps = designHighpass(spec);
+        const std::vector<float> taps = designHighpass(spec).value();
         expect(eq(taps.size(), 87UZ));
         expect(approx(static_cast<double>(taps[43UZ]), 0.749970810986, 1e-7)) << "center tap";
         expect(approx(static_cast<double>(taps[0UZ]), -1.067147377416e-04, 1e-10));
         expect(approx(std::abs(amplitudeAt(taps, 0.0)), 1.914094e-04, 2e-6)) << "the design is not blind at DC, only 74 dB down";
         expect(approx(20.0 * std::log10(std::abs(amplitudeAt(taps, 6000.0 / fs))), -6.020141, 1e-4)) << "the stated cutoff is the -6 dB point";
 
-        const BandLevels stopband = scanBand(taps, 0.0, 5000.0 / fs);
-        const BandLevels passband = scanBand(taps, 7000.0 / fs, 0.5);
+        const BandLevels stopband = scanBand(taps, 0.0, 5000.0 / fs).value();
+        const BandLevels passband = scanBand(taps, 7000.0 / fs, 0.5).value();
         expect(approx(stopband.peakDb(), -56.578, 0.01)) << "the estimate's own shortfall against a requested 60 dB, pinned rather than asserted away";
         expect(approx(passband.minMag, 0.998561420, 1e-6));
         expect(approx(passband.maxMag, 1.001043240, 1e-6));
@@ -525,7 +528,7 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
 
         // the two ways of stating the same transition band
         constexpr TransitionBand edges = fromEdges(7000.0, 5000.0);
-        const std::vector<float> same  = designHighpass({.sampleRate = fs, .cutoff = edges.cutoff, .transitionWidth = edges.width, .attenuationDb = 60.0});
+        const std::vector<float> same  = designHighpass({.sampleRate = fs, .cutoff = edges.cutoff, .transitionWidth = edges.width, .attenuationDb = 60.0}).value();
         expect(that % identical(same, taps)) << "(passEdge, stopEdge) and (edge, transitionWidth) are the same design";
     };
 
@@ -533,8 +536,8 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
         constexpr double fs = 48000.0;
         const FilterSpec spec{.sampleRate = fs, .cutoff = 5000.0, .highCutoff = 9000.0, .transitionWidth = 1000.0, .attenuationDb = 60.0};
 
-        expect(eq(tapCountOf(spec, 5UZ), 175UZ));
-        const std::vector<float> taps = designBandpass(spec);
+        expect(eq(tapCountOf(spec, 5UZ).value(), 175UZ));
+        const std::vector<float> taps = designBandpass(spec).value();
         expect(eq(taps.size(), 175UZ));
         expect(approx(static_cast<double>(taps[87UZ]), 0.166579470121, 1e-7)) << "center tap";
         expect(approx(amplitudeAt(taps, 7000.0 / fs), 1.0, 1e-6)) << "unit gain at the arithmetic center, not the geometric one";
@@ -548,32 +551,32 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
 
         expect(approx(20.0 * std::log10(std::abs(amplitudeAt(taps, 5000.0 / fs))), -6.0244, 1e-3)) << "both stated edges are -6 dB points";
         expect(approx(20.0 * std::log10(std::abs(amplitudeAt(taps, 9000.0 / fs))), -6.0264, 1e-3));
-        expect(approx(scanBand(taps, 0.0, 4500.0 / fs).peakDb(), -60.669, 0.01));
-        expect(approx(scanBand(taps, 9500.0 / fs, 0.5).peakDb(), -59.539, 0.01));
+        expect(approx(scanBand(taps, 0.0, 4500.0 / fs).value().peakDb(), -60.669, 0.01));
+        expect(approx(scanBand(taps, 9500.0 / fs, 0.5).value().peakDb(), -59.539, 0.01));
     };
 
     "band-stop measured anchors"_test = [] {
         constexpr double fs = 48000.0;
         const FilterSpec spec{.sampleRate = fs, .cutoff = 5000.0, .highCutoff = 9000.0, .transitionWidth = 1000.0, .attenuationDb = 60.0};
 
-        const std::vector<float> taps = designBandstop(spec);
+        const std::vector<float> taps = designBandstop(spec).value();
         expect(eq(taps.size(), 175UZ));
         expect(approx(static_cast<double>(taps[87UZ]), 0.833567515119, 1e-7)) << "center tap";
         expect(approx(tapSum(taps), 1.0, 1e-6)) << "unit gain at DC";
         expect(approx(20.0 * std::log10(std::abs(amplitudeAt(taps, 7000.0 / fs))), -65.620, 0.02)) << "the notch center";
-        expect(approx(scanBand(taps, 5500.0 / fs, 8500.0 / fs).peakDb(), -60.026, 0.01));
+        expect(approx(scanBand(taps, 5500.0 / fs, 8500.0 / fs).value().peakDb(), -60.026, 0.01));
 
-        const BandLevels lower  = scanBand(taps, 0.0, 4500.0 / fs);
-        const BandLevels upper  = scanBand(taps, 9500.0 / fs, 0.5);
+        const BandLevels lower  = scanBand(taps, 0.0, 4500.0 / fs).value();
+        const BandLevels upper  = scanBand(taps, 9500.0 / fs, 0.5).value();
         const double     ripple = 20.0 * std::log10(std::max(lower.maxMag, upper.maxMag) / std::min(lower.minMag, upper.minMag));
         expect(approx(ripple, 0.0171, 1e-3));
     };
 
     "two calls with the same parameters return the same taps"_test = [&] {
-        expect(that % identical(lowpass(87, 0.125, kaiser60, 2.0), lowpass(87, 0.125, kaiser60, 2.0)));
-        expect(that % identical(highpass(87, 0.125, kaiser60), highpass(87, 0.125, kaiser60)));
-        expect(that % identical(bandpass(101, 0.1, 0.2, kaiser60), bandpass(101, 0.1, 0.2, kaiser60)));
-        expect(that % identical(bandstop(101, 0.1, 0.2, kaiser60), bandstop(101, 0.1, 0.2, kaiser60)));
+        expect(that % identical(lowpass(87, 0.125, kaiser60, 2.0).value(), lowpass(87, 0.125, kaiser60, 2.0).value()));
+        expect(that % identical(highpass(87, 0.125, kaiser60).value(), highpass(87, 0.125, kaiser60).value()));
+        expect(that % identical(bandpass(101, 0.1, 0.2, kaiser60).value(), bandpass(101, 0.1, 0.2, kaiser60).value()));
+        expect(that % identical(bandstop(101, 0.1, 0.2, kaiser60).value(), bandstop(101, 0.1, 0.2, kaiser60).value()));
     };
 };
 
@@ -585,7 +588,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
     const WindowSpec kaiser60 = kaiserFor(60.0);
 
     // the real low-pass prototype the complex pair is built from: same length, half the band width
-    const auto prototype = [&](std::size_t n, double lowCutoff, double highCutoff) { return lowpass(n, 0.5 * (highCutoff - lowCutoff) / fs, kaiser60); };
+    const auto prototype = [&](std::size_t n, double lowCutoff, double highCutoff) { return lowpass(n, 0.5 * (highCutoff - lowCutoff) / fs, kaiser60).value(); };
 
     // |A_proto| read off the prototype's own half turn, folded by symmetry; the modulation
     // identity turns every complex band measurement into a prototype one
@@ -599,7 +602,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
 
     "complex designs are conjugate-symmetric to the bit"_test = [&] {
         for (const std::size_t n : {31UZ, 32UZ, 175UZ}) {
-            for (const auto& taps : {complexBandpass(n, 2000.0 / fs, 6000.0 / fs, kaiser60), complexBandstop(n, 2000.0 / fs, 6000.0 / fs, kaiser60)}) {
+            for (const auto& taps : {complexBandpass(n, 2000.0 / fs, 6000.0 / fs, kaiser60).value(), complexBandstop(n, 2000.0 / fs, 6000.0 / fs, kaiser60).value()}) {
                 expect(eq(taps.size() % 2UZ, 1UZ));
                 double worst = 0.0;
                 for (std::size_t i = 0UZ; i < taps.size(); ++i) {
@@ -608,14 +611,14 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
                 expect(eq(worst, 0.0)) << "the second half is the first half's conjugate, copied";
             }
         }
-        expect(eq(complexBandpass(1, 0.1, 0.2, kaiser60).size(), 5UZ)) << "a band design's floor is five taps";
+        expect(eq(complexBandpass(1, 0.1, 0.2, kaiser60).value().size(), 5UZ)) << "a band design's floor is five taps";
     };
 
     "a complex band-pass centered on DC is the real low-pass"_test = [&] {
         // f1 = -f2 is not special-cased: the general formula gives a zero phase ramp and real taps.
         constexpr double         cutoff      = 0.2;
         const std::vector<float> real        = kaiserLowpass(101, cutoff, 60.0);
-        const auto               complexTaps = complexBandpass(101, -cutoff, cutoff, kaiser60);
+        const auto               complexTaps = complexBandpass(101, -cutoff, cutoff, kaiser60).value();
 
         double worstReal = 0.0;
         double worstImag = 0.0;
@@ -629,9 +632,9 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
 
     "complex band-pass measured anchors"_test = [&] {
         const FilterSpec spec{.sampleRate = fs, .cutoff = 2000.0, .highCutoff = 6000.0, .transitionWidth = 1000.0, .attenuationDb = 60.0};
-        expect(eq(tapCountOf(spec, 5UZ), 175UZ));
+        expect(eq(tapCountOf(spec, 5UZ).value(), 175UZ));
 
-        const auto taps = designComplexBandpass(spec);
+        const auto taps = designComplexBandpass(spec).value();
         expect(eq(taps.size(), 175UZ));
         expect(approx(static_cast<double>(taps[87UZ].real()), 0.083290454007, 1e-7)) << "center tap";
         expect(eq(static_cast<double>(taps[87UZ].imag()), 0.0)) << "and the phase ramp is exactly zero there";
@@ -643,7 +646,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
 
         // the stopband is the prototype's, on both sides of the center by the modulation identity
         const std::vector<float> proto = prototype(175UZ, 2000.0, 6000.0);
-        expect(approx(scanBand(proto, 2500.0 / fs, 0.5).peakDb(), -60.038, 0.01));
+        expect(approx(scanBand(proto, 2500.0 / fs, 0.5).value().peakDb(), -60.038, 0.01));
 
         double worst = 0.0;
         for (std::size_t i = 0UZ; i < kDesignGrid; i += 331UZ) {
@@ -655,7 +658,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
 
     "complex band-stop measured anchors"_test = [&] {
         const FilterSpec spec{.sampleRate = fs, .cutoff = 2000.0, .highCutoff = 6000.0, .transitionWidth = 1000.0, .attenuationDb = 60.0};
-        const auto       taps = designComplexBandstop(spec);
+        const auto       taps = designComplexBandstop(spec).value();
         expect(eq(taps.size(), 175UZ));
         expect(approx(static_cast<double>(taps[87UZ].real()), 0.916709545993, 1e-7)) << "center tap, one minus the band-pass's";
 
@@ -670,7 +673,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
         // abs(H) = abs(1 - A_proto(f - fc)) exactly, so both bands are read off the prototype
         const std::vector<float> proto = prototype(175UZ, 2000.0, 6000.0);
         std::vector<double>      amp;
-        halfAmplitude(proto, amp);
+        halfAmplitude(proto, amp).value();
 
         double notch = std::abs(1.0 - amplitudeAt(proto, 1500.0 / fs));
         for (std::size_t i = 0UZ; i <= static_cast<std::size_t>(std::floor(1500.0 / fs * static_cast<double>(kDesignGrid))); ++i) {
@@ -690,13 +693,13 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
 
     "each complex design carries its gain, and two calls agree"_test = [&] {
         for (const double gain : {1.0, 0.5, 1000.0}) {
-            const auto pass = complexBandpass(175, 2000.0 / fs, 6000.0 / fs, kaiser60, gain);
-            const auto stop = complexBandstop(175, 2000.0 / fs, 6000.0 / fs, kaiser60, gain);
+            const auto pass = complexBandpass(175, 2000.0 / fs, 6000.0 / fs, kaiser60, gain).value();
+            const auto stop = complexBandstop(175, 2000.0 / fs, 6000.0 / fs, kaiser60, gain).value();
             expect(approx(std::abs(responseAt(pass, 4000.0 / fs)), gain, 1e-6 * gain)) << "band-pass at its center";
             expect(approx(std::abs(responseAt(stop, 0.0)) / gain, 1.000327778, 1e-5)) << "band-stop away from its notch";
         }
-        expect(that % identical(complexBandpass(101, 0.1, 0.2, kaiser60), complexBandpass(101, 0.1, 0.2, kaiser60)));
-        expect(that % identical(complexBandstop(101, 0.1, 0.2, kaiser60), complexBandstop(101, 0.1, 0.2, kaiser60)));
+        expect(that % identical(complexBandpass(101, 0.1, 0.2, kaiser60).value(), complexBandpass(101, 0.1, 0.2, kaiser60).value()));
+        expect(that % identical(complexBandstop(101, 0.1, 0.2, kaiser60).value(), complexBandstop(101, 0.1, 0.2, kaiser60).value()));
     };
 
     "a design of no taps is empty"_test = [&] {
@@ -708,8 +711,8 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
         expect(that % gr::filter::fir::design::detail::rotate(nothing, 0.25).empty()) << "no center tap for the ramp to be zero at";
         expect(that % gr::filter::fir::design::detail::narrow(gr::filter::fir::design::detail::rotate(nothing, 0.25)).empty());
 
-        expect(eq(complexBandpass(0, 2000.0 / fs, 6000.0 / fs, kaiser60).size(), 5UZ)) << "a zero request is the band floor, not an empty design";
-        expect(eq(complexBandstop(0, 2000.0 / fs, 6000.0 / fs, kaiser60).size(), 5UZ));
+        expect(eq(complexBandpass(0, 2000.0 / fs, 6000.0 / fs, kaiser60).value().size(), 5UZ)) << "a zero request is the band floor, not an empty design";
+        expect(eq(complexBandstop(0, 2000.0 / fs, 6000.0 / fs, kaiser60).value().size(), 5UZ));
     };
 
     "the complex pair is the closed-form rotation of its prototype, tap for tap"_test = [&] {
@@ -724,7 +727,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
         for (const std::size_t requested : {31UZ, 32UZ}) {
             const std::size_t   len   = oddLength(requested, 5UZ);
             std::vector<double> proto = lowpassKernel(len, 0.5 * (highCutoff - lowCutoff), kaiser60);
-            normalizeAt(proto, 0.0, 1.0);
+            normalizeAt(proto, 0.0, 1.0).value();
 
             const std::size_t                 mid = (len - 1UZ) / 2UZ;
             std::vector<std::complex<double>> rotated(len);
@@ -741,8 +744,8 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
             }
             delta[mid] += 1.0;
 
-            expect(that % identical(complexBandpass(requested, lowCutoff, highCutoff, kaiser60), gr::filter::fir::design::detail::narrow(rotated))) << "band-pass at " << requested << " requested taps";
-            expect(that % identical(complexBandstop(requested, lowCutoff, highCutoff, kaiser60), gr::filter::fir::design::detail::narrow(delta))) << "band-stop at " << requested << " requested taps";
+            expect(that % identical(complexBandpass(requested, lowCutoff, highCutoff, kaiser60).value(), gr::filter::fir::design::detail::narrow(rotated))) << "band-pass at " << requested << " requested taps";
+            expect(that % identical(complexBandstop(requested, lowCutoff, highCutoff, kaiser60).value(), gr::filter::fir::design::detail::narrow(delta))) << "band-stop at " << requested << " requested taps";
         }
     };
 };
@@ -796,7 +799,7 @@ const boost::ut::suite<"FIR pulse-shaping design"> pulseDesignTests = [] {
         }
         expect(approx(unnormalized, 7.996057881613, 1e-11));
 
-        const std::vector<float> taps = designRootRaisedCosine(65, 19000.0, 2375.0, 1.0);
+        const std::vector<float> taps = designRootRaisedCosine(65, 19000.0, 2375.0, 1.0).value();
         expect(eq(taps.size(), 65UZ));
         expect(eq(worstAsymmetry(taps), 0.0));
         expect(approx(static_cast<double>(taps[32UZ]), 0.159233407710, 1e-7)) << "center tap";
@@ -818,7 +821,7 @@ const boost::ut::suite<"FIR pulse-shaping design"> pulseDesignTests = [] {
         };
         for (const Row& row : std::array<Row, 6>{{{0.20, 4, 1.743e-03, 0.248655515}, {0.20, 8, 1.797e-03, 0.124192346}, {0.35, 4, 3.918e-04, 0.250231763}, {0.35, 8, 4.522e-04, 0.125229537}, {1.00, 4, 4.915e-05, 0.250145006}, {1.00, 8, 5.956e-05, 0.125034273}}}) {
             const std::size_t        n    = static_cast<std::size_t>(16 * row.sps + 1);
-            const std::vector<float> taps = rootRaisedCosine(n, static_cast<double>(row.sps), row.alpha);
+            const std::vector<float> taps = rootRaisedCosine(n, static_cast<double>(row.sps), row.alpha).value();
 
             std::vector<double> self(2UZ * taps.size() - 1UZ, 0.0);
             for (std::size_t i = 0UZ; i < taps.size(); ++i) {
@@ -861,11 +864,11 @@ const boost::ut::suite<"FIR pulse-shaping design"> pulseDesignTests = [] {
     };
 
     "pulse designs round up, floor and repeat"_test = [] {
-        expect(eq(rootRaisedCosine(32, 4.0, 0.35).size(), 33UZ));
+        expect(eq(rootRaisedCosine(32, 4.0, 0.35).value().size(), 33UZ));
         expect(eq(gaussianPulse(32, 4.0, 0.35).size(), 33UZ));
-        expect(eq(rootRaisedCosine(0, 4.0, 0.35).size(), 3UZ));
+        expect(eq(rootRaisedCosine(0, 4.0, 0.35).value().size(), 3UZ));
         expect(eq(gaussianPulse(1, 4.0, 0.35).size(), 3UZ));
-        expect(that % identical(rootRaisedCosine(65, 8.0, 0.35, 2.0), rootRaisedCosine(65, 8.0, 0.35, 2.0)));
+        expect(that % identical(rootRaisedCosine(65, 8.0, 0.35, 2.0).value(), rootRaisedCosine(65, 8.0, 0.35, 2.0).value()));
         expect(that % identical(gaussianPulse(33, 8.0, 0.30), gaussianPulse(33, 8.0, 0.30)));
     };
 };
@@ -938,19 +941,19 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
                  {63, {0.997, 0.998, 0.9996}, {1.003, 1.000, 1.0003}},                                //
                  {127, {0.998, 0.99999, 0.9999}, {1.002, 1.00001, 1.0001}}}}) {
             for (std::size_t w = 0UZ; w < windows.size(); ++w) {
-                const BandLevels band = scanHilbert(hilbert(row.taps, windows[w]), 0.05);
+                const BandLevels band = scanHilbert(hilbert(row.taps, windows[w]), 0.05).value();
                 expect(approx(band.minMag, row.lo[w], 1e-3)) << "band floor at " << row.taps << " taps, window " << w;
                 expect(approx(band.maxMag, row.hi[w], 1e-3)) << "band ceiling at " << row.taps << " taps, window " << w;
             }
         }
-        expect(lt(scanHilbert(hilbert(11, windows[0]), 0.05).minMag, 0.6)) << "eleven taps is not usable across 0.05 .. 0.45";
-        expect(gt(scanHilbert(hilbert(127, windows[0]), 0.05).minMag, 0.99)) << "127 taps is";
+        expect(lt(scanHilbert(hilbert(11, windows[0]), 0.05).value().minMag, 0.6)) << "eleven taps is not usable across 0.05 .. 0.45";
+        expect(gt(scanHilbert(hilbert(127, windows[0]), 0.05).value().minMag, 0.99)) << "127 taps is";
     };
 
     "halfResponseOdd is the sine sum halfResponse is not"_test = [&] {
         const std::vector<float> taps = hilbert(63, windows[2]);
         std::vector<double>      mag;
-        halfResponseOdd(taps, mag);
+        halfResponseOdd(taps, mag).value();
 
         expect(eq(mag.size(), kDesignGrid / 2UZ + 1UZ));
         double worst = 0.0;
@@ -997,8 +1000,8 @@ const boost::ut::suite<"manchesterMatchedFilter"> manchesterMatchedFilterTests =
         constexpr double      kRate = 38000.0; // RDS's biphase grid: 16 samples per 2375-baud symbol
         constexpr double      kBaud = 2375.0;
 
-        const std::vector<float> pulse = designRootRaisedCosine(kTaps, kRate, kBaud, 1.0);
-        const std::vector<float> taps  = manchesterMatchedFilter(kTaps, kRate, kBaud, 1.0);
+        const std::vector<float> pulse = designRootRaisedCosine(kTaps, kRate, kBaud, 1.0).value();
+        const std::vector<float> taps  = manchesterMatchedFilter(kTaps, kRate, kBaud, 1.0).value();
 
         expect(eq(taps.size(), pulse.size() - 8UZ)) << "eight samples is the half symbol at sixteen per";
         double worst = 0.0;
@@ -1015,8 +1018,8 @@ const boost::ut::suite<"manchesterMatchedFilter"> manchesterMatchedFilterTests =
         constexpr std::size_t    kSps  = 16UZ;
         constexpr double         kBaud = 2375.0;
         constexpr double         kRate = static_cast<double>(kSps) * kBaud;
-        const std::vector<float> taps  = manchesterMatchedFilter(12UZ * kSps + 1UZ, kRate, kBaud, 1.0);
-        const std::vector<float> pulse = designRootRaisedCosine(12UZ * kSps + 1UZ, kRate, kBaud, 1.0);
+        const std::vector<float> taps  = manchesterMatchedFilter(12UZ * kSps + 1UZ, kRate, kBaud, 1.0).value();
+        const std::vector<float> pulse = designRootRaisedCosine(12UZ * kSps + 1UZ, kRate, kBaud, 1.0).value();
 
         // The biphase symbol IS the filter's generating difference, so the aligned correlation is
         // the filter's own energy, 2(R(0) - R(T/2)). The un-split pulse does best a quarter symbol
@@ -1041,8 +1044,74 @@ const boost::ut::suite<"manchesterMatchedFilter"> manchesterMatchedFilterTests =
     };
 
     "refusals fire by name"_test = [] {
-        expect(throws([] { std::ignore = manchesterMatchedFilter(151, 38000.0, 2400.0, 1.0); })) << "a fractional half symbol is a resampler's job";
-        expect(throws([] { std::ignore = manchesterMatchedFilter(8, 38000.0, 2375.0, 1.0); })) << "too short to span the shift";
+        expect(!manchesterMatchedFilter(151, 38000.0, 2400.0, 1.0).has_value()) << "a fractional half symbol is a resampler's job";
+        expect(!manchesterMatchedFilter(8, 38000.0, 2375.0, 1.0).has_value()) << "too short to span the shift";
+        const auto fractional = manchesterMatchedFilter(151, 38000.0, 2400.0, 1.0);
+        expect(fatal(!fractional.has_value()));
+        expect(fractional.error().message.contains("needs a whole number")) << fractional.error().message;
+    };
+};
+
+const boost::ut::suite<"FIR design errors"> designErrorTests = [] {
+    using namespace boost::ut;
+    using namespace gr::filter::fir::design;
+    using gr::algorithm::window::Type;
+
+    "a grid that is not a power of two is an error for every reader"_test = [] {
+        const std::vector<float> taps = kaiserLowpass(31UZ, 0.2, 60.0);
+        std::vector<double>      out;
+        constexpr std::size_t    kBadGrid = 1000UZ;
+
+        const auto amplitude = halfAmplitude(taps, out, kBadGrid);
+        expect(fatal(!amplitude.has_value())) << "halfAmplitude";
+        expect(amplitude.error().message.contains("power of two, got 1000")) << amplitude.error().message;
+        expect(!halfResponse(taps, out, kBadGrid).has_value()) << "halfResponse";
+        expect(!halfResponseOdd(taps, out, kBadGrid).has_value()) << "halfResponseOdd";
+        expect(!scanLowpass(taps, 0.15, 0.25, kBadGrid).has_value()) << "scanLowpass";
+        expect(!scanBand(taps, 0.25, 0.5, kBadGrid).has_value()) << "scanBand";
+        expect(!scanEdges(taps, 0.15, 0.25, kBadGrid).has_value()) << "scanEdges";
+        expect(!scanHilbert(taps, 0.05, kBadGrid).has_value()) << "scanHilbert";
+        expect(!searchLowpass(0.15, 0.25, 60.0, 0.1, 501UZ, kBadGrid).has_value()) << "searchLowpass";
+        expect(scanEdges(taps, 0.15, 0.25, 1024UZ).has_value()) << "a power of two reads";
+    };
+
+    "a design with no response at its reference is an error"_test = [] {
+        const WindowSpec kaiser60 = kaiserFor(60.0);
+
+        const auto zeroLowpass = lowpass(31UZ, 0.0, kaiser60);
+        expect(fatal(!zeroLowpass.has_value())) << "a low-pass cut at DC is zero at DC";
+        expect(zeroLowpass.error().message.contains("normalization reference is zero")) << zeroLowpass.error().message;
+        // A window this narrow keeps the center tap alone, and at these cutoffs the center tap is zero.
+        const WindowSpec centerOnly{Type::Gaussian, 1e-3};
+        expect(!highpass(31UZ, 0.5, centerOnly).has_value()) << "a high-pass cut at Nyquist is zero at Nyquist";
+        expect(!bandpass(31UZ, 0.2, 0.2, kaiser60).has_value()) << "a band-pass of no width is zero at its center";
+        expect(!bandstop(31UZ, 0.0, 0.5, centerOnly).has_value()) << "a band-stop over the whole band is zero at DC";
+        expect(!complexBandpass(31UZ, 0.2, 0.2, kaiser60).has_value()) << "a complex band-pass of no width";
+        expect(!complexBandstop(31UZ, 0.2, 0.2, kaiser60).has_value()) << "a complex band-stop of no width";
+
+        // At this rolloff the center tap of the pulse is exactly zero, and at a vanishing sample rate every other tap
+        // underflows to zero.
+        const double zeroCenterAlpha = 1.0 / (1.0 - 4.0 / std::numbers::pi);
+        expect(!rootRaisedCosine(31UZ, 1e-200, zeroCenterAlpha).has_value()) << "a pulse whose taps sum to zero";
+        expect(!designRootRaisedCosine(31UZ, 1e-200, 1.0, zeroCenterAlpha).has_value()) << "the same pulse from rates";
+    };
+
+    "a design from a spec returns the length estimate's error"_test = [] {
+        const FilterSpec tukey{.sampleRate = 1000.0, .cutoff = 100.0, .highCutoff = 200.0, .transitionWidth = 20.0, .window = Type::Tukey};
+
+        const auto taps = tapCountOf(tukey);
+        expect(fatal(!taps.has_value())) << "Tukey has no fixed transition constant";
+        expect(taps.error().message.contains("shape-dependent")) << taps.error().message;
+        expect(!designLowpass(tukey).has_value()) << "designLowpass";
+        expect(!designHighpass(tukey).has_value()) << "designHighpass";
+        expect(!designBandpass(tukey).has_value()) << "designBandpass";
+        expect(!designBandstop(tukey).has_value()) << "designBandstop";
+        expect(!designComplexBandpass(tukey).has_value()) << "designComplexBandpass";
+        expect(!designComplexBandstop(tukey).has_value()) << "designComplexBandstop";
+
+        FilterSpec stated = tukey;
+        stated.taps       = 31UZ;
+        expect(designLowpass(stated).has_value()) << "a stated tap count needs no estimate";
     };
 };
 

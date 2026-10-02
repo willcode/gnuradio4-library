@@ -811,8 +811,8 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
         const double  w0 = 2.0 * std::numbers::pi * 0.5 * (f1 + f2);
 
         const auto                 window   = gr::filter::fir::design::kaiserFor(60.0);
-        const std::vector<CF>      centered = gr::filter::fir::design::complexBandpass(kN, f1, f2, window, 1.0);
-        const std::vector<float>   proto    = gr::filter::fir::design::lowpass(kN, 0.5 * (f2 - f1), window, 1.0);
+        const std::vector<CF>      centered = gr::filter::fir::design::complexBandpass(kN, f1, f2, window, 1.0).value();
+        const std::vector<float>   proto    = gr::filter::fir::design::lowpass(kN, 0.5 * (f2 - f1), window, 1.0).value();
         const std::complex<double> constant = std::polar(1.0, -w0 * 0.5 * static_cast<double>(kN - 1));
 
         expect(eq(centered.size(), proto.size()));

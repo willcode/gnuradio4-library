@@ -89,7 +89,7 @@ struct Geometry {
  * the offset.
  */
 [[nodiscard]] std::vector<CF> shapedQpsk(std::size_t nSymbols, int sps, double rolloff, double power, std::uint32_t seed) {
-    const std::vector<float> pulse = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(11 * sps + 1), static_cast<double>(sps), rolloff, 1.0);
+    const std::vector<float> pulse = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(11 * sps + 1), static_cast<double>(sps), rolloff, 1.0).value();
     std::mt19937             rng(seed);
 
     const double    half = std::numbers::sqrt2 / 2.0;

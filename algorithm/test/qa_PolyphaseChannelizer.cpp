@@ -72,7 +72,7 @@ constexpr std::array<std::size_t, 7UZ> kStreamGroups{3UZ, 1UZ, 7UZ, 2UZ, 11UZ, 1
 
 /// A square-root-Nyquist prototype spanning `symbols` channel widths. The length asked for is one tap short of a
 /// whole number of widths, which is what the designer's odd-length rounding pads back to exactly that number.
-[[nodiscard]] std::vector<float> rootNyquistPrototype(std::size_t channels, std::size_t symbols, double alpha) { return gr::filter::fir::design::rootRaisedCosine(symbols * channels - 1UZ, static_cast<double>(channels), alpha, 1.0); }
+[[nodiscard]] std::vector<float> rootNyquistPrototype(std::size_t channels, std::size_t symbols, double alpha) { return gr::filter::fir::design::rootRaisedCosine(symbols * channels - 1UZ, static_cast<double>(channels), alpha, 1.0).value(); }
 
 [[nodiscard]] std::vector<double> asDouble(std::span<const float> taps) {
     std::vector<double> out(taps.size());
@@ -656,7 +656,7 @@ const boost::ut::suite<"polyphasePartition"> polyphasePartitionTests = [] {
             11.f, 8.f, 5.f, 2.f,                                    //
             12.f, 9.f, 6.f, 3.f};
 
-        const auto branches = polyphasePartition(prototype, 3UZ);
+        const auto branches = polyphasePartition(prototype, 3UZ).value();
         expect(eq(branches.size(), 12UZ));
         expect(std::ranges::equal(branches, expected)) << "the twelve-tap partition must match the hand-computed branches";
     };
@@ -670,7 +670,7 @@ const boost::ut::suite<"polyphasePartition"> polyphasePartitionTests = [] {
             0.f, 0.f, 5.f, 2.f,                                    //
             0.f, 0.f, 6.f, 3.f};
 
-        const auto branches = polyphasePartition(prototype, 3UZ);
+        const auto branches = polyphasePartition(prototype, 3UZ).value();
         expect(eq(branches.size(), 12UZ)) << "the branch length must be even";
         expect(std::ranges::equal(branches, expected)) << "the padding must land at the head of each branch";
     };
@@ -682,7 +682,7 @@ const boost::ut::suite<"polyphasePartition"> polyphasePartitionTests = [] {
         }
 
         for (const std::size_t arms : {1UZ, 2UZ, 3UZ, 4UZ, 5UZ, 8UZ, 16UZ, 64UZ}) {
-            const auto        branches     = polyphasePartition(prototype, arms);
+            const auto        branches     = polyphasePartition(prototype, arms).value();
             const std::size_t branchLength = branches.size() / arms;
             expect(eq(branches.size() % arms, 0UZ)) << std::format("{} arms: the partition must divide evenly", arms);
             expect(eq(branchLength % 2UZ, 0UZ)) << std::format("{} arms: branch length {} must be even", arms, branchLength);
@@ -702,8 +702,8 @@ const boost::ut::suite<"polyphasePartition"> polyphasePartitionTests = [] {
 
     "a partition needs at least one branch"_test = [] {
         const std::array<float, 4UZ> prototype{1.f, 2.f, 3.f, 4.f};
-        expect(throws<std::invalid_argument>([&] { std::ignore = polyphasePartition(prototype, 0UZ); })) << "zero arms";
-        expect(nothrow([&] { std::ignore = polyphasePartition(prototype, 1UZ); })) << "one arm";
+        expect(!polyphasePartition(prototype, 0UZ).has_value()) << "zero arms";
+        expect(polyphasePartition(prototype, 1UZ).has_value()) << "one arm";
     };
 };
 

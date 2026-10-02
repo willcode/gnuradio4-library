@@ -81,7 +81,7 @@ constexpr double kPi = std::numbers::pi;
     spec.sampleRate      = kSampleRate;
     spec.cutoff          = cutoffSymbolRates * kSymbolRate;
     spec.transitionWidth = 0.5 * cutoffSymbolRates * kSymbolRate;
-    return gr::filter::fir::design::designLowpass(spec);
+    return gr::filter::fir::design::designLowpass(spec).value();
 }
 
 /// @brief The taps' response at @p frequency cycles per sample, referred to the design's own center tap.

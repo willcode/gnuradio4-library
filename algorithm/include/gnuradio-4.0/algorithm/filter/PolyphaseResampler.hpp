@@ -251,9 +251,9 @@ struct PolyphaseDesignKey {
     [[nodiscard]] bool operator==(const PolyphaseDesignKey&) const = default;
 };
 
-/// @brief `fir::design::scanEdges` as a pair of stopband peak and passband ripple, in dB.
+/// @brief `fir::design::scanEdges` as a pair of stopband peak and passband ripple, in dB. @p grid is a power of two.
 [[nodiscard]] inline std::pair<double, double> polyphaseEdgeScan(const std::vector<float>& taps, double passEdge, double stopEdge, std::size_t grid) {
-    const fir::design::LowpassScan scan = fir::design::scanEdges(taps, passEdge, stopEdge, grid);
+    const fir::design::LowpassScan scan = fir::design::detail::scanEdges(taps, passEdge, stopEdge, grid);
     return {scan.stopbandDb, scan.rippleDb};
 }
 
