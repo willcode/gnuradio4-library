@@ -10,6 +10,7 @@
 #include <expected>
 #include <functional>
 #include <numeric>
+#include <source_location>
 #include <span>
 #include <type_traits>
 
@@ -141,11 +142,18 @@ namespace gr::math {
 template<typename T, std::size_t... Ex>
 struct TensorOps {
     using TensorType = Tensor<T, Ex...>;
+    using MeanType   = std::conditional_t<std::is_integral_v<T>, double, T>;
 
-    [[maybe_unused]] static constexpr TensorType& add_inplace(TensorType& self, const TensorType& other) {
-        auto same_shape = [](std::span<const std::size_t> a1, std::span<const std::size_t> b1) { return a1.size() == b1.size() && std::equal(a1.begin(), a1.end(), b1.begin()); };
-        if (!same_shape(self.extents(), other.extents())) {
-            throw std::runtime_error("Tensor dimensions must match for element-wise operations");
+    [[nodiscard]] static constexpr std::expected<void, gr::Error> checkSameShape(const TensorType& a, const TensorType& b, std::source_location loc) {
+        if (!std::ranges::equal(a.extents(), b.extents())) {
+            return std::unexpected(gr::Error("Tensor dimensions must match for element-wise operations", loc));
+        }
+        return {};
+    }
+
+    [[nodiscard]] static constexpr std::expected<void, gr::Error> add_inplace(TensorType& self, const TensorType& other, std::source_location loc = std::source_location::current()) {
+        if (auto shape = checkSameShape(self, other, loc); !shape) {
+            return shape;
         }
         constexpr auto add = [](const T& x, const T& y) { return static_cast<T>(x + y); };
 #if defined(__GLIBCXX__) && !defined(__ACPP__)
@@ -153,18 +161,17 @@ struct TensorOps {
 #else
         std::transform(self.begin(), self.end(), other.begin(), self.begin(), add);
 #endif
-        return self;
+        return {};
     }
 
-    [[nodiscard]] static constexpr TensorType add(const TensorType& a, const TensorType& b) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> add(const TensorType& a, const TensorType& b, std::source_location loc = std::source_location::current()) {
         TensorType result(a);
-        return add_inplace(result, b);
+        return add_inplace(result, b, loc).transform([&result] { return std::move(result); });
     }
 
-    [[maybe_unused]] static constexpr TensorType& subtract_inplace(TensorType& self, const TensorType& other) {
-        auto same_shape = [](std::span<const std::size_t> a1, std::span<const std::size_t> b1) { return a1.size() == b1.size() && std::equal(a1.begin(), a1.end(), b1.begin()); };
-        if (!same_shape(self.extents(), other.extents())) {
-            throw std::runtime_error("Tensor dimensions must match for element-wise operations");
+    [[nodiscard]] static constexpr std::expected<void, gr::Error> subtract_inplace(TensorType& self, const TensorType& other, std::source_location loc = std::source_location::current()) {
+        if (auto shape = checkSameShape(self, other, loc); !shape) {
+            return shape;
         }
         // the transparent functors return the promoted operand type, which narrows on write-back for sub-int T
         constexpr auto subtract = [](const T& x, const T& y) { return static_cast<T>(x - y); };
@@ -173,12 +180,12 @@ struct TensorOps {
 #else
         std::transform(self.begin(), self.end(), other.begin(), self.begin(), subtract);
 #endif
-        return self;
+        return {};
     }
 
-    [[nodiscard]] static constexpr TensorType subtract(const TensorType& a, const TensorType& b) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> subtract(const TensorType& a, const TensorType& b, std::source_location loc = std::source_location::current()) {
         TensorType result(a);
-        return subtract_inplace(result, b);
+        return subtract_inplace(result, b, loc).transform([&result] { return std::move(result); });
     }
 
     [[maybe_unused]] static constexpr TensorType& multiply_scalar_inplace(TensorType& self, const T& scalar) {
@@ -195,28 +202,27 @@ struct TensorOps {
         return multiply_scalar_inplace(result, scalar);
     }
 
-    [[maybe_unused]] static constexpr TensorType& divide_scalar_inplace(TensorType& self, const T& scalar) {
+    [[nodiscard]] static constexpr std::expected<void, gr::Error> divide_scalar_inplace(TensorType& self, const T& scalar, std::source_location loc = std::source_location::current()) {
         if (scalar == T{0}) {
-            throw std::runtime_error("Division by zero");
+            return std::unexpected(gr::Error("Division by zero", loc));
         }
 #if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [scalar](const T& x) { return static_cast<T>(x / scalar); });
 #else
         std::ranges::transform(self.begin(), self.end(), self.begin(), [scalar](const T& x) { return static_cast<T>(x / scalar); });
 #endif
-        return self;
+        return {};
     }
 
-    [[nodiscard]] static constexpr TensorType divide_scalar(const TensorType& tensor, const T& scalar) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> divide_scalar(const TensorType& tensor, const T& scalar, std::source_location loc = std::source_location::current()) {
         TensorType result(tensor);
-        return divide_scalar_inplace(result, scalar);
+        return divide_scalar_inplace(result, scalar, loc).transform([&result] { return std::move(result); });
     }
 
     // element-wise multiplication (Hadamard product)
-    [[maybe_unused]] static constexpr TensorType& multiply_elementwise_inplace(TensorType& self, const TensorType& other) {
-        auto same_shape = [](std::span<const std::size_t> a1, std::span<const std::size_t> b1) { return a1.size() == b1.size() && std::equal(a1.begin(), a1.end(), b1.begin()); };
-        if (!same_shape(self.extents(), other.extents())) {
-            throw std::runtime_error("Tensor dimensions must match for element-wise operations");
+    [[nodiscard]] static constexpr std::expected<void, gr::Error> multiply_elementwise_inplace(TensorType& self, const TensorType& other, std::source_location loc = std::source_location::current()) {
+        if (auto shape = checkSameShape(self, other, loc); !shape) {
+            return shape;
         }
 
         // the transparent functors return the promoted operand type, which narrows on write-back for sub-int T
@@ -226,18 +232,17 @@ struct TensorOps {
 #else
         std::ranges::transform(self, other, self.begin(), multiply);
 #endif
-        return self;
+        return {};
     }
 
-    [[nodiscard]] static constexpr TensorType multiply_elementwise(const TensorType& a, const TensorType& b) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> multiply_elementwise(const TensorType& a, const TensorType& b, std::source_location loc = std::source_location::current()) {
         TensorType result(a);
-        return multiply_elementwise_inplace(result, b);
+        return multiply_elementwise_inplace(result, b, loc).transform([&result] { return std::move(result); });
     }
 
-    [[maybe_unused]] static constexpr TensorType& divide_elementwise_inplace(TensorType& self, const TensorType& other) {
-        auto same_shape = [](std::span<const std::size_t> a1, std::span<const std::size_t> b1) { return a1.size() == b1.size() && std::equal(a1.begin(), a1.end(), b1.begin()); };
-        if (!same_shape(self.extents(), other.extents())) {
-            throw std::runtime_error("Tensor dimensions must match for element-wise operations");
+    [[nodiscard]] static constexpr std::expected<void, gr::Error> divide_elementwise_inplace(TensorType& self, const TensorType& other, std::source_location loc = std::source_location::current()) {
+        if (auto shape = checkSameShape(self, other, loc); !shape) {
+            return shape;
         }
         // the transparent functors return the promoted operand type, which narrows on write-back for sub-int T
         constexpr auto divide = [](const T& x, const T& y) { return static_cast<T>(x / y); };
@@ -246,12 +251,12 @@ struct TensorOps {
 #else
         std::ranges::transform(self, other, self.begin(), divide);
 #endif
-        return self;
+        return {};
     }
 
-    [[nodiscard]] static constexpr TensorType divide_elementwise(const TensorType& a, const TensorType& b) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> divide_elementwise(const TensorType& a, const TensorType& b, std::source_location loc = std::source_location::current()) {
         TensorType result(a);
-        return divide_elementwise_inplace(result, b);
+        return divide_elementwise_inplace(result, b, loc).transform([&result] { return std::move(result); });
     }
 
     [[nodiscard]] static constexpr T sum(const TensorType& self) { return std::accumulate(self.begin(), self.end(), T{0}); }
@@ -260,9 +265,9 @@ struct TensorOps {
         return std::reduce(self.begin(), self.end(), T{1}, [](T lhs, T rhs) { return static_cast<T>(lhs * rhs); });
     }
 
-    [[nodiscard]] static constexpr auto mean(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<MeanType, gr::Error> mean(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.empty()) {
-            throw std::runtime_error("Cannot compute mean of empty tensor");
+            return std::unexpected(gr::Error("Cannot compute mean of empty tensor", loc));
         }
         if constexpr (std::is_integral_v<T>) {
             return static_cast<double>(sum(self)) / static_cast<double>(self.size());
@@ -271,51 +276,54 @@ struct TensorOps {
         }
     }
 
-    [[nodiscard]] static constexpr auto variance(const TensorType& self) {
-        auto m      = mean(self);
-        T    sum_sq = 0;
-        for (const auto& x : self) {
-            auto diff = x - m;
-            sum_sq += diff * diff;
-        }
-        return sum_sq / static_cast<T>(self.size());
+    [[nodiscard]] static constexpr std::expected<T, gr::Error> variance(const TensorType& self, std::source_location loc = std::source_location::current()) {
+        return mean(self, loc).transform([&self](MeanType m) {
+            T sum_sq = 0;
+            for (const auto& x : self) {
+                auto diff = x - m;
+                sum_sq += diff * diff;
+            }
+            return static_cast<T>(sum_sq / static_cast<T>(self.size()));
+        });
     }
 
-    [[nodiscard]] static constexpr auto std_dev(const TensorType& self) { return std::sqrt(variance(self)); }
+    [[nodiscard]] static constexpr auto std_dev(const TensorType& self, std::source_location loc = std::source_location::current()) {
+        return variance(self, loc).transform([](T v) { return std::sqrt(v); });
+    }
 
-    [[nodiscard]] static constexpr T min(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<T, gr::Error> min(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.empty()) {
-            throw std::runtime_error("Cannot find min of empty tensor");
+            return std::unexpected(gr::Error("Cannot find min of empty tensor", loc));
         }
         return *std::min_element(self.begin(), self.end());
     }
 
-    [[nodiscard]] static constexpr T max(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<T, gr::Error> max(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.empty()) {
-            throw std::runtime_error("Cannot find max of empty tensor");
+            return std::unexpected(gr::Error("Cannot find max of empty tensor", loc));
         }
         return *std::max_element(self.begin(), self.end());
     }
 
-    [[nodiscard]] static constexpr std::size_t argmin(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<std::size_t, gr::Error> argmin(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.empty()) {
-            throw std::runtime_error("Cannot find argmin of empty tensor");
+            return std::unexpected(gr::Error("Cannot find argmin of empty tensor", loc));
         }
         auto it = std::min_element(self.begin(), self.end());
         return static_cast<std::size_t>(std::distance(self.begin(), it));
     }
 
-    [[nodiscard]] static constexpr std::size_t argmax(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<std::size_t, gr::Error> argmax(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.empty()) {
-            throw std::runtime_error("Cannot find argmax of empty tensor");
+            return std::unexpected(gr::Error("Cannot find argmax of empty tensor", loc));
         }
         auto it = std::max_element(self.begin(), self.end());
         return static_cast<std::size_t>(std::distance(self.begin(), it));
     }
 
-    [[nodiscard]] static constexpr TensorType sum_axis(const TensorType& self, std::size_t axis) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> sum_axis(const TensorType& self, std::size_t axis, std::source_location loc = std::source_location::current()) {
         if (axis >= self.rank()) {
-            throw std::out_of_range("Axis out of range");
+            return std::unexpected(gr::Error("Axis out of range", loc));
         }
 
         auto                     extents = self.extents();
@@ -357,10 +365,8 @@ struct TensorOps {
         return result;
     }
 
-    [[nodiscard]] static constexpr TensorType mean_axis(const TensorType& self, std::size_t axis) {
-        auto sum_result = sum_axis(self, axis);
-        auto count      = self.extent(axis);
-        return divide_scalar_inplace(sum_result, static_cast<T>(count));
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> mean_axis(const TensorType& self, std::size_t axis, std::source_location loc = std::source_location::current()) {
+        return sum_axis(self, axis, loc).and_then([&self, axis, loc](TensorType&& sum_result) { return divide_scalar(sum_result, static_cast<T>(self.extent(axis)), loc); });
     }
 
     [[nodiscard]] static constexpr bool contains_nan(const TensorType& self)
@@ -436,9 +442,9 @@ struct TensorOps {
         return result;
     }
 
-    [[nodiscard]] static constexpr TensorType transpose(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> transpose(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.rank() != 2) {
-            throw std::runtime_error("Transpose currently only supports 2D tensors");
+            return std::unexpected(gr::Error("Transpose currently only supports 2D tensors", loc));
         }
 
         auto       extents = self.extents();
@@ -453,9 +459,9 @@ struct TensorOps {
         return result;
     }
 
-    [[nodiscard]] static constexpr TensorType diag(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> diag(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.rank() != 2) {
-            throw std::runtime_error("Diagonal extraction requires 2D tensor");
+            return std::unexpected(gr::Error("Diagonal extraction requires 2D tensor", loc));
         }
 
         auto        extents = self.extents();
@@ -469,9 +475,9 @@ struct TensorOps {
         return result;
     }
 
-    [[nodiscard]] static constexpr TensorType diag_matrix(const TensorType& self) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> diag_matrix(const TensorType& self, std::source_location loc = std::source_location::current()) {
         if (self.rank() != 1) {
-            throw std::runtime_error("Creating diagonal matrix requires 1D tensor");
+            return std::unexpected(gr::Error("Creating diagonal matrix requires 1D tensor", loc));
         }
 
         std::size_t n = self.size();
@@ -486,21 +492,22 @@ struct TensorOps {
     }
 
     template<typename... Tensors>
-    [[nodiscard]] static constexpr TensorType concatenate(std::size_t axis, const TensorType& first, const Tensors&... rest) {
+    [[nodiscard]] static constexpr std::expected<TensorType, gr::Error> concatenate(std::size_t axis, const TensorType& first, const Tensors&... rest) {
+        constexpr std::source_location loc = std::source_location::current();
         std::vector<const TensorType*> tensors{&first, &rest...};
         if (axis >= first.rank()) {
-            throw std::out_of_range("concatenation axis out of range");
+            return std::unexpected(gr::Error("concatenation axis out of range", loc));
         }
 
         auto ref_extents = first.extents();
         for (auto* t : tensors) {
             if (t->rank() != first.rank()) {
-                throw std::runtime_error("all tensors must have same rank for concatenation");
+                return std::unexpected(gr::Error("all tensors must have same rank for concatenation", loc));
             }
             auto te = t->extents();
             for (std::size_t i = 0; i < first.rank(); ++i) {
                 if (i != axis && te[i] != ref_extents[i]) {
-                    throw std::runtime_error("all dimensions except concatenation axis must match");
+                    return std::unexpected(gr::Error("all dimensions except concatenation axis must match", loc));
                 }
             }
         }
@@ -546,14 +553,14 @@ struct TensorOps {
         return result;
     }
 
-    [[nodiscard]] static constexpr std::vector<TensorType> split(const TensorType& self, std::size_t axis, std::size_t n_splits) {
+    [[nodiscard]] static constexpr std::expected<std::vector<TensorType>, gr::Error> split(const TensorType& self, std::size_t axis, std::size_t n_splits, std::source_location loc = std::source_location::current()) {
         if (axis >= self.rank()) {
-            throw std::out_of_range("Split axis out of range");
+            return std::unexpected(gr::Error("Split axis out of range", loc));
         }
 
         std::size_t axis_size = self.extent(axis);
-        if (axis_size % n_splits != 0) {
-            throw std::runtime_error("Tensor size along axis must be divisible by number of splits");
+        if (n_splits == 0UZ || axis_size % n_splits != 0) {
+            return std::unexpected(gr::Error("Tensor size along axis must be divisible by number of splits", loc));
         }
 
         std::size_t             split_size = axis_size / n_splits;
@@ -632,24 +639,43 @@ struct TensorOps {
     }
 };
 
+/**
+ * The arithmetic operators keep the algebraic form, so a shape mismatch or a division by zero cannot travel in a
+ * return value: they throw gr::exception with the message of the named TensorOps function, which returns the
+ * same fault as a gr::Error.
+ */
+namespace detail {
+template<typename R>
+constexpr decltype(auto) valueOrThrow(R&& result, std::source_location loc) {
+    if (!result) {
+        throw gr::exception(result.error().message, loc);
+    }
+    if constexpr (!std::is_void_v<typename std::remove_cvref_t<R>::value_type>) {
+        return std::forward<R>(result).value();
+    }
+}
+} // namespace detail
+
 template<class T, std::size_t... Ex>
 Tensor<T, Ex...> operator+(const Tensor<T, Ex...>& a, const Tensor<T, Ex...>& b) {
-    return TensorOps<T, Ex...>::add(a, b);
+    return detail::valueOrThrow(TensorOps<T, Ex...>::add(a, b), std::source_location::current());
 }
 
 template<class T, std::size_t... Ex>
 Tensor<T, Ex...>& operator+=(Tensor<T, Ex...>& a, const Tensor<T, Ex...>& b) {
-    return TensorOps<T, Ex...>::add_inplace(a, b);
+    detail::valueOrThrow(TensorOps<T, Ex...>::add_inplace(a, b), std::source_location::current());
+    return a;
 }
 
 template<class T, std::size_t... Ex>
 Tensor<T, Ex...> operator-(const Tensor<T, Ex...>& a, const Tensor<T, Ex...>& b) {
-    return TensorOps<T, Ex...>::subtract(a, b);
+    return detail::valueOrThrow(TensorOps<T, Ex...>::subtract(a, b), std::source_location::current());
 }
 
 template<class T, std::size_t... Ex>
 Tensor<T, Ex...>& operator-=(Tensor<T, Ex...>& a, const Tensor<T, Ex...>& b) {
-    return TensorOps<T, Ex...>::subtract_inplace(a, b);
+    detail::valueOrThrow(TensorOps<T, Ex...>::subtract_inplace(a, b), std::source_location::current());
+    return a;
 }
 
 template<class T, std::size_t... Ex>
@@ -669,12 +695,13 @@ Tensor<T, Ex...>& operator*=(Tensor<T, Ex...>& tensor, const T& scalar) {
 
 template<class T, std::size_t... Ex>
 Tensor<T, Ex...> operator/(const Tensor<T, Ex...>& tensor, const T& scalar) {
-    return TensorOps<T, Ex...>::divide_scalar(tensor, scalar);
+    return detail::valueOrThrow(TensorOps<T, Ex...>::divide_scalar(tensor, scalar), std::source_location::current());
 }
 
 template<class T, std::size_t... Ex>
 Tensor<T, Ex...>& operator/=(Tensor<T, Ex...>& tensor, const T& scalar) {
-    return TensorOps<T, Ex...>::divide_scalar_inplace(tensor, scalar);
+    detail::valueOrThrow(TensorOps<T, Ex...>::divide_scalar_inplace(tensor, scalar), std::source_location::current());
+    return tensor;
 }
 
 template<class T, std::size_t... Ex>
@@ -688,51 +715,51 @@ auto gemm(const Tensor<T, Ex1...>& a, const Tensor<T, Ex2...>& b) {
 }
 
 template<class T, std::size_t... Ex>
-T dot(const Tensor<T, Ex...>& a, const Tensor<T, Ex...>& b) {
+[[nodiscard]] std::expected<T, gr::Error> dot(const Tensor<T, Ex...>& a, const Tensor<T, Ex...>& b, std::source_location loc = std::source_location::current()) {
     if (a.rank() != 1 || b.rank() != 1) {
-        throw std::runtime_error("Dot product requires 1D tensors");
+        return std::unexpected(gr::Error("Dot product requires 1D tensors", loc));
     }
     if (a.size() != b.size()) {
-        throw std::runtime_error("Tensors must have same size for dot product");
+        return std::unexpected(gr::Error("Tensors must have same size for dot product", loc));
     }
     return std::inner_product(a.begin(), a.end(), b.begin(), T{0});
 }
 
 template<class T, std::size_t... Ex>
-auto transpose(const Tensor<T, Ex...>& tensor) {
-    return TensorOps<T, Ex...>::transpose(tensor);
+[[nodiscard]] auto transpose(const Tensor<T, Ex...>& tensor, std::source_location loc = std::source_location::current()) {
+    return TensorOps<T, Ex...>::transpose(tensor, loc);
 }
 
 template<class T, std::size_t... Ex, typename... Tensors>
-auto concatenate(std::size_t axis, const Tensor<T, Ex...>& first, const Tensors&... rest) {
+[[nodiscard]] auto concatenate(std::size_t axis, const Tensor<T, Ex...>& first, const Tensors&... rest) {
     return TensorOps<T, Ex...>::concatenate(axis, first, rest...);
 }
 
 template<class T>
-std::pair<Tensor<T>, Tensor<T>> broadcast(const Tensor<T>& a, const Tensor<T>& b) {
+[[nodiscard]] std::expected<std::pair<Tensor<T>, Tensor<T>>, gr::Error> broadcast(const Tensor<T>& a, const Tensor<T>& b, std::source_location loc = std::source_location::current()) {
     auto a_ext = a.extents();
     auto b_ext = b.extents();
 
     bool same_shape = (a_ext.size() == b_ext.size()) && std::equal(a_ext.begin(), a_ext.end(), b_ext.begin());
 
     if (same_shape) {
-        return {a, b};
+        return std::pair{a, b};
     }
 
     // handle scalar broadcasting
     if (a.size() == 1) {
         Tensor<T> broadcast_a(b.extents());
         broadcast_a.fill(a.data()[0]);
-        return {broadcast_a, b};
+        return std::pair{std::move(broadcast_a), b};
     }
 
     if (b.size() == 1) {
         Tensor<T> broadcast_b(a.extents());
         broadcast_b.fill(b.data()[0]);
-        return {a, broadcast_b};
+        return std::pair{a, std::move(broadcast_b)};
     }
 
-    throw std::runtime_error("Broadcasting not supported for these tensor shapes");
+    return std::unexpected(gr::Error("Broadcasting not supported for these tensor shapes", loc));
 }
 
 template<typename T>
@@ -774,11 +801,10 @@ template<TensorLike Tensor>
     }
 }
 
-template<TensorLike Tensor>
-[[nodiscard]] auto conjTranspose(const Tensor& A) {
-    using T = typename tensor_traits<std::remove_cvref_t<Tensor>>::value_type;
+template<TensorLike Tensor, typename T = typename tensor_traits<std::remove_cvref_t<Tensor>>::value_type>
+[[nodiscard]] std::expected<gr::Tensor<T>, gr::Error> conjTranspose(const Tensor& A, std::source_location loc = std::source_location::current()) {
     if (A.rank() != 2) {
-        throw std::runtime_error("conjTranspose requires 2D tensor");
+        return std::unexpected(gr::Error("conjTranspose requires 2D tensor", loc));
     }
 
     auto          extents = A.extents();

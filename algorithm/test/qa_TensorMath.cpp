@@ -70,8 +70,8 @@ const boost::ut::suite<"Level 0: Basic Operations"> _level1_basic = [] {
             expect(eq(empty.rank(), 0UZ));
             expect(empty.empty());
 
-            expect(throws([&] { std::ignore = TensorOps<int>::min(empty); })) << "min on empty tensor";
-            expect(throws([&] { std::ignore = TensorOps<int>::max(empty); })) << "max on empty tensor";
+            expect(!TensorOps<int>::min(empty).has_value()) << "min on empty tensor";
+            expect(!TensorOps<int>::max(empty).has_value()) << "max on empty tensor";
         };
 
         "single element tensors"_test = [] {
@@ -155,7 +155,7 @@ const boost::ut::suite<"Level 0: Basic Operations"> _level1_basic = [] {
             auto frac_div = A / 3.0;
             expect(approx(frac_div[0], 10.0 / 3.0, 1e-6)) << "division by 3 should result in fractions";
 
-            expect(throws([&] { std::ignore = A / 0.0; })) << "division by zero should throw";
+            expect(throws<gr::exception>([&] { std::ignore = A / 0.0; })) << "division by zero should throw";
 
             "division with infinity"_test = [] {
                 Tensor<double> inf_tensor({2});
@@ -281,21 +281,21 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
             // mean of integers returns double
             Tensor<int> ints(extents_from, {5});
             ints      = {1, 2, 3, 4, 5};
-            auto mean = TensorOps<int>::mean(ints);
+            auto mean = TensorOps<int>::mean(ints).value();
             expect(eq(mean, 3.0));
 
             "mean with floating point"_test = [] {
                 Tensor<double> floats({4});
                 floats          = {1.0, 2.0, 3.0, 4.0};
-                auto float_mean = TensorOps<double>::mean(floats);
+                auto float_mean = TensorOps<double>::mean(floats).value();
                 expect(approx(float_mean, 2.5, 1e-6));
             };
 
             "variance and standard deviation"_test = [] {
                 Tensor<double> data({6});
                 data     = {2, 4, 4, 4, 5, 5};
-                auto var = TensorOps<double>::variance(data);
-                auto std = TensorOps<double>::std_dev(data);
+                auto var = TensorOps<double>::variance(data).value();
+                auto std = TensorOps<double>::std_dev(data).value();
                 expect(approx(var, 1.0, 1e-6));
                 expect(approx(std, 1.0, 1e-6));
             };
@@ -308,7 +308,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
                 Tensor<int> row_matrix(gr::extents_from, {1, 5});
                 std::iota(row_matrix.begin(), row_matrix.end(), 1);
 
-                auto sum0 = TensorOps<int>::sum_axis(row_matrix, 0);
+                auto sum0 = TensorOps<int>::sum_axis(row_matrix, 0).value();
                 expect(eq(sum0.size(), 5UZ));
                 expect(eq(sum0[0], 1)) << "only one row";
             };
@@ -317,7 +317,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
                 Tensor<int> col_matrix(gr::extents_from, {5, 1});
                 std::iota(col_matrix.begin(), col_matrix.end(), 1);
 
-                auto sum1 = TensorOps<int>::sum_axis(col_matrix, 1);
+                auto sum1 = TensorOps<int>::sum_axis(col_matrix, 1).value();
                 expect(eq(sum1.size(), 5UZ));
                 expect(eq(sum1[0], 1)) << "only one column";
             };
@@ -328,7 +328,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
             with_nan.fill(1.0);
             with_nan[1, 1] = std::numeric_limits<double>::quiet_NaN();
 
-            auto mean0 = TensorOps<double>::mean_axis(with_nan, 0);
+            auto mean0 = TensorOps<double>::mean_axis(with_nan, 0).value();
             expect(!std::isnan(mean0[0])) << "column 0 has no NaN";
             expect(std::isnan(mean0[1])) << "column 1 has NaN";
         };
@@ -339,10 +339,10 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
             Tensor<int> with_dups(extents_from, {8});
             with_dups = {3, 1, 4, 1, 5, 9, 2, 1};
 
-            auto min_idx = TensorOps<int>::argmin(with_dups);
+            auto min_idx = TensorOps<int>::argmin(with_dups).value();
             expect(eq(min_idx, 1UZ)) << "first occurrence of 1";
 
-            auto max_idx = TensorOps<int>::argmax(with_dups);
+            auto max_idx = TensorOps<int>::argmax(with_dups).value();
             expect(eq(max_idx, 5UZ)) << "index of 9";
         };
 
@@ -350,11 +350,79 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
             Tensor<double> special({5});
             special = {1.0, std::numeric_limits<double>::quiet_NaN(), -std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(), 2.0};
 
-            auto min_val = TensorOps<double>::min(special);
-            auto max_val = TensorOps<double>::max(special);
+            auto min_val = TensorOps<double>::min(special).value();
+            auto max_val = TensorOps<double>::max(special).value();
             expect(std::isnan(min_val) || std::isinf(min_val)) << "NaN propagates to min";
             expect(std::isnan(max_val) || std::isinf(max_val)) << "NaN propagates to max";
         };
+    };
+};
+
+const boost::ut::suite<"Level 1b: refusals returned as gr::Error"> _level2b_refusals = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::math;
+
+    constexpr auto refusedWith = [](const auto& result, std::string_view text) {
+        expect(fatal(!result.has_value())) << text;
+        expect(result.error().message.contains(text)) << result.error().message;
+    };
+
+    "element-wise operations refuse a shape mismatch"_test = [refusedWith] {
+        Tensor<double>       a({2, 3});
+        const Tensor<double> b({3, 2});
+        a.fill(1.0);
+        refusedWith(TensorOps<double>::add(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::add_inplace(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::subtract(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::subtract_inplace(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::multiply_elementwise(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::multiply_elementwise_inplace(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::divide_elementwise(a, b), "dimensions must match");
+        refusedWith(TensorOps<double>::divide_elementwise_inplace(a, b), "dimensions must match");
+        expect(std::ranges::all_of(a, [](double v) { return v == 1.0; })) << "a refused in-place operation leaves the tensor unchanged";
+        expect(throws<gr::exception>([&] { std::ignore = a + b; })) << "operator+ throws the same fault";
+        expect(throws<gr::exception>([&] { a -= b; })) << "operator-= throws the same fault";
+    };
+
+    "scalar division refuses zero"_test = [refusedWith] {
+        Tensor<double> a({2});
+        refusedWith(TensorOps<double>::divide_scalar(a, 0.0), "Division by zero");
+        refusedWith(TensorOps<double>::divide_scalar_inplace(a, 0.0), "Division by zero");
+        expect(throws<gr::exception>([&] { a /= 0.0; }));
+    };
+
+    "reductions refuse an empty tensor"_test = [refusedWith] {
+        const Tensor<double> empty;
+        refusedWith(TensorOps<double>::mean(empty), "mean of empty");
+        refusedWith(TensorOps<double>::variance(empty), "mean of empty");
+        refusedWith(TensorOps<double>::std_dev(empty), "mean of empty");
+        refusedWith(TensorOps<double>::min(empty), "min of empty");
+        refusedWith(TensorOps<double>::max(empty), "max of empty");
+        refusedWith(TensorOps<double>::argmin(empty), "argmin of empty");
+        refusedWith(TensorOps<double>::argmax(empty), "argmax of empty");
+    };
+
+    "axis and rank checks"_test = [refusedWith] {
+        Tensor<double> m({2, 4});
+        m.fill(1.0);
+        const Tensor<double> v({3});
+        refusedWith(TensorOps<double>::sum_axis(m, 2UZ), "Axis out of range");
+        refusedWith(TensorOps<double>::mean_axis(m, 2UZ), "Axis out of range");
+        refusedWith(TensorOps<double>::transpose(v), "2D");
+        refusedWith(transpose(v), "2D");
+        refusedWith(TensorOps<double>::diag(v), "2D");
+        refusedWith(TensorOps<double>::diag_matrix(m), "1D");
+        refusedWith(TensorOps<double>::split(m, 2UZ, 2UZ), "Split axis out of range");
+        refusedWith(TensorOps<double>::split(m, 1UZ, 3UZ), "divisible");
+        refusedWith(TensorOps<double>::split(m, 1UZ, 0UZ), "divisible");
+        refusedWith(concatenate(2UZ, m, m), "axis out of range");
+        refusedWith(concatenate(0UZ, m, Tensor<double>({2, 3})), "except concatenation axis");
+        refusedWith(concatenate(0UZ, m, Tensor<double>({2, 4, 1})), "same rank");
+        refusedWith(dot(m, m), "1D");
+        refusedWith(dot(v, Tensor<double>({4})), "same size");
+        refusedWith(broadcast(m, Tensor<double>({3, 2})), "Broadcasting not supported");
+        expect(broadcast(m, Tensor<double>({1})).has_value()) << "a one-element operand broadcasts";
     };
 };
 
@@ -859,7 +927,7 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             Tensor<int> A(gr::extents_from, {3, 3});
             std::iota(A.begin(), A.end(), 0);
 
-            auto At = transpose(A);
+            auto At = transpose(A).value();
             expect(eq(At.extent(0), 3UZ));
             expect(eq(At.extent(1), 3UZ));
 
@@ -872,12 +940,12 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             // Non-square matrix
             Tensor<double> B({2, 5});
             randomize(B);
-            auto Bt = transpose(B);
+            auto Bt = transpose(B).value();
             expect(eq(Bt.extent(0), 5UZ));
             expect(eq(Bt.extent(1), 2UZ));
 
             // Double transpose should equal original
-            auto Btt = transpose(Bt);
+            auto Btt = transpose(Bt).value();
             expect(tensors_approximately_equal(Btt, B));
         };
 
@@ -887,7 +955,7 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             t2.fill(2);
             t3.fill(3);
 
-            auto concat = concatenate(0UZ, t1, t2, t3);
+            auto concat = concatenate(0UZ, t1, t2, t3).value();
             expect(eq(concat.extent(0), 6UZ));
             expect(eq(concat.extent(1), 3UZ));
 
@@ -906,7 +974,7 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             Tensor<double> A({100, 10});
             randomize(A);
 
-            auto splits = TensorOps<double>::split(A, 0, 10);
+            auto splits = TensorOps<double>::split(A, 0, 10).value();
             expect(eq(splits.size(), 10UZ));
 
             for (const auto& split : splits) {
@@ -1123,7 +1191,7 @@ const boost::ut::suite<"Level F: Corner Cases"> _level6_corner = [] {
             // If views are supported, test overlapping operations
             // For now, just test that operations maintain correctness
             auto B = A;
-            TensorOps<int>::add_inplace(A, B);
+            expect(TensorOps<int>::add_inplace(A, B).has_value());
 
             for (std::size_t i = 0; i < 10; ++i) {
                 expect(eq(A[i], static_cast<int>(2 * i)));
@@ -1288,7 +1356,7 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
             Tensor<double> A({2, 3});
             A = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
 
-            auto At = conjTranspose(A);
+            auto At = conjTranspose(A).value();
 
             expect(eq(At.extent(0), 3UZ));
             expect(eq(At.extent(1), 2UZ));
@@ -1304,7 +1372,7 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
             Tensor<Complex> A({2, 2});
             A = {Complex{1, 2}, Complex{3, 4}, Complex{5, 6}, Complex{7, 8}};
 
-            auto Ah = conjTranspose(A);
+            auto Ah = conjTranspose(A).value();
 
             expect(eq(Ah.extent(0), 2UZ));
             expect(eq(Ah.extent(1), 2UZ));
@@ -1321,7 +1389,7 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
             Tensor<Complex> H({2, 2});
             H = {Complex{1, 0}, Complex{2, -1}, Complex{2, 1}, Complex{3, 0}};
 
-            auto Hh = conjTranspose(H);
+            auto Hh = conjTranspose(H).value();
 
             for (std::size_t i = 0; i < 2; ++i) {
                 for (std::size_t j = 0; j < 2; ++j) {
@@ -1331,14 +1399,16 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
             }
         };
 
-        "1D tensor throws"_test = [] {
+        "1D tensor is refused"_test = [] {
             Tensor<double> v({5});
-            expect(throws([&] { std::ignore = conjTranspose(v); }));
+            const auto     refused = conjTranspose(v);
+            expect(fatal(!refused.has_value()));
+            expect(refused.error().message.contains("2D")) << refused.error().message;
         };
 
-        "3D tensor throws"_test = [] {
+        "3D tensor is refused"_test = [] {
             Tensor<double> T({2, 3, 4});
-            expect(throws([&] { std::ignore = conjTranspose(T); }));
+            expect(!conjTranspose(T).has_value());
         };
     };
 
@@ -1706,7 +1776,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
 
     "transposed right operand reads along the right stride"_test = [&] {
         const Tensor<C64> A  = matrix(2, 3, aValues);
-        const Tensor<C64> Bt = transpose(matrix(3, 2, bValues)); // stored as B^T, 2x3
+        const Tensor<C64> Bt = transpose(matrix(3, 2, bValues)).value(); // stored as B^T, 2x3
         Tensor<C64>       C({2UZ, 2UZ});
         gemm<NoTrans, Trans>(C, A, Bt);
         expectProduct(C, "NoTrans, Trans");
@@ -1714,14 +1784,14 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
 
     "conjugate-transposed right operand is conjugated"_test = [&] {
         const Tensor<C64> A  = matrix(2, 3, aValues);
-        const Tensor<C64> Bh = conjTranspose(matrix(3, 2, bValues)); // stored as B^H, 2x3
+        const Tensor<C64> Bh = conjTranspose(matrix(3, 2, bValues)).value(); // stored as B^H, 2x3
         Tensor<C64>       C({2UZ, 2UZ});
         gemm<NoTrans, ConjTrans>(C, A, Bh);
         expectProduct(C, "NoTrans, ConjTrans");
     };
 
     "conjugate-transposed left operand is conjugated"_test = [&] {
-        const Tensor<C64> Ah = conjTranspose(matrix(2, 3, aValues)); // stored as A^H, 3x2
+        const Tensor<C64> Ah = conjTranspose(matrix(2, 3, aValues)).value(); // stored as A^H, 3x2
         const Tensor<C64> B  = matrix(3, 2, bValues);
         Tensor<C64>       C({2UZ, 2UZ});
         gemm<ConjTrans, NoTrans>(C, Ah, B);
@@ -1729,16 +1799,16 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
     };
 
     "both operands conjugate-transposed"_test = [&] {
-        const Tensor<C64> Ah = conjTranspose(matrix(2, 3, aValues));
-        const Tensor<C64> Bh = conjTranspose(matrix(3, 2, bValues));
+        const Tensor<C64> Ah = conjTranspose(matrix(2, 3, aValues)).value();
+        const Tensor<C64> Bh = conjTranspose(matrix(3, 2, bValues)).value();
         Tensor<C64>       C({2UZ, 2UZ});
         gemm<ConjTrans, ConjTrans>(C, Ah, Bh);
         expectProduct(C, "ConjTrans, ConjTrans");
     };
 
     "Trans on a complex operand does not conjugate"_test = [&] {
-        const Tensor<C64> At = transpose(matrix(2, 3, aValues)); // stored as A^T, 3x2
-        const Tensor<C64> Bt = transpose(matrix(3, 2, bValues));
+        const Tensor<C64> At = transpose(matrix(2, 3, aValues)).value(); // stored as A^T, 3x2
+        const Tensor<C64> Bt = transpose(matrix(3, 2, bValues)).value();
         Tensor<C64>       C({2UZ, 2UZ});
         gemm<Trans, Trans>(C, At, Bt);
         expectProduct(C, "Trans, Trans");
@@ -1814,10 +1884,10 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<float> aClip = TensorOps<float>::clip(a, -1.0f, 4.0f);
         expect(aClip[0] == -1.0f && aClip[1] == 0.0f && aClip[2] == 3.0f && aClip[3] == 4.0f);
 
-        const Tensor<float> hadamard = TensorOps<float>::multiply_elementwise(a, b);
+        const Tensor<float> hadamard = TensorOps<float>::multiply_elementwise(a, b).value();
         expect(hadamard[0] == -8.0f && hadamard[1] == 0.0f && hadamard[2] == 6.0f && hadamard[3] == -32.0f);
 
-        const Tensor<float> quotient = TensorOps<float>::divide_elementwise(a, b);
+        const Tensor<float> quotient = TensorOps<float>::divide_elementwise(a, b).value();
         expect(quotient[0] == -0.5f && quotient[1] == 0.0f && quotient[2] == 1.5f && quotient[3] == -2.0f);
     };
 };

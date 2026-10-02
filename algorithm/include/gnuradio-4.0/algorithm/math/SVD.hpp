@@ -879,7 +879,7 @@ svd::Status gesvd(Policy&& /*policy*/, TensorU& U, TensorS& S, TensorV& V, const
 
     if (m < n) {
         transposed = true;
-        Awork      = conjTranspose(A);
+        Awork      = *conjTranspose(A); // A is rank 2, checked above
     } else {
         Awork = Tensor<T>(A);
     }
@@ -1052,7 +1052,7 @@ svd::Status gesvd(Policy&& /*policy*/, TensorS& S, const TensorA& A, const svd::
     }
 
     bool      transposed = (m < n);
-    Tensor<T> Awork      = transposed ? conjTranspose(A) : Tensor<T>(A);
+    Tensor<T> Awork      = transposed ? *conjTranspose(A) : Tensor<T>(A); // A is rank 2, checked above
 
     svd::Status status;
     Tensor<T>*  noV = nullptr; // explicit type for template deduction

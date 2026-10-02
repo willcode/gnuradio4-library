@@ -142,9 +142,9 @@ template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>
     // A_recon = US * V^H (use transpose for real, conjTranspose for complex)
     gr::Tensor<T> Vh;
     if constexpr (gr::meta::complex_like<T>) {
-        Vh = conjTranspose(V);
+        Vh = conjTranspose(V).value();
     } else {
-        Vh = transpose(V);
+        Vh = transpose(V).value();
     }
     gr::Tensor<T> A_recon({m, n});
     A_recon.fill(T{0});
@@ -175,7 +175,7 @@ template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>
 [[nodiscard]] bool verifyOrthogonal(const gr::Tensor<T>& Q, RealT tol) {
     const std::size_t cols = Q.extent(1);
 
-    gr::Tensor<T> Qh = conjTranspose(Q);
+    gr::Tensor<T> Qh = conjTranspose(Q).value();
     gr::Tensor<T> QhQ({cols, cols});
     QhQ.fill(T{0});
     gemm(QhQ, Qh, Q);
@@ -1275,7 +1275,7 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
             }
 
             // Verify U^T * A_orig * V ≈ B
-            Tensor<double> UT = transpose(U);
+            Tensor<double> UT = transpose(U).value();
             Tensor<double> UtA({3, 3});
             UtA.fill(0.0);
             gemm(UtA, UT, A_orig);
@@ -1330,7 +1330,7 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
             }
 
             // Verify U^T * A_orig * V ≈ B
-            Tensor<double> UT = transpose(U);
+            Tensor<double> UT = transpose(U).value();
             Tensor<double> UtA({4, 4});
             UtA.fill(0.0);
             gemm(UtA, UT, A_orig);
@@ -1348,7 +1348,7 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
             gemm(UB, U, B);
             Tensor<double> UBVt({4, 4});
             UBVt.fill(0.0);
-            Tensor<double> Vt = transpose(V);
+            Tensor<double> Vt = transpose(V).value();
             gemm(UBVt, UB, Vt);
 
             expect(tensors_approximately_equal(A_orig, UBVt, 1e-9));
