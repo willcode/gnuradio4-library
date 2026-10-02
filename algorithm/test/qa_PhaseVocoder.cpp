@@ -159,9 +159,9 @@ const boost::ut::suite<"PhaseVocoder"> phaseVocoderTests = [] {
 
     "refusals fire by name"_test = [] {
         PhaseVocoder engine;
-        expect(throws([&] { engine.configure(1000UZ, 250UZ, 25UZ); })) << "frame must be a power of two";
-        expect(throws([&] { engine.configure(1024UZ, 0UZ, 1UZ); })) << "hops must be positive";
-        expect(throws([&] { engine.configure(1024UZ, 2048UZ, 256UZ); })) << "a hop past the frame leaves gaps";
+        expect(throws<gr::exception>([&] { engine.configure(1000UZ, 250UZ, 25UZ); })) << "frame must be a power of two";
+        expect(throws<gr::exception>([&] { engine.configure(1024UZ, 0UZ, 1UZ); })) << "hops must be positive";
+        expect(throws<gr::exception>([&] { engine.configure(1024UZ, 2048UZ, 256UZ); })) << "a hop past the frame leaves gaps";
     };
 };
 

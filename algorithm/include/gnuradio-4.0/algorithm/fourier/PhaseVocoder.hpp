@@ -7,9 +7,9 @@
 #include <cstddef>
 #include <numbers>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 
 namespace gr::algorithm {
@@ -41,17 +41,17 @@ struct PhaseVocoder {
     std::size_t synthesisHop = 0UZ;
 
     /**
-     * @brief Size the engine. Throws on a shape the algorithm cannot run.
+     * @brief Size the engine. Throws `gr::exception` on a shape the algorithm cannot run.
      *
      * The frame must be a power of two, the transform's size. Both hops must be positive and no
      * longer than the frame. A hop above the frame would leave gaps that no window covers.
      */
     void configure(std::size_t frame, std::size_t hopIn, std::size_t hopOut) {
         if (frame == 0UZ || (frame & (frame - 1UZ)) != 0UZ) {
-            throw std::invalid_argument("PhaseVocoder: frame must be a power of two");
+            throw gr::exception("PhaseVocoder: frame must be a power of two");
         }
         if (hopIn == 0UZ || hopOut == 0UZ || hopIn > frame || hopOut > frame) {
-            throw std::invalid_argument("PhaseVocoder: hops must be positive and no longer than the frame");
+            throw gr::exception("PhaseVocoder: hops must be positive and no longer than the frame");
         }
         frameSize    = frame;
         analysisHop  = hopIn;
