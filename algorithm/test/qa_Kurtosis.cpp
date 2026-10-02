@@ -89,8 +89,8 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         expect(kurtosisBias(4'096UZ, false) == -6. / 4'096.);
         expect(kurtosisVariance(4'096UZ, true) == 4. / 4'096.);
         expect(kurtosisVariance(4'096UZ, false) == 24. / 4'096.);
-        expect(approx(kurtosisSpread(4'096UZ, true), 0.03125, 1e-12)) << "2/sqrt(N) at N = 4096";
-        expect(approx(kurtosisSpread(4'096UZ, false), 0.0765466, 1e-6)) << "4.899/sqrt(N) at N = 4096";
+        expect(approx(kurtosisSpread(4'096UZ, true), 2. / std::sqrt(4'096.), 1e-12)) << "2/sqrt(N) at N = 4096";
+        expect(approx(kurtosisSpread(4'096UZ, false), std::sqrt(24. / 4'096.), 1e-12)) << "sqrt(24/N) at N = 4096";
         expect(kurtosisBias(0UZ, true) == 0.) << "an empty window has no bias to report";
     };
 
