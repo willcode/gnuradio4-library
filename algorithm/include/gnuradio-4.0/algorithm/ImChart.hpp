@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <numeric>
 #include <ranges>
 #include <source_location>
@@ -29,6 +30,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include "gnuradio-4.0/Message.hpp"
 #include "gnuradio-4.0/meta/reflection.hpp"
 #include "gnuradio-4.0/meta/utils.hpp"
 #include <bitset>
@@ -76,11 +78,12 @@ struct LinearAxisTransform {
     }
 };
 
+/// The log axis is undefined for a non-positive value or range; the two transforms return that as an error.
 struct LogAxisTransform {
     template<typename T>
-    [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr std::expected<std::size_t, gr::Error> toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (value <= 0 || axisMin <= 0 || axisMax <= axisMin) {
-            throw std::invalid_argument(std::format("{} not defined for non-positive value {} in [{}, {}].", gr::meta::type_name<LogAxisTransform>(), value, axisMin, axisMax));
+            return std::unexpected(gr::Error(std::format("{} not defined for non-positive value {} in [{}, {}].", gr::meta::type_name<LogAxisTransform>(), value, axisMin, axisMax)));
         }
 
         const T log_min    = std::log10(axisMin);
@@ -89,9 +92,9 @@ struct LogAxisTransform {
     }
 
     template<std::floating_point T>
-    [[nodiscard]] static constexpr T fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr std::expected<T, gr::Error> fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (axisMin <= 0UZ || axisMax <= axisMin) {
-            throw std::invalid_argument(std::format("{} not defined for non-positive ranges [{}, {}].", gr::meta::type_name<LogAxisTransform>(), axisMin, axisMax));
+            return std::unexpected(gr::Error(std::format("{} not defined for non-positive ranges [{}, {}].", gr::meta::type_name<LogAxisTransform>(), axisMin, axisMax)));
         }
 
         const T proportion = static_cast<T>(screenCoordinate - screenOffset) / (static_cast<T>(screenSize - screenOffset - 1UZ)); // convert screen coordinates back to a proportion of the axis
@@ -105,6 +108,19 @@ enum struct ResetChartView { RESET, KEEP };
 enum class Style { Braille, Bars, Marker };
 
 namespace detail {
+/// An axis transform returns its value plainly or in a std::expected; this gives both forms as a std::expected.
+template<typename R>
+[[nodiscard]] constexpr auto asExpected(R&& result) {
+    if constexpr (requires {
+                      result.has_value();
+                      result.error();
+                  }) {
+        return std::forward<R>(result);
+    } else {
+        return std::expected<std::remove_cvref_t<R>, gr::Error>(std::forward<R>(result));
+    }
+}
+
 inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
     constexpr std::array preferredDivisors{10UZ, 8UZ, 5UZ, 4UZ, 3UZ, 2UZ};
     std::size_t          reducedAxisWidth = axisWidth - 1; // because we always require & add the '0'
@@ -295,8 +311,13 @@ public:
                 continue;
             }
 
-            const auto brailleColIndex = horAxisTransform::toScreen(x, ValueType(axis_min_x), ValueType(axis_max_x), horOffset, arrayWidth);
-            const auto brailleRowIndex = arrayHeight - verAxisTransform::toScreen(y, ValueType(axis_min_y), ValueType(axis_max_y), 0UZ, arrayHeight);
+            const auto column = detail::asExpected(horAxisTransform::toScreen(x, ValueType(axis_min_x), ValueType(axis_max_x), horOffset, arrayWidth));
+            const auto row    = detail::asExpected(verAxisTransform::toScreen(y, ValueType(axis_min_y), ValueType(axis_max_y), 0UZ, arrayHeight));
+            if (!column || !row) {
+                continue; // a point the axis transform does not define is not drawn
+            }
+            const auto brailleColIndex = *column;
+            const auto brailleRowIndex = arrayHeight - *row;
             if (brailleRowIndex >= (arrayHeight - 1UZ) || brailleColIndex >= arrayWidth || (style == Style::Bars && brailleRowIndex >= horAxisPosY)) {
                 continue;
             }
@@ -439,15 +460,16 @@ public:
         // x-axis labels and ticks
         const std::size_t maxHorLabelWidth = std::max(std::format("{:+G}", axis_min_x).size(), std::format("{:+G}", axis_max_x).size());
         for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_width - horOffset, 1UZ)) {
-            const std::size_t tickPos   = horOffset + relTickScreenPos;
-            const double      tickValue = horAxisTransform::fromScreen(tickPos, axis_min_x, axis_max_x, horOffset, _screen_width);
-            if ((axis_min_x == 0 && relTickScreenPos == 0) || tickPos > _screen_width) {
+            const std::size_t tickPos = horOffset + relTickScreenPos;
+            const auto        tick    = detail::asExpected(horAxisTransform::fromScreen(tickPos, axis_min_x, axis_max_x, horOffset, _screen_width));
+            if (!tick || (axis_min_x == 0 && relTickScreenPos == 0) || tickPos > _screen_width) {
                 continue; // skip first '0' that would collide with the vertical axis
             }
             _screen[horAxisPosY][tickPos] = relTickScreenPos == 0 ? "┌" : ((tickPos + 1) >= _screen_width) ? "┐" : "┬"; // NOSONAR
 
-            const std::string rawLabel = axis_min_x < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
-            const std::string label    = std::format("{:.{}}", rawLabel, maxHorLabelWidth);
+            const double      tickValue = *tick;
+            const std::string rawLabel  = axis_min_x < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
+            const std::string label     = std::format("{:.{}}", rawLabel, maxHorLabelWidth);
 
             // Calculate the start and end positions for the label to be centred around tickPos and clamp to ensure they're within screen bounds
             const std::size_t start_pos = std::clamp((tickPos >= label.size() / 2) ? tickPos - label.size() / 2 : 0, 0UZ, _screen_width - label.size());
@@ -460,15 +482,16 @@ public:
 
         // y-axis labels and ticks
         for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_height)) {
-            const std::size_t tickPos   = _screen_height - 1UZ - relTickScreenPos;
-            const double      tickValue = verAxisTransform::fromScreen(relTickScreenPos, axis_min_y, axis_max_y, 0UZ, _screen_height);
-            if (/*(axis_min_y == 0 && relTickScreenPos == 0) ||*/ tickPos > _screen_height) {
+            const std::size_t tickPos = _screen_height - 1UZ - relTickScreenPos;
+            const auto        tick    = detail::asExpected(verAxisTransform::fromScreen(relTickScreenPos, axis_min_y, axis_max_y, 0UZ, _screen_height));
+            if (!tick || /*(axis_min_y == 0 && relTickScreenPos == 0) ||*/ tickPos > _screen_height) {
                 continue; // skip first '0' that would collide with the vertical axis
             }
             _screen[tickPos][verAxisPosX] = relTickScreenPos == 0 ? "┘" : (tickPos < _screen_height) ? "┤" : (axis_max_y == 0) ? "┬" : "┐"; // NOSONAR
 
-            const std::string rawLabel = axis_min_y < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
-            const std::string label    = std::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
+            const double      tickValue = *tick;
+            const std::string rawLabel  = axis_min_y < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
+            const std::string label     = std::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
 
             // Calculate the starting position for the label ensuring it's within bounds.
             const std::size_t label_start_pos = (verAxisPosX > label.size() + 1UZ) ? verAxisPosX - label.size() - 1UZ : 0UZ;

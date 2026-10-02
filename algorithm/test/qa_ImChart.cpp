@@ -37,19 +37,23 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
         constexpr double      xMax       = 100.;
         //
         auto identity = [](double value) {
-            const auto screenCoordinate = LogAxisTransform::toScreen(value, xMin, xMax, axisOffset, axisWidth);
-            return LogAxisTransform::fromScreen(screenCoordinate, xMin, xMax, axisOffset, axisWidth);
+            const auto screenCoordinate = LogAxisTransform::toScreen(value, xMin, xMax, axisOffset, axisWidth).value();
+            return LogAxisTransform::fromScreen(screenCoordinate, xMin, xMax, axisOffset, axisWidth).value();
         };
         expect(approx(valueCoordinate, identity(valueCoordinate), 2.2)); // binning limited
 
-        expect(eq(axisOffset, LogAxisTransform::toScreen(xMin, xMin, xMax, axisOffset, axisWidth))) << "xMin does not correspond to min axis index";
-        expect(eq(axisWidth - 1UZ, LogAxisTransform::toScreen(xMax, xMin, xMax, axisOffset, axisWidth))) << "xMax does not correspond to max axis index";
+        expect(eq(axisOffset, LogAxisTransform::toScreen(xMin, xMin, xMax, axisOffset, axisWidth).value())) << "xMin does not correspond to min axis index";
+        expect(eq(axisWidth - 1UZ, LogAxisTransform::toScreen(xMax, xMin, xMax, axisOffset, axisWidth).value())) << "xMax does not correspond to max axis index";
 
-        expect(throws([] { std::ignore = LogAxisTransform::toScreen(0.0, 10., 100., 5UZ, 65UZ); }));
-        expect(throws([] { std::ignore = LogAxisTransform::toScreen(1.0, 0., 100., 5UZ, 65UZ); }));
-        expect(throws([] { std::ignore = LogAxisTransform::toScreen(1.0, 10., 0., 5UZ, 65UZ); }));
-        expect(throws([] { std::ignore = LogAxisTransform::fromScreen(40, 0., 100., 5UZ, 65UZ); }));
-        expect(throws([] { std::ignore = LogAxisTransform::fromScreen(40, 10., 0., 5UZ, 65UZ); }));
+        const auto zeroValue = LogAxisTransform::toScreen(0.0, 10., 100., 5UZ, 65UZ);
+        expect(fatal(!zeroValue.has_value()));
+        expect(zeroValue.error().message.contains("not defined for non-positive value")) << zeroValue.error().message;
+        expect(!LogAxisTransform::toScreen(1.0, 0., 100., 5UZ, 65UZ).has_value());
+        expect(!LogAxisTransform::toScreen(1.0, 10., 0., 5UZ, 65UZ).has_value());
+        const auto zeroRange = LogAxisTransform::fromScreen(40, 0., 100., 5UZ, 65UZ);
+        expect(fatal(!zeroRange.has_value()));
+        expect(zeroRange.error().message.contains("not defined for non-positive ranges")) << zeroRange.error().message;
+        expect(!LogAxisTransform::fromScreen(40, 10., 0., 5UZ, 65UZ).has_value());
     } | std::vector{10., 20., 42., 50., 100.};
 
     "optimal tick position"_test = [](std::size_t axisWidth) {
