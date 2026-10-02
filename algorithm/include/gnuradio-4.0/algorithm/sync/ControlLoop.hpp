@@ -4,9 +4,12 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <expected>
 #include <limits>
 #include <numbers>
-#include <stdexcept>
+#include <source_location>
+
+#include <gnuradio-4.0/Message.hpp>
 
 /**
  * @brief The second-order tracking loop shared by the synchronizers: carrier PLL, Costas loop,
@@ -215,26 +218,27 @@ struct LoopGains {
  * design is a settings-time computation whose accuracy has nothing to do with how the recursion is
  * carried. `detectorGain` divides both arms and is rejected at zero rather than defaulted: a loop
  * given the wrong S-curve slope has the wrong bandwidth by exactly that factor and no diagnostic.
+ * A bandwidth, damping or detector gain that is not positive is an error.
  */
-[[nodiscard]] constexpr LoopGains designLoopGains(double noiseBandwidth, double damping, double detectorGain, LoopOrder order = LoopOrder::Second) {
+[[nodiscard]] constexpr std::expected<LoopGains, gr::Error> designLoopGains(double noiseBandwidth, double damping, double detectorGain, LoopOrder order = LoopOrder::Second, std::source_location location = std::source_location::current()) {
     if (!(noiseBandwidth > 0.0)) {
-        throw std::invalid_argument("designLoopGains: noiseBandwidth (Bn*T, cycles per step) must be positive");
+        return std::unexpected(gr::Error("designLoopGains: noiseBandwidth (Bn*T, cycles per step) must be positive", location));
     }
     if (!(damping > 0.0)) {
-        throw std::invalid_argument("designLoopGains: damping must be positive");
+        return std::unexpected(gr::Error("designLoopGains: damping must be positive", location));
     }
     if (!(detectorGain > 0.0)) {
-        throw std::invalid_argument("designLoopGains: detectorGain must be positive — it is the detector's measured S-curve slope and it divides both gains");
+        return std::unexpected(gr::Error("designLoopGains: detectorGain must be positive; it is the detector's measured S-curve slope and it divides both gains", location));
     }
 
     if (order == LoopOrder::First) {
         const double lambda = 4.0 * noiseBandwidth / (1.0 + 2.0 * noiseBandwidth);
-        return {0.0, lambda / detectorGain, 0.0};
+        return LoopGains{0.0, lambda / detectorGain, 0.0};
     }
 
     const double theta = noiseBandwidth / (damping + 0.25 / damping);
     const double denom = 1.0 + 2.0 * damping * theta + theta * theta;
-    return {4.0 * damping * theta / denom / detectorGain, 4.0 * theta * theta / denom / detectorGain, theta};
+    return LoopGains{4.0 * damping * theta / denom / detectorGain, 4.0 * theta * theta / denom / detectorGain, theta};
 }
 
 /// @brief `remainder(phase, 2*pi)`: canonical in `[-pi, pi]`, exact, constant time, terminating on every finite input.
@@ -269,11 +273,12 @@ public:
      *
      * The bounds default to infinite, which is a loop with no clamp rather than a loop with a
      * forgotten one; every block in the synchronization family sets its own from something physical.
-     * Crossed bounds throw here rather than becoming a limit cycle later.
+     * Crossed bounds throw `gr::exception` here rather than becoming a limit cycle later, and so does a design
+     * `designLoopGains` refuses.
      */
     ControlLoop(double noiseBandwidth, double damping, double detectorGain, T minFrequency = -std::numeric_limits<T>::infinity(), T maxFrequency = std::numeric_limits<T>::infinity(), LoopOrder order = LoopOrder::Second) : _noiseBandwidth(noiseBandwidth), _damping(damping), _detectorGain(detectorGain), _order(order) {
         setFrequencyLimits(minFrequency, maxFrequency);
-        applyGains(designLoopGains(noiseBandwidth, damping, detectorGain, order));
+        applyGains(designOrThrow(noiseBandwidth, damping, detectorGain, order));
     }
 
     /**
@@ -308,23 +313,25 @@ public:
     /// @brief Parked against a bound: the loop is not tracking, it is reporting the closest frequency it may hold.
     [[nodiscard]] bool saturated() const noexcept { return _frequency == _minFrequency || _frequency == _maxFrequency; }
 
+    /// @brief The four settings below redesign the gains. A design `designLoopGains` refuses throws `gr::exception` and
+    /// leaves the loop unchanged.
     void setNoiseBandwidth(double noiseBandwidth) {
-        applyGains(designLoopGains(noiseBandwidth, _damping, _detectorGain, _order));
+        applyGains(designOrThrow(noiseBandwidth, _damping, _detectorGain, _order));
         _noiseBandwidth = noiseBandwidth;
     }
 
     void setDamping(double damping) {
-        applyGains(designLoopGains(_noiseBandwidth, damping, _detectorGain, _order));
+        applyGains(designOrThrow(_noiseBandwidth, damping, _detectorGain, _order));
         _damping = damping;
     }
 
     void setDetectorGain(double detectorGain) {
-        applyGains(designLoopGains(_noiseBandwidth, _damping, detectorGain, _order));
+        applyGains(designOrThrow(_noiseBandwidth, _damping, detectorGain, _order));
         _detectorGain = detectorGain;
     }
 
     void setOrder(LoopOrder order) {
-        applyGains(designLoopGains(_noiseBandwidth, _damping, _detectorGain, order));
+        applyGains(designOrThrow(_noiseBandwidth, _damping, _detectorGain, order));
         _order = order;
     }
 
@@ -335,23 +342,24 @@ public:
      * and a first-order `beta` leaves that box routinely. Negative gains are a sign error and are
      * rejected; everything else is accepted and the poles follow from it. A first-order loop keeps
      * `alpha == 0`, which is what the mode means, so setting one here is an error rather than a
-     * promotion to a loop with a proportional arm.
+     * promotion to a loop with a proportional arm. Either refusal throws `gr::exception`.
      */
     void setGains(double alpha, double beta) {
         if (!(alpha >= 0.0) || !(beta >= 0.0)) {
-            throw std::invalid_argument("ControlLoop::setGains: negative gains put the poles outside the unit circle — negate the detector, not the loop");
+            throw gr::exception("ControlLoop::setGains: negative gains put the poles outside the unit circle; negate the detector, not the loop");
         }
         if (_order == LoopOrder::First && alpha != 0.0) {
-            throw std::invalid_argument("ControlLoop::setGains: a first-order loop has no proportional arm — change the order first");
+            throw gr::exception("ControlLoop::setGains: a first-order loop has no proportional arm; change the order first");
         }
         _alpha = static_cast<T>(alpha);
         _beta  = static_cast<T>(beta);
     }
 
     /// @brief Set both bounds and re-clamp the state immediately, rather than leaving it out of range until the next step.
+    /// Crossed bounds throw `gr::exception`.
     void setFrequencyLimits(T minFrequency, T maxFrequency) {
         if (!(minFrequency <= maxFrequency)) {
-            throw std::invalid_argument("ControlLoop: minFrequency must not exceed maxFrequency — crossed bounds are a period-two limit cycle, not a clamp");
+            throw gr::exception("ControlLoop: minFrequency must not exceed maxFrequency; crossed bounds are a period-two limit cycle, not a clamp");
         }
         _minFrequency = minFrequency;
         _maxFrequency = maxFrequency;
@@ -391,6 +399,15 @@ private:
         } else {
             return phase;
         }
+    }
+
+    /// @brief The gains `designLoopGains` returns, its error thrown as `gr::exception`.
+    [[nodiscard]] static LoopGains designOrThrow(double noiseBandwidth, double damping, double detectorGain, LoopOrder order) {
+        const std::expected<LoopGains, gr::Error> gains = designLoopGains(noiseBandwidth, damping, detectorGain, order);
+        if (!gains) {
+            throw gr::exception(gains.error().message, gains.error().sourceLocation);
+        }
+        return *gains;
     }
 
     void applyGains(const LoopGains& gains) noexcept {

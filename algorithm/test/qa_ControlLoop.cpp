@@ -198,7 +198,7 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
 
     "Rice's gains are the table"_test = [] {
         for (const GainRow& row : kGainTable) {
-            const LoopGains gains = designLoopGains(row.noiseBandwidth, row.damping, 1.0);
+            const LoopGains gains = designLoopGains(row.noiseBandwidth, row.damping, 1.0).value();
             expect(approx(gains.theta, row.theta, 1e-9 * row.theta)) << row.noiseBandwidth << " at zeta " << row.damping << ": theta";
             expect(approx(gains.alpha, row.alpha, 1e-9 * row.alpha)) << row.noiseBandwidth << " at zeta " << row.damping << ": alpha";
             expect(approx(gains.beta, row.beta, 1e-9 * row.beta)) << row.noiseBandwidth << " at zeta " << row.damping << ": beta";
@@ -209,15 +209,15 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
             expect(le(largestPoleModulus(gains.alpha, gains.beta), 1.0));
         }
 
-        const LoopGains gains = designLoopGains(0.01, kFlat, 1.0);
+        const LoopGains gains = designLoopGains(0.01, kFlat, 1.0).value();
         expect(approx(0.01, gains.theta * (kFlat + 0.25 / kFlat), 1e-15)) << "theta is wn*T/2";
 
-        const LoopGains scaled = designLoopGains(0.01, kFlat, 4.0);
+        const LoopGains scaled = designLoopGains(0.01, kFlat, 4.0).value();
         expect(approx(scaled.alpha * 4.0, gains.alpha, 1e-15)) << "Kdet divides both arms";
         expect(approx(scaled.beta * 4.0, gains.beta, 1e-15));
         expect(approx(scaled.theta, gains.theta, 1e-15)) << "and leaves theta unchanged";
 
-        const LoopGains critical = designLoopGains(0.010, 1.0, 1.0);
+        const LoopGains critical = designLoopGains(0.010, 1.0, 1.0).value();
         const double    p        = critical.alpha + critical.beta - 2.0;
         expect(lt(std::abs(p * p - 4.0 * (1.0 - critical.alpha)), 1e-15)) << "the discriminant vanishes at zeta = 1";
         expect(approx(std::sqrt(1.0 - critical.alpha), 0.992 / 1.008, 1e-12)) << "leaving a double real pole at (1-theta)/(1+theta)";
@@ -237,7 +237,7 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
             const double    bandwidth = std::exp(logBandwidth(rng));
             const double    zeta      = damping(rng);
             const double    kdet      = detectorGain(rng);
-            const LoopGains gains     = designLoopGains(bandwidth, zeta, kdet);
+            const LoopGains gains     = designLoopGains(bandwidth, zeta, kdet).value();
 
             const double a        = gains.alpha * kdet;
             const double b        = gains.beta * kdet;
@@ -247,7 +247,7 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
 
         // Numerator and denominator both reduce to b, so what is left is eps/b.
         for (const double bandwidth : {1e-6, 1e-4, 1e-2, 0.2}) {
-            const LoopGains gains = designLoopGains(bandwidth, kFlat, 1.0);
+            const LoopGains gains = designLoopGains(bandwidth, kFlat, 1.0).value();
             const double    value = ((gains.alpha + gains.beta) - gains.alpha) / (1.0 + (gains.alpha + gains.beta - 2.0) + (1.0 - gains.alpha));
             expect(lt(std::abs(value - 1.0) * gains.beta, 1e-15)) << "Bn*T " << bandwidth;
         }
@@ -256,7 +256,7 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
     "the delivered noise bandwidth is the measured table"_test = [] {
         for (const DeliveredRow& row : kDeliveredTable) {
             for (std::size_t d = 0UZ; d < std::size(kDampings); ++d) {
-                const LoopGains gains     = designLoopGains(row.requested, kDampings[d], 1.0);
+                const LoopGains gains     = designLoopGains(row.requested, kDampings[d], 1.0).value();
                 const double    delivered = deliveredNoiseBandwidth(gains.alpha, gains.beta);
                 expect(approx(delivered, row.delivered[d], 1e-6)) << row.requested << " at zeta " << kDampings[d] << ": delivered " << delivered;
             }
@@ -264,7 +264,7 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
 
         // The approximation in full: exact asymptotically, 1% at 0.01, 10.5% at 0.1.
         const auto relative = [](double requested, double zeta) {
-            const LoopGains gains = designLoopGains(requested, zeta, 1.0);
+            const LoopGains gains = designLoopGains(requested, zeta, 1.0).value();
             return std::abs(deliveredNoiseBandwidth(gains.alpha, gains.beta) - requested) / requested;
         };
         expect(approx(relative(0.001, 0.5), 0.001001, 1e-6)) << "a tenth of a percent at Bn*T = 0.001";
@@ -282,19 +282,19 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
             const double bandwidth = std::pow(10.0, -5.0 + (std::log10(2.0) + 5.0) * static_cast<double>(i) / static_cast<double>(kBandwidthSteps - 1));
             for (int j = 0; j < kDampingSteps; ++j) {
                 const double    zeta  = 0.3 + 3.7 * static_cast<double>(j) / static_cast<double>(kDampingSteps - 1);
-                const LoopGains gains = designLoopGains(bandwidth, zeta, 1.0);
+                const LoopGains gains = designLoopGains(bandwidth, zeta, 1.0).value();
                 worst                 = std::max(worst, largestPoleModulus(gains.alpha, gains.beta));
             }
         }
         expect(lt(worst, 1.0)) << "worst pole modulus over Bn*T in [1e-5, 2], zeta in [0.3, 4] is " << worst;
 
-        const LoopGains wide = designLoopGains(2.0, kFlat, 1.0);
+        const LoopGains wide = designLoopGains(2.0, kFlat, 1.0).value();
         expect(approx(largestPoleModulus(wide.alpha, wide.beta), 0.511408, 1e-6)) << "at Bn*T = 2 the poles are back inside";
     };
 
     "the first-order inversion is exact where 4*Bn*T is two percent high"_test = [] {
         for (const FirstOrderRow& row : kFirstOrderTable) {
-            const LoopGains gains = designLoopGains(row.requested, 1.0, 1.0, LoopOrder::First);
+            const LoopGains gains = designLoopGains(row.requested, 1.0, 1.0, LoopOrder::First).value();
             expect(eq(gains.alpha, 0.0)) << "a first-order loop has no proportional arm";
             expect(eq(gains.theta, 0.0)) << "and no natural frequency to report";
             expect(approx(gains.beta, row.exactGain, 1e-15));
@@ -306,11 +306,11 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
         expect(approx(kFirstOrderTable[2].approximateGives / 0.010, 1.0204, 1e-4)) << "2% high at Bn*T = 0.01";
         expect(approx(kFirstOrderTable[4].approximateGives / 0.100, 1.25, 1e-9)) << "25% high at Bn*T = 0.1";
 
-        expect(approx(designLoopGains(0.01, 0.3, 5.0, LoopOrder::First).beta * 5.0, designLoopGains(0.01, 4.0, 1.0, LoopOrder::First).beta, 1e-15)) << "Kdet divides the first-order gain too, and damping is not consulted";
+        expect(approx(designLoopGains(0.01, 0.3, 5.0, LoopOrder::First).value().beta * 5.0, designLoopGains(0.01, 4.0, 1.0, LoopOrder::First).value().beta, 1e-15)) << "Kdet divides the first-order gain too, and damping is not consulted";
 
         ControlLoop<double> loop(0.01, kFlat, 1.0, -1.0, 1.0, LoopOrder::First);
         expect(eq(loop.alpha(), 0.0));
-        expect(throws<std::invalid_argument>([&] { loop.setGains(0.1, 0.01); })) << "setGains cannot install a proportional arm on a first-order loop";
+        expect(throws<gr::exception>([&] { loop.setGains(0.1, 0.01); })) << "setGains cannot install a proportional arm on a first-order loop";
         loop.setNoiseBandwidth(0.05);
         expect(eq(loop.alpha(), 0.0)) << "and a live bandwidth change does not re-derive one";
         expect(approx(loop.beta(), 0.2 / 1.1, 1e-15));
@@ -371,7 +371,7 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
         expect(that % !loop.saturated());
         expect(lt(peak, kPi)) << "and the recovery slipped no cycle";
 
-        constexpr LoopGains gains = designLoopGains(kBandwidth, kFlat, 1.0);
+        constexpr LoopGains gains = designLoopGains(kBandwidth, kFlat, 1.0).value();
         WoundUpLoop         wrong{gains.alpha, gains.beta, -kLimit, kLimit, 0.0, 0.0, 0.0};
         for (std::size_t n = 0UZ; n < saturate; ++n) {
             [[maybe_unused]] const double instant = wrong.step(1.0);
@@ -607,11 +607,11 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
     };
 
     "crossed bounds throw, and the limit cycle is unrepresentable"_test = [] {
-        expect(throws<std::invalid_argument>([] { ControlLoop<double>(0.01, kFlat, 1.0, 0.5, 0.1); })) << "0.5, 0.1, 0.5, 0.1, ... once per sample is not a clamp";
+        expect(throws<gr::exception>([] { ControlLoop<double>(0.01, kFlat, 1.0, 0.5, 0.1); })) << "0.5, 0.1, 0.5, 0.1, ... once per sample is not a clamp";
 
         ControlLoop<double> loop(0.01, kFlat, 1.0, -1.0, 1.0);
-        expect(throws<std::invalid_argument>([&] { loop.setMinFrequency(2.0); }));
-        expect(throws<std::invalid_argument>([&] { loop.setMaxFrequency(-2.0); }));
+        expect(throws<gr::exception>([&] { loop.setMinFrequency(2.0); }));
+        expect(throws<gr::exception>([&] { loop.setMaxFrequency(-2.0); }));
         expect(eq(loop.minFrequency(), -1.0)) << "and a rejected bound changes nothing";
         expect(eq(loop.maxFrequency(), 1.0));
 
@@ -641,10 +641,15 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
 
         ControlLoop<double> unbounded(0.01, 1.0, 1.0);
         expect(that % !unbounded.saturated()) << "infinite bounds are a loop with no clamp, not one with a forgotten clamp";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LoopGains unused = designLoopGains(0.0, 1.0, 1.0); })) << "a bandwidth of zero designs nothing";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LoopGains unused = designLoopGains(0.01, 0.0, 1.0); }));
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LoopGains unused = designLoopGains(0.01, 1.0, 0.0); })) << "and a detector gain of zero is the misconfiguration the mandatory argument exists to prevent";
-        expect(throws<std::invalid_argument>([&] { unbounded.setGains(-0.1, 0.01); })) << "negative gains are a sign error in the detector, not a loop setting";
+        const auto noBandwidth = designLoopGains(0.0, 1.0, 1.0);
+        expect(fatal(!noBandwidth.has_value())) << "a bandwidth of zero designs nothing";
+        expect(noBandwidth.error().message.contains("noiseBandwidth")) << noBandwidth.error().message;
+        expect(!designLoopGains(0.01, 0.0, 1.0).has_value());
+        const auto noDetector = designLoopGains(0.01, 1.0, 0.0);
+        expect(fatal(!noDetector.has_value())) << "and a detector gain of zero is the misconfiguration the mandatory argument exists to prevent";
+        expect(noDetector.error().message.contains("detectorGain")) << noDetector.error().message;
+        expect(throws<gr::exception>([] { ControlLoop<double>(0.0, kFlat, 1.0); })) << "the constructor throws the design's error";
+        expect(throws<gr::exception>([&] { unbounded.setGains(-0.1, 0.01); })) << "negative gains are a sign error in the detector, not a loop setting";
         unbounded.setGains(1.33, 2.5);
         expect(eq(unbounded.alpha(), 1.33)) << "gains outside [0, 1] are the caller's business: a range check here would exclude this design's own output";
     };
@@ -704,15 +709,15 @@ const boost::ut::suite<"control loop"> controlLoopTests = [] {
         expect(eq(loop.frequency(), frequency));
         loop.setDetectorGain(4.0);
         expect(eq(loop.frequency(), frequency));
-        expect(approx(loop.alpha(), designLoopGains(0.02, 2.0, 4.0).alpha, 1e-15));
+        expect(approx(loop.alpha(), designLoopGains(0.02, 2.0, 4.0).value().alpha, 1e-15));
 
         loop.setOrder(LoopOrder::First);
         expect(eq(loop.frequency(), frequency)) << "and changing the order only zeroes alpha";
         expect(eq(loop.phase(), phase));
         expect(eq(loop.alpha(), 0.0));
-        expect(approx(loop.beta(), designLoopGains(0.02, 2.0, 4.0, LoopOrder::First).beta, 1e-15));
+        expect(approx(loop.beta(), designLoopGains(0.02, 2.0, 4.0, LoopOrder::First).value().beta, 1e-15));
 
-        expect(throws<std::invalid_argument>([&] { loop.setNoiseBandwidth(-1.0); }));
+        expect(throws<gr::exception>([&] { loop.setNoiseBandwidth(-1.0); }));
         expect(eq(loop.noiseBandwidth(), 0.02)) << "a rejected setting leaves the gains alone";
     };
 
