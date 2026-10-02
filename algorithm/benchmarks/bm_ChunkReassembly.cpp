@@ -9,6 +9,7 @@
 #include <format>
 #include <span>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -97,15 +98,15 @@ void runOnce(const gr::packet::ChunkReassembler::Config& config, const std::vect
         // The even chunks first, then the odd ones. The interval set grows to one interval per pair,
         // and the second pass merges them. This order is the worst fragmentation a chunked delivery produces.
         for (std::size_t i = 0UZ; i < records.size(); i += 2UZ) {
-            engine.push(records[i]);
+            std::ignore = engine.push(records[i]);
         }
         for (std::size_t i = 1UZ; i < records.size(); i += 2UZ) {
-            engine.push(records[i]);
+            std::ignore = engine.push(records[i]);
         }
         return;
     }
     for (const std::vector<std::uint8_t>& record : records) {
-        engine.push(record);
+        std::ignore = engine.push(record);
     }
 }
 

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <numeric>
 #include <span>
+#include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/packet/ChunkReassembly.hpp>
@@ -26,6 +27,9 @@
 namespace {
 
 using namespace gr::packet;
+
+bool isAccepted(const ChunkReassembler::ChunkResult& result) { return result.has_value() && !result->completed(); }
+bool isCompleted(const ChunkReassembler::ChunkResult& result) { return result.has_value() && result->completed(); }
 
 std::uint64_t rng = 0xD1B54A32D192ED03ULL;
 
@@ -159,14 +163,14 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         for (const std::vector<std::size_t>& order : orders) {
             ChunkReassembler engine{indexedConfig()};
-            expect(engine.validate() == FormatError::ok);
+            expect(engine.validate().has_value());
             std::size_t completed = 0UZ;
             for (const std::size_t at : order) {
                 const ChunkReassembler::ChunkResult result = engine.push(records[at]);
-                expect(result.status != ChunkReassembler::Status::refused);
-                if (result.status == ChunkReassembler::Status::completed) {
+                expect(result.has_value());
+                if (isCompleted(result)) {
                     ++completed;
-                    expect(eq(*result.completed_id, 7ULL));
+                    expect(eq(*result->completed_id, 7ULL));
                     expect(sameBytes(engine.file(7ULL), file)) << "byte for byte, in every arrival order";
                     const FileFacts facts = engine.facts(7ULL);
                     expect(eq(facts.chunks, 37ULL));
@@ -186,11 +190,11 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         ChunkReassembler engine{indexedConfig()};
         for (std::size_t i = 0UZ; i + 1UZ < records.size(); ++i) {
-            expect(engine.push(records[i]).status == ChunkReassembler::Status::accepted);
-            expect(engine.push(records[i]).status == ChunkReassembler::Status::accepted) << "a retransmitting downlink is not an error";
+            expect(isAccepted(engine.push(records[i])));
+            expect(isAccepted(engine.push(records[i]))) << "a retransmitting downlink is not an error";
         }
         const ChunkReassembler::ChunkResult completed = engine.push(records.back());
-        expect(completed.status == ChunkReassembler::Status::completed);
+        expect(isCompleted(completed));
         expect(sameBytes(engine.file(1ULL), file)) << "identical to the file criterion 1 assembles";
         expect(eq(engine.counters().duplicate_chunks, 36ULL));
         expect(eq(engine.counters().conflicting_chunks, 0ULL));
@@ -198,7 +202,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         // A retransmission that arrives after the file is published has no file to join. The file left the engine when
         // it completed. The retransmission opens a new file, and `files_opened` counts it.
         engine.release(1ULL);
-        expect(engine.push(records.back()).status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(engine.push(records.back())));
         expect(eq(engine.counters().files_opened, 2ULL));
     };
 
@@ -207,19 +211,19 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         std::vector<std::vector<std::uint8_t>> records = indexedChunksOf(2ULL, file);
 
         ChunkReassembler engine{indexedConfig()};
-        engine.push(records[0]);
+        std::ignore = engine.push(records[0]);
 
         std::vector<std::uint8_t> altered            = records[0];
         altered[kHeaderSize + 100UZ]                 = static_cast<std::uint8_t>(altered[kHeaderSize + 100UZ] ^ 0xFFU);
         const ChunkReassembler::ChunkResult conflict = engine.push(altered);
-        expect(conflict.status == ChunkReassembler::Status::refused);
-        expect(conflict.reason == ChunkReassembler::RefusalReason::content_conflict);
+        expect(!conflict.has_value());
+        expect(conflict == std::unexpected(ChunkReassembler::RefusalReason::content_conflict));
         expect(eq(engine.counters().conflicting_chunks, 1ULL));
 
         for (std::size_t i = 1UZ; i < records.size(); ++i) {
             const ChunkReassembler::ChunkResult result = engine.push(records[i]);
-            expect(result.status != ChunkReassembler::Status::refused) << "the following chunk is processed";
-            if (result.status == ChunkReassembler::Status::completed) {
+            expect(result.has_value()) << "the following chunk is processed";
+            if (isCompleted(result)) {
                 expect(sameBytes(engine.file(2ULL), file)) << "the first write stands";
                 expect(eq(engine.facts(2ULL).conflicts, 1ULL));
             }
@@ -240,13 +244,13 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             if (i == 17UZ) {
                 continue; // chunk 17 withheld
             }
-            expect(engine.push(records[i]).status == ChunkReassembler::Status::accepted);
+            expect(isAccepted(engine.push(records[i])));
         }
         expect(eq(engine.counters().files_completed, 0ULL)) << "coverage is not complete, so nothing is published";
 
         bool evicted = false;
         for (std::size_t i = 0UZ; i < 51UZ; ++i) {
-            engine.push(otherRecords[i % otherRecords.size()]);
+            std::ignore = engine.push(otherRecords[i % otherRecords.size()]);
             for (const std::uint64_t id : engine.departed()) {
                 if (id == 3ULL) {
                     evicted               = true;
@@ -272,8 +276,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         std::vector<std::uint64_t> order;
         for (std::size_t i = 0UZ; i < a.size(); ++i) {
             for (const ChunkReassembler::ChunkResult result : {engine.push(a[i]), engine.push(b[i])}) {
-                if (result.status == ChunkReassembler::Status::completed) {
-                    order.push_back(*result.completed_id);
+                if (isCompleted(result)) {
+                    order.push_back(*result->completed_id);
                 }
             }
         }
@@ -291,13 +295,13 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         const std::vector<std::vector<std::uint8_t>> records = indexedChunksOf(30ULL, third);
 
         ChunkReassembler engine{indexedConfig(2UZ)};
-        engine.push(indexedChunksOf(20ULL, knownFile(2240UZ, 31U))[0]);
-        engine.push(indexedChunksOf(21ULL, knownFile(2240UZ, 32U))[0]);
-        engine.push(indexedChunksOf(21ULL, knownFile(2240UZ, 32U))[1]); // 21 is touched more recently
+        std::ignore = engine.push(indexedChunksOf(20ULL, knownFile(2240UZ, 31U))[0]);
+        std::ignore = engine.push(indexedChunksOf(21ULL, knownFile(2240UZ, 32U))[0]);
+        std::ignore = engine.push(indexedChunksOf(21ULL, knownFile(2240UZ, 32U))[1]); // 21 is touched more recently
 
         bool evictedFirst = false;
         for (const std::vector<std::uint8_t>& record : records) {
-            engine.push(record);
+            std::ignore = engine.push(record);
             for (const std::uint64_t id : engine.departed()) {
                 if (id == 20ULL) {
                     evictedFirst = true;
@@ -325,7 +329,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         config.max_open_files = 4UZ;
         config.max_file_bytes = 65536ULL;
         ChunkReassembler engine{config};
-        expect(engine.validate() == FormatError::ok);
+        expect(engine.validate().has_value());
 
         const std::vector<std::uint8_t> payload = knownFile(kChunkSize, 44U);
         const auto                      wide    = [&payload](std::uint64_t index, std::uint64_t totalSize) {
@@ -345,13 +349,13 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         static_assert(kWrappingIndex > 65536ULL / kChunkSize);
 
         const ChunkReassembler::ChunkResult huge = engine.push(wide(kWrappingIndex, 65536ULL));
-        expect(huge.status == ChunkReassembler::Status::refused);
-        expect(huge.reason == ChunkReassembler::RefusalReason::over_max_bytes) << "the comparison is made before the multiply, so no product wraps";
+        expect(!huge.has_value());
+        expect(huge == std::unexpected(ChunkReassembler::RefusalReason::over_max_bytes)) << "the comparison is made before the multiply, so no product wraps";
         expect(eq(engine.counters().refused_over_max, 1ULL));
         expect(eq(engine.facts(1ULL).covered_bytes, 0ULL)) << "nothing landed at the wrapped product's byte 96";
 
         const ChunkReassembler::ChunkResult inRange = engine.push(wide(0ULL, 65536ULL));
-        expect(inRange.status == ChunkReassembler::Status::accepted) << "the file is not marked broken by one bad header";
+        expect(isAccepted(inRange)) << "the file is not marked broken by one bad header";
         expect(eq(engine.facts(1ULL).covered_bytes, kChunkSize));
 
         // And the configuration bounds themselves, each refused where the configuration is offered.
@@ -361,20 +365,20 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         };
         ChunkReassembler::Config oversize = config;
         oversize.max_file_bytes           = kMaxFileBytes + 1ULL;
-        expect(ChunkReassembler::validate(oversize) == FormatError::file_bytes_too_large);
-        expect(throws([&refused, &oversize] { refused(oversize); }));
+        expect(ChunkReassembler::validate(oversize) == std::unexpected(FormatError::file_bytes_too_large));
+        expect(throws<gr::exception>([&refused, &oversize] { refused(oversize); }));
         ChunkReassembler::Config unset = config;
         unset.max_open_files           = 0UZ;
-        expect(ChunkReassembler::validate(unset) == FormatError::open_files_required);
-        expect(throws([&refused, &unset] { refused(unset); })) << "a cap of zero admits no file, so nothing could ever be evicted to make room";
+        expect(ChunkReassembler::validate(unset) == std::unexpected(FormatError::open_files_required));
+        expect(throws<gr::exception>([&refused, &unset] { refused(unset); })) << "a cap of zero admits no file, so nothing could ever be evicted to make room";
         ChunkReassembler::Config noBytes = config;
         noBytes.max_file_bytes           = 0ULL;
-        expect(ChunkReassembler::validate(noBytes) == FormatError::file_bytes_required);
-        expect(throws([&refused, &noBytes] { refused(noBytes); }));
+        expect(ChunkReassembler::validate(noBytes) == std::unexpected(FormatError::file_bytes_required));
+        expect(throws<gr::exception>([&refused, &noBytes] { refused(noBytes); }));
         ChunkReassembler::Config noGaps = config;
         noGaps.max_gaps                 = 0UZ;
-        expect(ChunkReassembler::validate(noGaps) == FormatError::gaps_required);
-        expect(throws([&refused, &noGaps] { refused(noGaps); }));
+        expect(ChunkReassembler::validate(noGaps) == std::unexpected(FormatError::gaps_required));
+        expect(throws<gr::exception>([&refused, &noGaps] { refused(noGaps); }));
     };
 
     "8. max_gaps refuses only chunks that would add a gap"_test = [] {
@@ -384,7 +388,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         config.max_file_bytes = 65536ULL;
         config.max_gaps       = 4UZ;
         ChunkReassembler engine{config};
-        expect(engine.validate() == FormatError::ok);
+        expect(engine.validate().has_value());
 
         const std::vector<std::uint8_t> file = knownFile(2000UZ, 55U);
         const auto                      at   = [&file](std::uint64_t offset, std::size_t length) { return offsetChunk(5ULL, offset, file.size(), false, std::span{file}.subspan(static_cast<std::size_t>(offset), length)); };
@@ -392,17 +396,17 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         // Alternating 100-byte chunks. Each one opens a new interval until the cap.
         for (std::uint64_t i = 0ULL; i < 5ULL; ++i) {
             const ChunkReassembler::ChunkResult result = engine.push(at(i * 200ULL, 100UZ));
-            expect(result.status == ChunkReassembler::Status::accepted) << "interval " << i;
+            expect(isAccepted(result)) << "interval " << i;
         }
         const ChunkReassembler::ChunkResult tooMany = engine.push(at(1000ULL, 100UZ));
-        expect(tooMany.status == ChunkReassembler::Status::refused);
-        expect(tooMany.reason == ChunkReassembler::RefusalReason::too_fragmented);
+        expect(!tooMany.has_value());
+        expect(tooMany == std::unexpected(ChunkReassembler::RefusalReason::too_fragmented));
         expect(eq(engine.counters().refused_too_fragmented, 1ULL));
 
         // A chunk that fills an existing hole is accepted in the same state, because merging is
         // attempted before the cap is tested.
         const ChunkReassembler::ChunkResult fills = engine.push(at(100ULL, 100UZ));
-        expect(fills.status == ChunkReassembler::Status::accepted) << "a chunk that fills a hole is never refused for making one";
+        expect(isAccepted(fills)) << "a chunk that fills a hole is never refused for making one";
     };
 
     "9. completion is coverage, not a write pointer"_test = [] {
@@ -415,14 +419,14 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
                 continue;
             }
             const ChunkReassembler::ChunkResult result = engine.push(records[i]);
-            expect(result.status != ChunkReassembler::Status::completed) << "chunk " << i << " must not complete a file with a hole in it";
+            expect(!isCompleted(result)) << "chunk " << i << " must not complete a file with a hole in it";
         }
         expect(eq(engine.counters().files_completed, 0ULL)) << "the last chunk reached the declared size and the file is still not complete";
         expect(eq(engine.facts(6ULL).covered_bytes, kFileBytes - kChunkSize));
 
         // And it completes the moment the hole is filled, in the same engine.
         const ChunkReassembler::ChunkResult filled = engine.push(records[3]);
-        expect(filled.status == ChunkReassembler::Status::completed);
+        expect(isCompleted(filled));
         expect(sameBytes(engine.file(6ULL), file));
     };
 
@@ -436,7 +440,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             for (std::size_t base = 0UZ; base < file.size(); base += kChunkSize) {
                 last = engine.push(indexedChunk(1ULL, base / kChunkSize, file.size(), false, std::span{file}.subspan(base, kChunkSize)));
             }
-            expect(last.status == ChunkReassembler::Status::completed);
+            expect(isCompleted(last));
             expect(sameBytes(engine.file(1ULL), file));
         }
 
@@ -452,7 +456,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             for (std::size_t base = 0UZ; base < file.size(); base += kChunkSize) {
                 last = engine.push(indexedChunk(1ULL, base / kChunkSize, 3ULL, false, std::span{file}.subspan(base, kChunkSize)));
             }
-            expect(last.status == ChunkReassembler::Status::completed);
+            expect(isCompleted(last));
             expect(sameBytes(engine.file(1ULL), file));
         }
 
@@ -468,7 +472,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
                 const bool isLast = base + kChunkSize == file.size();
                 last              = engine.push(indexedChunk(1ULL, base / kChunkSize, 0ULL, isLast, std::span{file}.subspan(base, kChunkSize)));
             }
-            expect(last.status == ChunkReassembler::Status::completed);
+            expect(isCompleted(last));
             expect(eq(*engine.facts(1ULL).declared_chunks, 3ULL)) << "the flag on chunk 2 declared three chunks";
         }
 
@@ -477,8 +481,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             ChunkReassembler    engine{indexedConfig()};
             const std::uint64_t honest = file.size();
             const std::uint64_t wrong  = file.size() + kChunkSize;
-            engine.push(indexedChunk(1ULL, 0ULL, bigFirst ? wrong : honest, false, std::span{file}.subspan(0UZ, kChunkSize)));
-            engine.push(indexedChunk(1ULL, 1ULL, bigFirst ? honest : wrong, false, std::span{file}.subspan(kChunkSize, kChunkSize)));
+            std::ignore                = engine.push(indexedChunk(1ULL, 0ULL, bigFirst ? wrong : honest, false, std::span{file}.subspan(0UZ, kChunkSize)));
+            std::ignore                = engine.push(indexedChunk(1ULL, 1ULL, bigFirst ? honest : wrong, false, std::span{file}.subspan(kChunkSize, kChunkSize)));
             expect(eq(engine.counters().declaration_conflicts, 1ULL)) << "counted once, whichever arrived first";
             expect(eq(*engine.facts(1ULL).declared_size, bigFirst ? wrong : honest)) << "the first declaration stands";
         }
@@ -497,18 +501,18 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         {
             ChunkReassembler engine{config};
-            engine.push(chunk(0ULL));
-            engine.push(chunk(1ULL));
-            engine.push(chunk(0ULL)); // a descending index
+            std::ignore = engine.push(chunk(0ULL));
+            std::ignore = engine.push(chunk(1ULL));
+            std::ignore = engine.push(chunk(0ULL)); // a descending index
             expect(eq(engine.counters().files_opened, 2ULL)) << "a transmitter that restarts its numbering has said so";
         }
         {
             ChunkReassembler::Config held     = config;
             held.new_file_on_index_regression = false;
             ChunkReassembler engine{held};
-            engine.push(chunk(0ULL));
-            engine.push(chunk(1ULL));
-            engine.push(chunk(0ULL));
+            std::ignore = engine.push(chunk(0ULL));
+            std::ignore = engine.push(chunk(1ULL));
+            std::ignore = engine.push(chunk(0ULL));
             expect(eq(engine.counters().files_opened, 1ULL));
             expect(eq(engine.counters().duplicate_chunks, 1ULL)) << "placed by index in the current file, where it is a duplicate";
         }
@@ -520,7 +524,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         ChunkReassembler engine{indexedConfig()};
         for (const std::vector<std::uint8_t>& record : records) {
-            engine.push(record);
+            std::ignore = engine.push(record);
         }
         const std::span<const std::uint8_t> payload = engine.file(8ULL);
         expect(ge(payload.size(), 1UZ)) << "a zero-item payload is not admissible at either carrier boundary";
@@ -530,8 +534,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         // no two-gigabyte file.
         ChunkReassembler::Config oversize = indexedConfig();
         oversize.max_file_bytes           = kMaxFileBytes + 1ULL;
-        expect(ChunkReassembler::validate(oversize) == FormatError::file_bytes_too_large);
-        expect(throws([&oversize] {
+        expect(ChunkReassembler::validate(oversize) == std::unexpected(FormatError::file_bytes_too_large));
+        expect(throws<gr::exception>([&oversize] {
             ChunkReassembler engine2{oversize};
             std::ignore = engine2.openFiles();
         }));
@@ -540,8 +544,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         ChunkReassembler                    fresh{indexedConfig()};
         const std::vector<std::uint8_t>     zero   = indexedChunk(9ULL, 0ULL, 0ULL, false, std::span{file}.first(16UZ));
         const ChunkReassembler::ChunkResult result = fresh.push(zero);
-        expect(result.status == ChunkReassembler::Status::refused);
-        expect(result.reason == ChunkReassembler::RefusalReason::zero_size);
+        expect(!result.has_value());
+        expect(result == std::unexpected(ChunkReassembler::RefusalReason::zero_size));
     };
 
     "13. the degenerate descriptor's strict continuity, and what it costs"_test = [] {
@@ -565,8 +569,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             return engine.pushDescriptor(descriptor, std::span{file}.subspan(begin, length));
         };
 
-        expect(feed(0UZ, 200UZ, true).status == ChunkReassembler::Status::accepted);
-        expect(feed(200UZ, 200UZ, true).status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(feed(0UZ, 200UZ, true)));
+        expect(isAccepted(feed(200UZ, 200UZ, true)));
         expect(eq(engine.facts(1ULL).covered_bytes, 400ULL)) << "contiguous chunks assemble exactly";
 
         // Now withhold one and offer the next. From there the pointer cannot say where anything goes.
@@ -577,7 +581,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         descriptor.payload_begin = 0UZ;
         descriptor.payload_end   = 100UZ;
         descriptor.total_size    = file.size();
-        expect(second.pushDescriptor(descriptor, std::span{file}.first(100UZ)).status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(second.pushDescriptor(descriptor, std::span{file}.first(100UZ))));
 
         ChunkDescriptor placed{};
         placed.file_id       = 2ULL;
@@ -585,11 +589,11 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         placed.payload_begin = 0UZ;
         placed.payload_end   = 100UZ;
         placed.total_size    = file.size();
-        expect(second.pushDescriptor(placed, std::span{file}.subspan(300UZ, 100UZ)).status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(second.pushDescriptor(placed, std::span{file}.subspan(300UZ, 100UZ))));
 
         const ChunkReassembler::ChunkResult lost = second.pushDescriptor(descriptor, std::span{file}.subspan(400UZ, 100UZ));
-        expect(lost.status == ChunkReassembler::Status::refused);
-        expect(lost.reason == ChunkReassembler::RefusalReason::no_position);
+        expect(!lost.has_value());
+        expect(lost == std::unexpected(ChunkReassembler::RefusalReason::no_position));
         expect(eq(second.counters().refused_no_position, 1ULL));
         expect(second.facts(2ULL).reason == EvictReason::no_position) << "and the file is evicted in that same call, with its coverage reported";
         expect(eq(second.facts(2ULL).covered_bytes, 200ULL));
@@ -603,7 +607,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             ChunkReassembler engine{indexedConfig()};
             for (std::size_t i = 0UZ; i < records.size(); ++i) {
                 const bool bad = i == 4UZ || i == 9UZ || i == 20UZ;
-                engine.push(records[i], !bad, true, bad ? 3ULL : 1ULL, bad ? 1ULL : 0ULL);
+                std::ignore    = engine.push(records[i], !bad, true, bad ? 3ULL : 1ULL, bad ? 1ULL : 0ULL);
             }
             const FileFacts facts = engine.facts(12ULL);
             expect(facts.crc_stated);
@@ -620,7 +624,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             for (std::size_t i = 0UZ; i < records.size(); ++i) {
                 const bool                          bad    = i == 4UZ || i == 9UZ || i == 20UZ;
                 const ChunkReassembler::ChunkResult result = engine.push(records[i], !bad, true, 0ULL, 0ULL);
-                expect((result.status == ChunkReassembler::Status::refused) == bad);
+                expect((!result.has_value()) == bad);
             }
             expect(eq(engine.counters().files_completed, 0ULL));
             expect(eq(engine.counters().refused_crc_failed, 3ULL));
@@ -656,19 +660,19 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         {
             ChunkReassembler engine{config};
-            expect(engine.push(record(0ULL, 3ULL, cell(0UZ, kCell))).status == ChunkReassembler::Status::accepted);
+            expect(isAccepted(engine.push(record(0ULL, 3ULL, cell(0UZ, kCell)))));
 
             // Half a cell at index 1. The count on this same record says index 1 is not the last index.
             const ChunkReassembler::ChunkResult shortMiddle = engine.push(record(1ULL, 3ULL, cell(1UZ, kCell / 2UZ)));
-            expect(shortMiddle.status == ChunkReassembler::Status::refused);
-            expect(shortMiddle.reason == ChunkReassembler::RefusalReason::bad_payload_span);
+            expect(!shortMiddle.has_value());
+            expect(shortMiddle == std::unexpected(ChunkReassembler::RefusalReason::bad_payload_span));
             expect(eq(engine.counters().refused_payload_span, 1ULL));
 
-            expect(engine.push(record(2ULL, 3ULL, cell(2UZ, kCell))).status == ChunkReassembler::Status::accepted);
+            expect(isAccepted(engine.push(record(2ULL, 3ULL, cell(2UZ, kCell)))));
             expect(eq(engine.counters().files_completed, 0ULL)) << "two of three cells covered is not a complete file";
 
             const ChunkReassembler::ChunkResult filled = engine.push(record(1ULL, 3ULL, cell(1UZ, kCell)));
-            expect(filled.status == ChunkReassembler::Status::completed);
+            expect(isCompleted(filled));
             expect(sameBytes(engine.file(1ULL), file)) << "and the file is the one that was sent, with no zero-filled hole";
         }
 
@@ -695,32 +699,32 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             held.format                   = flagged;
             ChunkReassembler engine{held};
 
-            expect(engine.push(flaggedRecord(1ULL, false, cell(1UZ, kCell / 2UZ))).status == ChunkReassembler::Status::accepted) << "nothing declares an extent yet";
-            expect(engine.push(flaggedRecord(0ULL, false, cell(0UZ, kCell))).status == ChunkReassembler::Status::accepted);
-            expect(engine.push(flaggedRecord(2ULL, true, cell(2UZ, kCell))).status == ChunkReassembler::Status::accepted);
+            expect(isAccepted(engine.push(flaggedRecord(1ULL, false, cell(1UZ, kCell / 2UZ))))) << "nothing declares an extent yet";
+            expect(isAccepted(engine.push(flaggedRecord(0ULL, false, cell(0UZ, kCell)))));
+            expect(isAccepted(engine.push(flaggedRecord(2ULL, true, cell(2UZ, kCell)))));
             expect(eq(engine.counters().files_completed, 0ULL)) << "the flag names index 2 as the last, so the short index 1 is a hole";
 
             // The cell cannot be repaired either. Its first write stands, and the full chunk disagrees with it.
             const ChunkReassembler::ChunkResult repair = engine.push(flaggedRecord(1ULL, false, cell(1UZ, kCell)));
-            expect(repair.status == ChunkReassembler::Status::refused);
-            expect(repair.reason == ChunkReassembler::RefusalReason::content_conflict);
+            expect(!repair.has_value());
+            expect(repair == std::unexpected(ChunkReassembler::RefusalReason::content_conflict));
             expect(eq(engine.counters().files_completed, 0ULL)) << "a file that took a short chunk at a non-final index stays open until it is evicted";
 
             // A second short chunk at another index is refused while nothing has declared an extent. Only one index can
             // be the last one.
             ChunkReassembler second{held};
-            expect(second.push(flaggedRecord(1ULL, false, cell(1UZ, kCell / 2UZ))).status == ChunkReassembler::Status::accepted);
+            expect(isAccepted(second.push(flaggedRecord(1ULL, false, cell(1UZ, kCell / 2UZ)))));
             const ChunkReassembler::ChunkResult twoShort = second.push(flaggedRecord(2ULL, false, cell(2UZ, kCell / 2UZ)));
-            expect(twoShort.status == ChunkReassembler::Status::refused);
-            expect(twoShort.reason == ChunkReassembler::RefusalReason::bad_payload_span);
+            expect(!twoShort.has_value());
+            expect(twoShort == std::unexpected(ChunkReassembler::RefusalReason::bad_payload_span));
         }
 
         // A chunk carrying no bytes covers nothing, on either coverage path.
         {
             ChunkReassembler                    engine{config};
             const ChunkReassembler::ChunkResult empty = engine.push(record(0ULL, 3ULL, std::span<const std::uint8_t>{}));
-            expect(empty.status == ChunkReassembler::Status::refused);
-            expect(empty.reason == ChunkReassembler::RefusalReason::bad_payload_span);
+            expect(!empty.has_value());
+            expect(empty == std::unexpected(ChunkReassembler::RefusalReason::bad_payload_span));
 
             ChunkReassembler::Config intervals{};
             intervals.format         = offsetFormat();
@@ -728,8 +732,8 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
             intervals.max_file_bytes = 65536ULL;
             ChunkReassembler                    other{intervals};
             const ChunkReassembler::ChunkResult none = other.push(offsetChunk(1ULL, 0ULL, 64ULL, false, std::span<const std::uint8_t>{}));
-            expect(none.status == ChunkReassembler::Status::refused);
-            expect(none.reason == ChunkReassembler::RefusalReason::bad_payload_span);
+            expect(!none.has_value());
+            expect(none == std::unexpected(ChunkReassembler::RefusalReason::bad_payload_span));
             expect(eq(other.counters().duplicate_chunks, 0ULL)) << "and it is not a duplicate of the nothing that is there";
         }
     };
@@ -745,9 +749,9 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         ChunkReassembler engine{config};
 
         const std::vector<std::uint8_t> file = knownFile(16UZ, 141U);
-        expect(engine.push(offsetChunk(1ULL, 0ULL, 16ULL, false, std::span{file}.first(8UZ))).status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(engine.push(offsetChunk(1ULL, 0ULL, 16ULL, false, std::span{file}.first(8UZ)))));
         const ChunkReassembler::ChunkResult second = engine.push(offsetChunk(1ULL, 8ULL, 16ULL, false, std::span{file}.subspan(8UZ, 8UZ)));
-        expect(second.status == ChunkReassembler::Status::completed) << "both halves land where their offsets say";
+        expect(isCompleted(second)) << "both halves land where their offsets say";
         expect(eq(engine.counters().conflicting_chunks, 0ULL));
         expect(sameBytes(engine.file(1ULL), file));
     };
@@ -760,14 +764,14 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         ChunkReassembler engine{config};
 
         const std::vector<std::uint8_t> file = knownFile(300UZ, 151U);
-        expect(engine.push(offsetChunk(1ULL, 0ULL, 300ULL, false, std::span{file}.first(100UZ))).status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(engine.push(offsetChunk(1ULL, 0ULL, 300ULL, false, std::span{file}.first(100UZ)))));
 
         std::vector<std::uint8_t> overlapping(file.begin() + 50, file.begin() + 150);
         overlapping[10] = static_cast<std::uint8_t>(overlapping[10] ^ 0xFFU); // inside the covered half
 
         const ChunkReassembler::ChunkResult conflict = engine.push(offsetChunk(1ULL, 50ULL, 300ULL, false, overlapping));
-        expect(conflict.status == ChunkReassembler::Status::refused);
-        expect(conflict.reason == ChunkReassembler::RefusalReason::content_conflict) << "so there is a record to publish on reject and a reason to name";
+        expect(!conflict.has_value());
+        expect(conflict == std::unexpected(ChunkReassembler::RefusalReason::content_conflict)) << "so there is a record to publish on reject and a reason to name";
         expect(eq(engine.counters().conflicting_chunks, 1ULL));
         expect(eq(engine.facts(1ULL).conflicts, 1ULL));
         expect(eq(engine.facts(1ULL).covered_bytes, 100ULL)) << "the uncovered half of a contradicting chunk is not written either";
@@ -775,53 +779,53 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         // The same range with the content that is already held is a duplicate, not a conflict.
         const ChunkReassembler::ChunkResult agreeing = engine.push(offsetChunk(1ULL, 50ULL, 300ULL, false, std::span{file}.subspan(50UZ, 100UZ)));
-        expect(agreeing.status == ChunkReassembler::Status::accepted);
+        expect(isAccepted(agreeing));
         expect(eq(engine.facts(1ULL).covered_bytes, 150ULL)) << "and its uncovered half is written";
     };
 
     "the format's own refusals, each naming what is wrong"_test = [] {
         IndexedChunkFormat noIndex = indexedFormat();
         noIndex.index              = FieldSpec{};
-        expect(validateChunkFormat(noIndex) == FormatError::index_required);
+        expect(validateChunkFormat(noIndex) == std::unexpected(FormatError::index_required));
 
         IndexedChunkFormat noChunkSize = indexedFormat();
         noChunkSize.chunk_size         = 0UZ;
-        expect(validateChunkFormat(noChunkSize) == FormatError::chunk_size_required);
+        expect(validateChunkFormat(noChunkSize) == std::unexpected(FormatError::chunk_size_required));
 
         IndexedChunkFormat wide = indexedFormat();
         wide.identifier         = FieldSpec{0UZ, 9UZ};
-        expect(validateChunkFormat(wide) == FormatError::field_too_wide);
+        expect(validateChunkFormat(wide) == std::unexpected(FormatError::field_too_wide));
 
         IndexedChunkFormat overlapping = indexedFormat();
         overlapping.total_size         = FieldSpec{1UZ, 4UZ};
-        expect(validateChunkFormat(overlapping) == FormatError::fields_overlap);
+        expect(validateChunkFormat(overlapping) == std::unexpected(FormatError::fields_overlap));
 
         IndexedChunkFormat intoPayload = indexedFormat();
         intoPayload.payload_offset     = 4UZ;
-        expect(validateChunkFormat(intoPayload) == FormatError::field_reaches_payload);
+        expect(validateChunkFormat(intoPayload) == std::unexpected(FormatError::field_reaches_payload));
 
         IndexedChunkFormat cannotComplete = indexedFormat();
         cannotComplete.total_size         = FieldSpec{};
         cannotComplete.last_flag          = FlagSpec{};
-        expect(validateChunkFormat(cannotComplete) == FormatError::cannot_complete) << "refusing it here beats discovering it as a stalled graph";
+        expect(validateChunkFormat(cannotComplete) == std::unexpected(FormatError::cannot_complete)) << "refusing it here beats discovering it as a stalled graph";
 
         OffsetChunkFormat noOffset = offsetFormat();
         noOffset.offset            = FieldSpec{};
-        expect(validateChunkFormat(noOffset) == FormatError::offset_required);
+        expect(validateChunkFormat(noOffset) == std::unexpected(FormatError::offset_required));
 
         OffsetChunkFormat countOnly = offsetFormat();
         countOnly.total_size        = FieldSpec{};
         countOnly.last_flag         = FlagSpec{};
         countOnly.chunk_count       = FieldSpec{6UZ, 4UZ};
         countOnly.chunk_size        = kChunkSize;
-        expect(validateChunkFormat(countOnly) == FormatError::cannot_complete) << "a count names cells an offset-addressed file does not have, so only a declared size completes one";
+        expect(validateChunkFormat(countOnly) == std::unexpected(FormatError::cannot_complete)) << "a count names cells an offset-addressed file does not have, so only a declared size completes one";
 
         // A record shorter than the header cannot be read. The engine refuses it as unparsable and does not throw.
         const std::vector<std::uint8_t>     tiny(4UZ, 0U);
         ChunkReassembler                    engine{indexedConfig()};
         const ChunkReassembler::ChunkResult result = engine.push(tiny);
-        expect(result.status == ChunkReassembler::Status::refused);
-        expect(result.reason == ChunkReassembler::RefusalReason::unparsable);
+        expect(!result.has_value());
+        expect(result == std::unexpected(ChunkReassembler::RefusalReason::unparsable));
         expect(eq(engine.counters().refused_unparsable, 1ULL));
 
         // Byte order is read where it is configured and nowhere else.
@@ -841,7 +845,7 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
 
         ChunkReassembler engine{indexedConfig()};
         for (std::size_t i = 0UZ; i < 10UZ; ++i) {
-            engine.push(records[i]);
+            std::ignore = engine.push(records[i]);
         }
         const std::span<const std::uint64_t> open = engine.finish();
         expect(eq(open.size(), 1UZ));
@@ -849,6 +853,20 @@ const boost::ut::suite<"chunk reassembly"> chunkReassemblyTests = [] {
         expect(eq(engine.counters().incomplete_at_stop, 1ULL));
         expect(engine.facts(50ULL).reason == EvictReason::at_stop);
         expect(eq(engine.facts(50ULL).covered_bytes, 10ULL * kChunkSize)) << "the operator learns what the pass lost";
+    };
+
+    "a refused reconfiguration throws and leaves the engine as it was"_test = [] {
+        const std::vector<std::uint8_t>              file    = knownFile(672UZ, 31U);
+        const std::vector<std::vector<std::uint8_t>> records = indexedChunksOf(60ULL, file);
+
+        ChunkReassembler engine{indexedConfig()};
+        expect(isAccepted(engine.push(records[0])));
+        ChunkReassembler::Config unset = indexedConfig();
+        unset.max_open_files           = 0UZ;
+        expect(ChunkReassembler::validate(unset) == std::unexpected(FormatError::open_files_required));
+        expect(throws<gr::exception>([&engine, &unset] { std::ignore = engine.reconfigure(unset); }));
+        expect(eq(engine.openFiles(), 1UZ)) << "the open file is not retired by a refused configuration";
+        expect(eq(engine.config().max_open_files, 4UZ));
     };
 };
 

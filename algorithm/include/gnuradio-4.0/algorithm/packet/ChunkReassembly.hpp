@@ -1,14 +1,16 @@
 #ifndef GNURADIO_ALGORITHM_PACKET_CHUNK_REASSEMBLY_HPP
 #define GNURADIO_ALGORITHM_PACKET_CHUNK_REASSEMBLY_HPP
 
+#include <gnuradio-4.0/Message.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <initializer_list>
 #include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -147,11 +149,10 @@ struct OffsetChunkFormat {
 using ChunkFormat = std::variant<IndexedChunkFormat, OffsetChunkFormat>;
 
 /// @brief The reason a configuration was refused. Each value names the fault.
-enum class FormatError { ok, field_too_wide, field_reaches_payload, fields_overlap, index_required, offset_required, chunk_size_required, cannot_complete, open_files_required, file_bytes_required, file_bytes_too_large, gaps_required };
+enum class FormatError { field_too_wide, field_reaches_payload, fields_overlap, index_required, offset_required, chunk_size_required, cannot_complete, open_files_required, file_bytes_required, file_bytes_too_large, gaps_required };
 
 [[nodiscard]] inline constexpr std::string_view formatErrorName(FormatError error) noexcept {
     switch (error) {
-    case FormatError::ok: return "ok";
     case FormatError::field_too_wide: return "a field wider than eight bytes does not fit a 64-bit value";
     case FormatError::field_reaches_payload: return "a header field reaches past payload_offset into the payload";
     case FormatError::fields_overlap: return "two header fields overlap";
@@ -224,48 +225,48 @@ namespace detail {
 }
 
 /**
- * @brief Validate a format's configuration and name the fault. It returns more than a bool.
+ * @brief Validate a format's configuration. The error names the fault.
  *
  * A header field that reaches into the payload is a configuration error and not a runtime error. It is
  * caught here. A format that cannot complete a file is caught here too. Refusing it at configuration is
  * better than a run that stalls with no file completed.
  */
-[[nodiscard]] inline FormatError validateChunkFormat(const ChunkFormat& format) {
+[[nodiscard]] inline std::expected<void, FormatError> validateChunkFormat(const ChunkFormat& format) {
     const std::vector<FieldSpec> fields = detail::fieldsOf(format);
     for (const FieldSpec& field : fields) {
         if (field.width > 8UZ) {
-            return FormatError::field_too_wide;
+            return std::unexpected(FormatError::field_too_wide);
         }
     }
     for (std::size_t i = 0UZ; i < fields.size(); ++i) {
         for (std::size_t j = i + 1UZ; j < fields.size(); ++j) {
             if (fields[i].offset < fields[j].end() && fields[j].offset < fields[i].end()) {
-                return FormatError::fields_overlap;
+                return std::unexpected(FormatError::fields_overlap);
             }
         }
     }
 
-    const auto common = [&fields](std::size_t payloadOffset, const FlagSpec& flag, bool canComplete) -> FormatError {
+    const auto common = [&fields](std::size_t payloadOffset, const FlagSpec& flag, bool canComplete) -> std::expected<void, FormatError> {
         for (const FieldSpec& field : fields) {
             if (field.end() > payloadOffset) {
-                return FormatError::field_reaches_payload;
+                return std::unexpected(FormatError::field_reaches_payload);
             }
         }
         if (flag.present() && flag.offset >= payloadOffset) {
-            return FormatError::field_reaches_payload;
+            return std::unexpected(FormatError::field_reaches_payload);
         }
         if (!canComplete) {
-            return FormatError::cannot_complete;
+            return std::unexpected(FormatError::cannot_complete);
         }
-        return FormatError::ok;
+        return {};
     };
 
     if (const IndexedChunkFormat* indexed = std::get_if<IndexedChunkFormat>(&format); indexed != nullptr) {
         if (!indexed->index.present()) {
-            return FormatError::index_required;
+            return std::unexpected(FormatError::index_required);
         }
         if (indexed->chunk_size == 0UZ) {
-            return FormatError::chunk_size_required;
+            return std::unexpected(FormatError::chunk_size_required);
         }
         // A declared size, a declared count and a last-chunk flag each complete an index-addressed file. The
         // flag declares the count from the index it arrives with. Any one of the three suffices.
@@ -273,7 +274,7 @@ namespace detail {
     }
     const OffsetChunkFormat& offsetFormat = std::get<OffsetChunkFormat>(format);
     if (!offsetFormat.offset.present()) {
-        return FormatError::offset_required;
+        return std::unexpected(FormatError::offset_required);
     }
     // An offset-addressed file is placed by byte intervals and completes on a declared size alone. A chunk
     // count names cells this format does not address. A last-chunk flag declares a count in the same way.
@@ -378,15 +379,17 @@ public:
         bool          new_file_on_index_regression = true;
     };
 
-    enum class Status { accepted, completed, refused };
+    /// @brief The reason the engine refused a chunk. It is the error of a `ChunkResult`.
+    enum class RefusalReason { unparsable, bad_payload_span, zero_size, offset_beyond_size, over_max_bytes, too_fragmented, no_position, content_conflict, crc_failed };
 
-    enum class RefusalReason { none, unparsable, bad_payload_span, zero_size, offset_beyond_size, over_max_bytes, too_fragmented, no_position, content_conflict, crc_failed };
-
-    struct ChunkResult {
-        Status                       status = Status::accepted;
+    /// @brief A chunk the engine took. `completed_id` names the file the chunk completed, when it completed one.
+    struct Accepted {
         std::optional<std::uint64_t> completed_id{};
-        RefusalReason                reason = RefusalReason::none;
+
+        [[nodiscard]] bool completed() const noexcept { return completed_id.has_value(); }
     };
+
+    using ChunkResult = std::expected<Accepted, RefusalReason>;
 
     struct Counters {
         std::uint64_t records                = 0ULL;
@@ -413,33 +416,33 @@ public:
         [[nodiscard]] bool operator==(const Counters&) const noexcept = default;
     };
 
-    /// @brief Refuses an inadmissible configuration at construction. No later operation then works with a
-    /// bound that does not exist. For example, a cap of zero open files admits no file. Cap-pressure eviction
-    /// would then have nothing to evict and no way to make room.
+    /// @brief Refuses an inadmissible configuration at construction with a `gr::exception`. No later operation
+    /// then works with a bound that does not exist. For example, a cap of zero open files admits no file.
+    /// Cap-pressure eviction would then have nothing to evict and no way to make room.
     explicit ChunkReassembler(Config config) : config_{std::move(config)} {
-        if (const FormatError error = validate(config_); error != FormatError::ok) {
-            throw std::invalid_argument("gr::packet::ChunkReassembler: " + std::string(formatErrorName(error)));
+        if (const auto valid = validate(config_); !valid) {
+            throw gr::exception("gr::packet::ChunkReassembler: " + std::string(formatErrorName(valid.error())));
         }
     }
 
-    /// @brief Checks a configuration and returns `ok` or the error that names the fault.
-    [[nodiscard]] static FormatError validate(const Config& config) {
+    /// @brief Checks a configuration. The error names the fault.
+    [[nodiscard]] static std::expected<void, FormatError> validate(const Config& config) {
         if (config.max_open_files == 0UZ) {
-            return FormatError::open_files_required;
+            return std::unexpected(FormatError::open_files_required);
         }
         if (config.max_file_bytes == 0ULL) {
-            return FormatError::file_bytes_required;
+            return std::unexpected(FormatError::file_bytes_required);
         }
         if (config.max_file_bytes > kMaxFileBytes) {
-            return FormatError::file_bytes_too_large;
+            return std::unexpected(FormatError::file_bytes_too_large);
         }
         if (config.max_gaps == 0UZ) {
-            return FormatError::gaps_required;
+            return std::unexpected(FormatError::gaps_required);
         }
         return validateChunkFormat(config.format);
     }
 
-    [[nodiscard]] FormatError validate() const { return validate(config_); }
+    [[nodiscard]] std::expected<void, FormatError> validate() const { return validate(config_); }
 
     /// @brief Read a record under the configured format and fold it in.
     ChunkResult push(std::span<const std::uint8_t> record, bool crcOk = true, bool crcStated = false, std::uint64_t correctedErrors = 0ULL, std::uint64_t uncorrectableErrors = 0ULL) {
@@ -447,7 +450,7 @@ public:
         if (!descriptor.has_value()) {
             beginRecord();
             ++counters_.refused_unparsable;
-            return ChunkResult{Status::refused, std::nullopt, RefusalReason::unparsable};
+            return std::unexpected(RefusalReason::unparsable);
         }
         return pushDescriptor(*descriptor, record, crcOk, crcStated, correctedErrors, uncorrectableErrors);
     }
@@ -463,18 +466,18 @@ public:
 
         if (descriptor.payload_end < descriptor.payload_begin || descriptor.payload_end > record.size()) {
             ++counters_.refused_payload_span;
-            return ChunkResult{Status::refused, std::nullopt, RefusalReason::bad_payload_span};
+            return std::unexpected(RefusalReason::bad_payload_span);
         }
         if (crcStated && !crcOk) {
             ++counters_.chunks_crc_failed;
             if (config_.require_crc_ok) {
                 ++counters_.refused_crc_failed;
-                return ChunkResult{Status::refused, std::nullopt, RefusalReason::crc_failed};
+                return std::unexpected(RefusalReason::crc_failed);
             }
         }
         if (descriptor.total_size.has_value() && *descriptor.total_size == 0ULL) {
             ++counters_.refused_zero_size;
-            return ChunkResult{Status::refused, std::nullopt, RefusalReason::zero_size};
+            return std::unexpected(RefusalReason::zero_size);
         }
 
         const std::span<const std::uint8_t> payload = record.subspan(descriptor.payload_begin, descriptor.payload_end - descriptor.payload_begin);
@@ -482,22 +485,20 @@ public:
         File& file = resolveFile(descriptor);
         foldDeclarations(file, descriptor);
 
-        std::uint64_t       begin  = 0ULL;
-        const RefusalReason placed = resolvePosition(file, descriptor, payload.size(), begin);
-        if (placed != RefusalReason::none) {
-            countRefusal(placed);
-            if (placed == RefusalReason::no_position) {
+        const std::expected<std::uint64_t, RefusalReason> placed = resolvePosition(file, descriptor, payload.size());
+        if (!placed) {
+            countRefusal(placed.error());
+            if (placed.error() == RefusalReason::no_position) {
                 // No later chunk can be placed either. Holding the file open until the cap or the age rule
                 // acts would only waste the bound. This refusal is the one that also evicts.
                 retire(file.id, EvictReason::no_position);
             }
-            return ChunkResult{Status::refused, std::nullopt, placed};
+            return std::unexpected(placed.error());
         }
 
-        const RefusalReason written = writeChunk(file, begin, payload);
-        if (written != RefusalReason::none) {
-            countRefusal(written);
-            return ChunkResult{Status::refused, std::nullopt, written};
+        if (const std::expected<void, RefusalReason> written = writeChunk(file, *placed, payload); !written) {
+            countRefusal(written.error());
+            return std::unexpected(written.error());
         }
 
         file.last_touch = counters_.records;
@@ -515,9 +516,9 @@ public:
             const std::uint64_t id = file.id;
             ++counters_.files_completed;
             retire(id, EvictReason::completed);
-            return ChunkResult{Status::completed, id, RefusalReason::none};
+            return Accepted{.completed_id = id};
         }
-        return ChunkResult{Status::accepted, std::nullopt, RefusalReason::none};
+        return Accepted{};
     }
 
     /// @brief The assembled bytes of a file that has been completed or evicted and not yet released.
@@ -566,9 +567,9 @@ public:
     /// A chunk format and a memory bound are properties of a link. A reconfigured engine must not complete
     /// a file from bytes received under the previous configuration.
     std::span<const std::uint64_t> reconfigure(Config config) {
-        if (const FormatError error = validate(config); error != FormatError::ok) {
-            // Refused before any file is retired. A rejected configuration leaves the engine unchanged.
-            throw std::invalid_argument("gr::packet::ChunkReassembler: " + std::string(formatErrorName(error)));
+        if (const auto valid = validate(config); !valid) {
+            // Refused with a `gr::exception` before any file is retired. A rejected configuration leaves the engine unchanged.
+            throw gr::exception("gr::packet::ChunkReassembler: " + std::string(formatErrorName(valid.error())));
         }
         departed_.clear();
         std::vector<std::uint64_t> open;
@@ -802,16 +803,17 @@ private:
     }
 
     /// @brief The position of this chunk's bytes. The multiplication is checked before it is performed.
-    [[nodiscard]] RefusalReason resolvePosition(const File& file, const ChunkDescriptor& descriptor, std::size_t length, std::uint64_t& begin) const {
+    [[nodiscard]] std::expected<std::uint64_t, RefusalReason> resolvePosition(const File& file, const ChunkDescriptor& descriptor, std::size_t length) const {
         const std::uint64_t chunk = chunkSize();
+        std::uint64_t       begin = 0ULL;
         if (descriptor.offset.has_value()) {
             begin = *descriptor.offset;
         } else if (descriptor.index.has_value()) {
             if (chunk == 0ULL) {
-                return RefusalReason::no_position;
+                return std::unexpected(RefusalReason::no_position);
             }
             if (*descriptor.index > config_.max_file_bytes / chunk) {
-                return RefusalReason::over_max_bytes; // tested before the multiply, and no product wraps
+                return std::unexpected(RefusalReason::over_max_bytes); // tested before the multiply, and no product wraps
             }
             begin = *descriptor.index * chunk;
         } else {
@@ -819,19 +821,19 @@ private:
             // coverage is exactly [0, write_pointer). A running pointer is meaningful only when no data
             // has been lost. This check tests that condition.
             if (!contiguous(file)) {
-                return RefusalReason::no_position;
+                return std::unexpected(RefusalReason::no_position);
             }
             begin = file.write_pointer;
         }
 
         const std::uint64_t end = begin + length;
         if (end > config_.max_file_bytes) {
-            return RefusalReason::over_max_bytes;
+            return std::unexpected(RefusalReason::over_max_bytes);
         }
         if (file.facts.declared_size.has_value() && end > *file.facts.declared_size) {
-            return RefusalReason::offset_beyond_size;
+            return std::unexpected(RefusalReason::offset_beyond_size);
         }
-        return RefusalReason::none;
+        return begin;
     }
 
     [[nodiscard]] bool contiguous(const File& file) const noexcept {
@@ -864,13 +866,13 @@ private:
         return std::nullopt;
     }
 
-    RefusalReason writeChunk(File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) {
+    std::expected<void, RefusalReason> writeChunk(File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) {
         const std::uint64_t end = begin + payload.size();
 
         // A chunk with no bytes covers nothing. Admitting it would mark a cell or an interval as covered
         // over an empty range. A file with a hole would then look complete.
         if (payload.empty()) {
-            return RefusalReason::bad_payload_span;
+            return std::unexpected(RefusalReason::bad_payload_span);
         }
 
         std::uint64_t index = 0ULL;
@@ -879,7 +881,7 @@ private:
             if (payload.size() > chunkSize()) {
                 // The index addresses a fixed grid. A chunk longer than one cell would overlap the next
                 // cell's bytes, and the bitmap could not record what is covered.
-                return RefusalReason::bad_payload_span;
+                return std::unexpected(RefusalReason::bad_payload_span);
             }
             if (payload.size() < chunkSize()) {
                 // One bit marks one cell as covered. A cell filled only in part would report coverage the
@@ -890,10 +892,10 @@ private:
                 const std::optional<std::uint64_t> last = lastIndex(file);
                 if (last.has_value()) {
                     if (index != *last) {
-                        return RefusalReason::bad_payload_span;
+                        return std::unexpected(RefusalReason::bad_payload_span);
                     }
                 } else if (file.short_index.has_value() && *file.short_index != index) {
-                    return RefusalReason::bad_payload_span;
+                    return std::unexpected(RefusalReason::bad_payload_span);
                 }
             }
         }
@@ -922,7 +924,7 @@ private:
             ++file.facts.chunks;
             ++counters_.chunks_written;
             counters_.payload_bytes += payload.size();
-            return RefusalReason::none;
+            return {};
         }
 
         // The interval path. The intervals are sorted and disjoint. Two binary searches find the run this
@@ -946,12 +948,12 @@ private:
         // the file inconsistent. The refusal reports the whole chunk instead.
         if (alreadyIn != 0ULL && coveredDiffers(file, begin, payload)) {
             ++file.facts.conflicts;
-            return RefusalReason::content_conflict;
+            return std::unexpected(RefusalReason::content_conflict);
         }
 
         const std::size_t touched = static_cast<std::size_t>(std::distance(lower, upper));
         if (file.intervals.size() - touched + 1UZ > config_.max_gaps + 1UZ) {
-            return RefusalReason::too_fragmented;
+            return std::unexpected(RefusalReason::too_fragmented);
         }
 
         // Write only the uncovered parts. A first write then stands.
@@ -981,7 +983,7 @@ private:
         ++file.facts.chunks;
         ++counters_.chunks_written;
         counters_.payload_bytes += payload.size();
-        return RefusalReason::none;
+        return {};
     }
 
     void copyRange(File& file, std::uint64_t from, std::uint64_t to, std::uint64_t begin, std::span<const std::uint8_t> payload) {
@@ -1022,13 +1024,13 @@ private:
     }
 
     /// @brief Compares a fully covered range. Equal content is a duplicate. Different content is a conflict.
-    RefusalReason compareCovered(File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) {
+    std::expected<void, RefusalReason> compareCovered(File& file, std::uint64_t begin, std::span<const std::uint8_t> payload) {
         if (!coveredDiffers(file, begin, payload)) {
             ++counters_.duplicate_chunks;
-            return RefusalReason::none;
+            return {};
         }
         ++file.facts.conflicts;
-        return RefusalReason::content_conflict;
+        return std::unexpected(RefusalReason::content_conflict);
     }
 
     [[nodiscard]] bool complete(const File& file) const noexcept {
