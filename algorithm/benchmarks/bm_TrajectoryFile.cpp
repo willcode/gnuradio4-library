@@ -53,7 +53,7 @@ void benchTrajectoryLoader() {
 
             const auto name                                                  = std::format("loadTrajectory, {:11}, {} knots, {} MB", iso ? "utc_iso8601" : "unix_ns", kKnots, text.size() >> 20);
             ::benchmark::benchmark<kRepeats>(std::string_view(name), kKnots) = [&] {
-                gr::timing::Trajectory loaded = gr::timing::loadTrajectory(text);
+                gr::timing::Trajectory loaded = gr::timing::loadTrajectory(text).value();
                 ::benchmark::force_to_memory(loaded);
             };
         }

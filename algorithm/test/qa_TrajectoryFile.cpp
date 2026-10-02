@@ -11,7 +11,6 @@
 #include <fstream>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,19 +35,13 @@ constexpr double kCarrierHz = 437e6;
 /// refusal it did not mean to exercise. Its four lines put the first knot on line 5.
 [[nodiscard]] std::string wellFormed(std::string_view columns, std::string_view timeScale, std::string_view knots) { return std::format("#!gr4-trajectory 1\ncolumns {}\ntime_scale {}\ncarrier_hz 437000000\n{}", columns, timeScale, knots); }
 
-/// The exception's type, and the line number in its message. Every refusal names a line. The line number is the part of
+/// The returned error, and the line number in its message. Every refusal names a line. The line number is the part of
 /// a parse failure an operator can act on, and the test reads it.
 void refuses(std::string_view text, std::size_t line, std::string_view label) {
-    bool        threw = false;
-    std::string message;
-    try {
-        (void)loadTrajectory(text);
-    } catch (const std::invalid_argument& error) {
-        threw   = true;
-        message = error.what();
-    }
-    expect(threw) << label << "must refuse";
-    if (threw) {
+    const auto loaded = loadTrajectory(text);
+    expect(!loaded.has_value()) << label << "must refuse";
+    if (!loaded.has_value()) {
+        const std::string& message = loaded.error().message;
         expect(that % message.contains(std::format("line {}:", line))) << label << "must name line" << line << "but said:" << message;
     }
 }
@@ -103,10 +96,10 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
                 bothCols += std::format("{} {:.17g} {:.17g}\n", when, pass.rangeAt(i), pass.rateAt(i));
             }
 
-            const Trajectory a = loadTrajectory(offsetOnly);
-            const Trajectory b = loadTrajectory(rangeOnly);
-            const Trajectory c = loadTrajectory(rateOnly);
-            const Trajectory d = loadTrajectory(bothCols);
+            const Trajectory a = loadTrajectory(offsetOnly).value();
+            const Trajectory b = loadTrajectory(rangeOnly).value();
+            const Trajectory c = loadTrajectory(rateOnly).value();
+            const Trajectory d = loadTrajectory(bothCols).value();
 
             expect(a.frequency.has_value() && !a.delay.has_value()) << "offset_hz alone makes a frequency schedule";
             expect(!b.frequency.has_value() && b.delay.has_value()) << "range_m alone makes a delay schedule";
@@ -142,7 +135,7 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
             text += std::format("{} {}\n", isoOf(kBase + static_cast<std::int64_t>(i), cases[i].fraction), i);
         }
 
-        const Trajectory loaded = loadTrajectory(text);
+        const Trajectory loaded = loadTrajectory(text).value();
         expect(loaded.frequency.has_value());
         for (std::size_t i = 0UZ; i < cases.size(); ++i) {
             const std::int64_t want = (kBase + static_cast<std::int64_t>(i)) * 1'000'000'000LL + cases[i].ns;
@@ -151,7 +144,7 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
     };
 
     "unix_ns is read as a signed integer, sign and all"_test = [] {
-        const Trajectory t = loadTrajectory(wellFormed("time offset_hz", "unix_ns", "-1000000000 1.0\n+0 2.0\n250 3.0\n"));
+        const Trajectory t = loadTrajectory(wellFormed("time offset_hz", "unix_ns", "-1000000000 1.0\n+0 2.0\n250 3.0\n")).value();
         expect(t.frequency->times()[0] == -1'000'000'000LL);
         expect(t.frequency->times()[1] == 0LL);
         expect(t.frequency->times()[2] == 250LL);
@@ -169,7 +162,7 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
                                  "0            2500000.0\n"
                                  "# a comment between knots\n"
                                  "20000000000  2360000.0\n";
-        const Trajectory  t    = loadTrajectory(text);
+        const Trajectory  t    = loadTrajectory(text).value();
         expect(t.source == "sgp4 over a 2500 km pass, two words and a comma") << "the source runs to the end of the line, got:" << t.source;
         expect(t.delay->size() == 2UZ);
         expect(t.delay->delays()[0] == delayFor(2'500'000.));
@@ -248,15 +241,21 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
     "a refusal leaves nothing partial behind"_test = [] {
         // The schedules are constructed only after the whole file has parsed. A file that refuses on its last line
         // therefore gives a caller no table of the lines before it.
-        expect(throws<std::invalid_argument>([] { (void)loadTrajectory(wellFormed("time offset_hz", "unix_ns", "0 1.0\n10 2.0\n20 3.0\n5 4.0\n")); }));
+        expect(!loadTrajectory(wellFormed("time offset_hz", "unix_ns", "0 1.0\n10 2.0\n20 3.0\n5 4.0\n")).has_value());
+
+        // A finite range rate whose offset overflows leaves the schedule's domain. The schedule's refusal arrives as
+        // the returned error.
+        const auto overflowing = loadTrajectory(wellFormed("time range_rate_m_s", "unix_ns", "0 1e301\n10 2.0\n"));
+        expect(fatal(!overflowing.has_value()));
+        expect(overflowing.error().message.contains("FrequencySchedule")) << overflowing.error().message;
     };
 
     "the class-mismatch rule: a range table is not a Doppler table"_test = [] {
-        const Trajectory t = loadTrajectory(wellFormed("time range_m", "unix_ns", "0 2500000.0\n20000000000 2360000.0\n"));
+        const Trajectory t = loadTrajectory(wellFormed("time range_m", "unix_ns", "0 2500000.0\n20000000000 2360000.0\n")).value();
         expect(!t.frequency.has_value()) << "a range column never yields a frequency schedule: differentiating a piecewise-linear table leaves the class it lives in";
         expect(t.delay.has_value());
 
-        const Trajectory u = loadTrajectory(wellFormed("time range_rate_m_s", "unix_ns", "0 -7000.0\n20000000000 -6900.0\n"));
+        const Trajectory u = loadTrajectory(wellFormed("time range_rate_m_s", "unix_ns", "0 -7000.0\n20000000000 -6900.0\n")).value();
         expect(!u.delay.has_value()) << "a range-rate column never yields a delay schedule";
         expect(u.frequency.has_value());
     };
@@ -266,7 +265,7 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
         constexpr double kRate   = -7'000.;
         constexpr double kSpan   = 300.;
 
-        const Trajectory t = loadTrajectory(wellFormed("time range_m", "unix_ns", std::format("0 {:.17g}\n{} {:.17g}\n", kRange0, static_cast<std::int64_t>(kSpan) * 1'000'000'000LL, kRange0 + kRate * kSpan)));
+        const Trajectory t = loadTrajectory(wellFormed("time range_m", "unix_ns", std::format("0 {:.17g}\n{} {:.17g}\n", kRange0, static_cast<std::int64_t>(kSpan) * 1'000'000'000LL, kRange0 + kRate * kSpan))).value();
 
         double worst = 0.;
         for (std::size_t i = 0UZ; i <= 10UZ; ++i) {
@@ -289,13 +288,13 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
             text += std::format("{} {:.17g} {:.17g}\n", pass.nsAt(i), pass.rangeAt(i), pass.rateAt(i));
         }
 
-        const Trajectory t = loadTrajectory(text);
+        const Trajectory t = loadTrajectory(text).value();
         expect(t.frequency.has_value() && t.delay.has_value());
 
         // For a quadratic range sampled every h seconds, the secant slope differs from the true derivative by exactly
         // a*h/2. The figure is therefore arithmetic, not a tolerance.
         const double bound = pass.accel * static_cast<double>(pass.stepSeconds) / 2.;
-        const double worst = worstRangeRateMismatch(*t.delay, *t.frequency, kCarrierHz);
+        const double worst = worstRangeRateMismatch(*t.delay, *t.frequency, kCarrierHz).value();
         std::println("worstRangeRateMismatch on a consistent quadratic pass: {:.9f} m/s against the a*h/2 figure of {:.9f}", worst, bound);
         expect(std::abs(worst - bound) <= bound * 1e-9) << "a consistent pair reads a*h/2 and no more";
 
@@ -304,11 +303,13 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
         std::vector<double> rates(t.frequency->offsets().begin(), t.frequency->offsets().end());
         rates[pass.knots / 2UZ] -= offsetFor(1., kCarrierHz);
         const FrequencySchedule perturbed(t.frequency->times(), rates);
-        const double            after = worstRangeRateMismatch(*t.delay, perturbed, kCarrierHz);
+        const double            after = worstRangeRateMismatch(*t.delay, perturbed, kCarrierHz).value();
         std::println("one knot moved by 1 m/s: {:.9f} m/s", after);
         expect(std::abs(after - (worst + 1.)) < 1e-6) << "the figure rises by exactly the perturbation";
 
-        expect(throws<std::invalid_argument>([&] { (void)worstRangeRateMismatch(*t.delay, *t.frequency, 0.); })) << "a non-positive carrier refuses";
+        const auto noCarrier = worstRangeRateMismatch(*t.delay, *t.frequency, 0.);
+        expect(fatal(!noCarrier.has_value())) << "a non-positive carrier refuses";
+        expect(noCarrier.error().message.contains("positive and finite")) << noCarrier.error().message;
     };
 
     "loadTrajectoryFile names the path"_test = [] {
@@ -317,17 +318,22 @@ const boost::ut::suite<"trajectory file"> _trajectory_file = [] {
             std::ofstream out(path, std::ios::binary);
             out << wellFormed("time range_m", "unix_ns", "0 2500000.0\n20000000000 2360000.0\n");
         }
-        const Trajectory t = loadTrajectoryFile(path);
+        const Trajectory t = loadTrajectoryFile(path).value();
         expect(t.delay.has_value() && t.delay->size() == 2UZ);
         std::filesystem::remove(path);
 
-        bool named = false;
-        try {
-            (void)loadTrajectoryFile(path);
-        } catch (const std::invalid_argument& error) {
-            named = std::string(error.what()).contains(path.string());
+        const auto missing = loadTrajectoryFile(path);
+        expect(fatal(!missing.has_value()));
+        expect(missing.error().message.contains(path.string())) << "an unreadable file names the path it tried";
+
+        {
+            std::ofstream out(path, std::ios::binary);
+            out << wellFormed("time range_m", "unix_ns", "0 2500000.0\n");
         }
-        expect(named) << "an unreadable file names the path it tried";
+        const auto oneKnot = loadTrajectoryFile(path);
+        std::filesystem::remove(path);
+        expect(fatal(!oneKnot.has_value()));
+        expect(oneKnot.error().message.contains(path.string()) && oneKnot.error().message.contains("line ")) << "a refused table names the path and the line: " << oneKnot.error().message;
     };
 };
 

@@ -7,19 +7,21 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <ios>
 #include <limits>
 #include <optional>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/timing/FrequencySchedule.hpp>
 
 /**
@@ -90,7 +92,7 @@ enum class TrajectoryQuantity : std::uint8_t { offset_hz, range_m, range_rate_m_
     return "";
 }
 
-[[noreturn]] inline void trajectoryRefuse(std::size_t line, std::string_view what, std::string_view offending) { throw std::invalid_argument(std::format("gr::timing::loadTrajectory: line {}: {} — {}", line, what, offending)); }
+[[nodiscard]] inline std::unexpected<gr::Error> trajectoryRefuse(std::size_t line, std::string_view what, std::string_view offending, std::source_location loc = std::source_location::current()) { return std::unexpected(gr::Error(std::format("gr::timing::loadTrajectory: line {}: {} — {}", line, what, offending), loc)); }
 
 /// @brief Lines of the text, with `\r` stripped from each end. A file from another platform then loads.
 ///
@@ -152,13 +154,14 @@ struct TrajectoryFields {
 
 /// The file is US-ASCII. A byte outside the printable range, other than tab, is refused. A recording passed in
 /// place of a table then gives one refusal and not ten thousand.
-inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
+[[nodiscard]] inline std::expected<void, gr::Error> trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     for (const char c : raw) {
         const auto byte = static_cast<unsigned char>(c);
         if (byte != '\t' && (byte < 0x20U || byte > 0x7EU)) {
-            trajectoryRefuse(line, std::format("byte 0x{:02X} is outside the printable US-ASCII the format admits", byte), raw);
+            return trajectoryRefuse(line, std::format("byte 0x{:02X} is outside the printable US-ASCII the format admits", byte), raw);
         }
     }
+    return {};
 }
 
 /// A header key begins with a letter or an underscore. A knot's time begins with a digit or a sign under either
@@ -172,21 +175,21 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
-[[nodiscard]] inline double trajectoryValue(std::size_t line, std::string_view field, std::string_view what) {
+[[nodiscard]] inline std::expected<double, gr::Error> trajectoryValue(std::size_t line, std::string_view field, std::string_view what) {
     double out           = 0.;
     const auto [end, ec] = std::from_chars(field.data(), field.data() + field.size(), out, std::chars_format::general);
     if (ec != std::errc{} || end != field.data() + field.size()) {
-        trajectoryRefuse(line, std::format("{} is not a number, or carries trailing characters", what), field);
+        return trajectoryRefuse(line, std::format("{} is not a number, or carries trailing characters", what), field);
     }
     if (!std::isfinite(out)) {
-        trajectoryRefuse(line, std::format("{} is not finite", what), field);
+        return trajectoryRefuse(line, std::format("{} is not finite", what), field);
     }
     return out;
 }
 
 /// `unix_ns`, an optional sign followed by decimal digits only. A nanosecond count does not pass through a
 /// floating type. There is no exponent form and no decimal point.
-[[nodiscard]] inline std::int64_t trajectoryUnixNs(std::size_t line, std::string_view field) {
+[[nodiscard]] inline std::expected<std::int64_t, gr::Error> trajectoryUnixNs(std::size_t line, std::string_view field) {
     std::string_view digits = field;
     if (!digits.empty() && digits.front() == '+') {
         digits.remove_prefix(1UZ);
@@ -194,10 +197,10 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     std::int64_t out     = 0;
     const auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), out, 10);
     if (ec == std::errc::result_out_of_range) {
-        trajectoryRefuse(line, "the unix_ns time overflows the signed 64-bit nanosecond axis", field);
+        return trajectoryRefuse(line, "the unix_ns time overflows the signed 64-bit nanosecond axis", field);
     }
     if (ec != std::errc{} || end != digits.data() + digits.size()) {
-        trajectoryRefuse(line, "the unix_ns time is not a decimal integer", field);
+        return trajectoryRefuse(line, "the unix_ns time is not a decimal integer", field);
     }
     return out;
 }
@@ -238,7 +241,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
  * A seconds field of `60` is refused with its reason named. The axis is a plain nanosecond count, and a leap
  * second has no representation on it.
  */
-[[nodiscard]] inline std::int64_t trajectoryIso8601Ns(std::size_t line, std::string_view field) {
+[[nodiscard]] inline std::expected<std::int64_t, gr::Error> trajectoryIso8601Ns(std::size_t line, std::string_view field) {
     constexpr std::size_t kFixed = 19UZ; // YYYY-MM-DDThh:mm:ss
 
     const bool shaped = field.size() > kFixed                                     //
@@ -248,7 +251,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
                         && trajectoryDigits(field, 11UZ, 2UZ) && field[13] == ':' //
                         && trajectoryDigits(field, 14UZ, 2UZ) && field[16] == ':' && trajectoryDigits(field, 17UZ, 2UZ);
     if (!shaped) {
-        trajectoryRefuse(line, "the time is not YYYY-MM-DDThh:mm:ss[.f{1,9}]Z at fixed field widths", field);
+        return trajectoryRefuse(line, "the time is not YYYY-MM-DDThh:mm:ss[.f{1,9}]Z at fixed field widths", field);
     }
 
     std::int64_t fraction = 0;
@@ -260,25 +263,25 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
         }
         const std::size_t digits = last - first;
         if (digits == 0UZ) {
-            trajectoryRefuse(line, "the fractional second carries no digits", field);
+            return trajectoryRefuse(line, "the fractional second carries no digits", field);
         }
         if (digits > 9UZ) {
-            trajectoryRefuse(line, std::format("the fractional second carries {} digits, past the nine a nanosecond axis holds", digits), field);
+            return trajectoryRefuse(line, std::format("the fractional second carries {} digits, past the nine a nanosecond axis holds", digits), field);
         }
         if (last + 1UZ != field.size() || field[last] != 'Z') {
-            trajectoryRefuse(line, "the time does not end in the literal Z, and no offset form is accepted", field);
+            return trajectoryRefuse(line, "the time does not end in the literal Z, and no offset form is accepted", field);
         }
         fraction = trajectoryInt(field, first, digits);
         for (std::size_t i = digits; i < 9UZ; ++i) {
             fraction *= 10;
         }
     } else if (field[kFixed] != 'Z' || field.size() != kFixed + 1UZ) {
-        trajectoryRefuse(line, "the time does not end in the literal Z, and no offset form is accepted", field);
+        return trajectoryRefuse(line, "the time does not end in the literal Z, and no offset form is accepted", field);
     }
 
     const int second = trajectoryInt(field, 17UZ, 2UZ);
     if (second == 60) {
-        trajectoryRefuse(line, "a seconds field of 60 names a leap second, which a plain nanosecond axis cannot represent", field);
+        return trajectoryRefuse(line, "a seconds field of 60 names a leap second, which a plain nanosecond axis cannot represent", field);
     }
 
     const int year   = trajectoryInt(field, 0UZ, 4UZ);
@@ -289,7 +292,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
 
     const std::chrono::year_month_day date{std::chrono::year{year}, std::chrono::month{static_cast<unsigned>(month)}, std::chrono::day{static_cast<unsigned>(day)}};
     if (!date.ok() || hour > 23 || minute > 59 || second > 59) {
-        trajectoryRefuse(line, "a calendar field is out of range", field);
+        return trajectoryRefuse(line, "a calendar field is out of range", field);
     }
 
     // 4-digit years reach 9999, and the axis reaches 2262-04-11. The product below overflows first. It is
@@ -298,7 +301,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
 
     const std::int64_t seconds = std::chrono::sys_days(date).time_since_epoch().count() * 86'400LL + hour * 3'600LL + minute * 60LL + second;
     if (seconds > kMaxSeconds || seconds < -kMaxSeconds) {
-        trajectoryRefuse(line, std::format("the instant is {} s from the epoch, outside the +/-{} s the signed 64-bit nanosecond axis holds", seconds, kMaxSeconds), field);
+        return trajectoryRefuse(line, std::format("the instant is {} s from the epoch, outside the +/-{} s the signed 64-bit nanosecond axis holds", seconds, kMaxSeconds), field);
     }
     return seconds * 1'000'000'000LL + fraction;
 }
@@ -311,10 +314,10 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
  * A pure function of its argument, with no global state and no locale dependence. It uses only
  * `std::from_chars` and `std::chrono`. `strtod` under a comma locale is the kind of defect this avoids.
  *
- * Throws `std::invalid_argument` with the line number in the message, as `FrequencySchedule` does. No partial
- * result escapes. The schedules are constructed after the whole file has parsed.
+ * A refused file is an error with the line number in its message. No partial result escapes. The schedules are
+ * constructed after the whole file has parsed.
  */
-[[nodiscard]] inline Trajectory loadTrajectory(std::string_view text) {
+[[nodiscard]] inline std::expected<Trajectory, gr::Error> loadTrajectory(std::string_view text) {
     using detail::TrajectoryQuantity;
     using detail::trajectoryRefuse;
 
@@ -322,22 +325,24 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     std::string_view        raw;
 
     if (!lines.next(raw)) {
-        trajectoryRefuse(1UZ, "the file is empty and carries no version line", "");
+        return trajectoryRefuse(1UZ, "the file is empty and carries no version line", "");
     }
-    detail::trajectoryCheckBytes(1UZ, raw);
+    if (const auto bytes = detail::trajectoryCheckBytes(1UZ, raw); !bytes) {
+        return std::unexpected(bytes.error());
+    }
     {
         constexpr std::string_view kMagic = "#!gr4-trajectory ";
         if (!raw.starts_with(kMagic)) {
-            trajectoryRefuse(1UZ, "the first line is not `#!gr4-trajectory <n>`", raw);
+            return trajectoryRefuse(1UZ, "the first line is not `#!gr4-trajectory <n>`", raw);
         }
         const std::string_view digits  = raw.substr(kMagic.size());
         int                    version = 0;
         const auto [end, ec]           = std::from_chars(digits.data(), digits.data() + digits.size(), version, 10);
         if (digits.empty() || ec != std::errc{} || end != digits.data() + digits.size()) {
-            trajectoryRefuse(1UZ, "the first line is not `#!gr4-trajectory <n>`", raw);
+            return trajectoryRefuse(1UZ, "the first line is not `#!gr4-trajectory <n>`", raw);
         }
         if (version != 1) {
-            trajectoryRefuse(1UZ, std::format("format version {} — this reader reads version 1", version), raw);
+            return trajectoryRefuse(1UZ, std::format("format version {} — this reader reads version 1", version), raw);
         }
     }
 
@@ -356,7 +361,9 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     bool             havePending = false;
 
     while (lines.next(raw)) {
-        detail::trajectoryCheckBytes(lines.number, raw);
+        if (const auto bytes = detail::trajectoryCheckBytes(lines.number, raw); !bytes) {
+            return std::unexpected(bytes.error());
+        }
 
         detail::TrajectoryFields fields{raw};
         std::string_view         key;
@@ -370,18 +377,21 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
             break;
         }
 
-        const auto once = [&](std::optional<std::size_t>& seen) {
+        const auto once = [&](std::optional<std::size_t>& seen) -> std::expected<void, gr::Error> {
             if (seen.has_value()) {
-                trajectoryRefuse(lines.number, std::format("header key `{}` was already given on line {}", key, *seen), raw);
+                return trajectoryRefuse(lines.number, std::format("header key `{}` was already given on line {}", key, *seen), raw);
             }
             seen = lines.number;
+            return {};
         };
 
         if (key == "columns") {
-            once(columnsLine);
+            if (const auto first = once(columnsLine); !first) {
+                return std::unexpected(first.error());
+            }
             std::string_view first;
             if (!fields.next(first) || first != "time") {
-                trajectoryRefuse(lines.number, "`columns` must begin with `time`", raw);
+                return trajectoryRefuse(lines.number, "`columns` must begin with `time`", raw);
             }
             std::string_view name;
             while (fields.next(name)) {
@@ -393,58 +403,68 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
                 } else if (name == "range_rate_m_s") {
                     quantity = TrajectoryQuantity::range_rate_m_s;
                 } else {
-                    trajectoryRefuse(lines.number, std::format("`columns` names the unknown quantity `{}`", name), raw);
+                    return trajectoryRefuse(lines.number, std::format("`columns` names the unknown quantity `{}`", name), raw);
                 }
                 if (std::ranges::find(quantities, quantity) != quantities.end()) {
-                    trajectoryRefuse(lines.number, std::format("`columns` names `{}` twice", name), raw);
+                    return trajectoryRefuse(lines.number, std::format("`columns` names `{}` twice", name), raw);
                 }
                 // The two are the same quantity through `offsetFor`. A file with both holds either a redundancy
                 // or a contradiction. No rule can pick the right one.
                 const bool clash = (quantity == TrajectoryQuantity::offset_hz && std::ranges::find(quantities, TrajectoryQuantity::range_rate_m_s) != quantities.end()) //
                                    || (quantity == TrajectoryQuantity::range_rate_m_s && std::ranges::find(quantities, TrajectoryQuantity::offset_hz) != quantities.end());
                 if (clash) {
-                    trajectoryRefuse(lines.number, "`columns` names both `offset_hz` and `range_rate_m_s`, which are one quantity in two units", raw);
+                    return trajectoryRefuse(lines.number, "`columns` names both `offset_hz` and `range_rate_m_s`, which are one quantity in two units", raw);
                 }
                 quantities.push_back(quantity);
             }
             if (quantities.empty()) {
-                trajectoryRefuse(lines.number, "`columns` names no quantity beyond `time`, so the table carries nothing", raw);
+                return trajectoryRefuse(lines.number, "`columns` names no quantity beyond `time`, so the table carries nothing", raw);
             }
         } else if (key == "time_scale") {
-            once(timeScaleLine);
+            if (const auto first = once(timeScaleLine); !first) {
+                return std::unexpected(first.error());
+            }
             std::string_view scale;
             if (!fields.next(scale) || (scale != "utc_iso8601" && scale != "unix_ns")) {
-                trajectoryRefuse(lines.number, "`time_scale` is `utc_iso8601` or `unix_ns`", raw);
+                return trajectoryRefuse(lines.number, "`time_scale` is `utc_iso8601` or `unix_ns`", raw);
             }
             isoTime = scale == "utc_iso8601";
         } else if (key == "carrier_hz") {
-            once(carrierLine);
+            if (const auto first = once(carrierLine); !first) {
+                return std::unexpected(first.error());
+            }
             std::string_view value;
             if (!fields.next(value)) {
-                trajectoryRefuse(lines.number, "`carrier_hz` carries no value", raw);
+                return trajectoryRefuse(lines.number, "`carrier_hz` carries no value", raw);
             }
-            carrierHz = detail::trajectoryValue(lines.number, value, "`carrier_hz`");
+            const auto carrier = detail::trajectoryValue(lines.number, value, "`carrier_hz`");
+            if (!carrier) {
+                return std::unexpected(carrier.error());
+            }
+            carrierHz = *carrier;
             if (!(carrierHz > 0.)) {
-                trajectoryRefuse(lines.number, std::format("`carrier_hz` is {}, and a carrier is positive", carrierHz), raw);
+                return trajectoryRefuse(lines.number, std::format("`carrier_hz` is {}, and a carrier is positive", carrierHz), raw);
             }
         } else if (key == "source") {
-            once(sourceLine);
+            if (const auto first = once(sourceLine); !first) {
+                return std::unexpected(first.error());
+            }
             source = std::string(fields.rest());
         } else {
-            trajectoryRefuse(lines.number, std::format("unknown header key `{}`", key), raw);
+            return trajectoryRefuse(lines.number, std::format("unknown header key `{}`", key), raw);
         }
     }
 
     const std::size_t firstKnotLine = havePending ? pendingLine : lines.number + 1UZ;
     if (!columnsLine.has_value()) {
-        trajectoryRefuse(firstKnotLine, "the header block ended without a `columns` key", "");
+        return trajectoryRefuse(firstKnotLine, "the header block ended without a `columns` key", "");
     }
     if (!timeScaleLine.has_value()) {
-        trajectoryRefuse(firstKnotLine, "the header block ended without a `time_scale` key", "");
+        return trajectoryRefuse(firstKnotLine, "the header block ended without a `time_scale` key", "");
     }
     const bool needsCarrier = std::ranges::find(quantities, TrajectoryQuantity::range_rate_m_s) != quantities.end();
     if (needsCarrier && !carrierLine.has_value()) {
-        trajectoryRefuse(firstKnotLine, "`columns` names `range_rate_m_s`, which needs a `carrier_hz` header to become a frequency", "");
+        return trajectoryRefuse(firstKnotLine, "`columns` names `range_rate_m_s`, which needs a `carrier_hz` header to become a frequency", "");
     }
 
     const std::size_t nFields = quantities.size() + 1UZ;
@@ -454,7 +474,7 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
     std::vector<double>       delays;
     std::size_t               previousLine = 0UZ;
 
-    const auto knot = [&](std::size_t number, std::string_view line) {
+    const auto knot = [&](std::size_t number, std::string_view line) -> std::expected<void, gr::Error> {
         detail::TrajectoryFields fields{line};
         std::string_view         field;
         std::size_t              count = 0UZ;
@@ -466,73 +486,89 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
             ++count;
         }
         if (count != nFields) {
-            trajectoryRefuse(number, std::format("{} fields against the {} `columns` declares", count, nFields), line);
+            return trajectoryRefuse(number, std::format("{} fields against the {} `columns` declares", count, nFields), line);
         }
 
-        const std::int64_t t_ns = isoTime ? detail::trajectoryIso8601Ns(number, seen[0]) : detail::trajectoryUnixNs(number, seen[0]);
+        const std::expected<std::int64_t, gr::Error> time = isoTime ? detail::trajectoryIso8601Ns(number, seen[0]) : detail::trajectoryUnixNs(number, seen[0]);
+        if (!time) {
+            return std::unexpected(time.error());
+        }
+        const std::int64_t t_ns = *time;
         if (!times.empty() && t_ns <= times.back()) {
-            trajectoryRefuse(number, std::format("the time {} ns is at or before line {}'s {} ns — times must strictly increase", t_ns, previousLine, times.back()), line);
+            return trajectoryRefuse(number, std::format("the time {} ns is at or before line {}'s {} ns — times must strictly increase", t_ns, previousLine, times.back()), line);
         }
         times.push_back(t_ns);
 
         for (std::size_t i = 0UZ; i < quantities.size(); ++i) {
-            const std::string_view name  = detail::trajectoryQuantityName(quantities[i]);
-            const double           value = detail::trajectoryValue(number, seen[i + 1UZ], std::format("`{}`", name));
+            const std::string_view name   = detail::trajectoryQuantityName(quantities[i]);
+            const auto             parsed = detail::trajectoryValue(number, seen[i + 1UZ], std::format("`{}`", name));
+            if (!parsed) {
+                return std::unexpected(parsed.error());
+            }
+            const double value = *parsed;
             switch (quantities[i]) {
             case TrajectoryQuantity::offset_hz: offsets.push_back(value); break;
             case TrajectoryQuantity::range_rate_m_s: offsets.push_back(offsetFor(value, carrierHz)); break;
             case TrajectoryQuantity::range_m:
                 if (value < 0.) {
-                    trajectoryRefuse(number, std::format("`range_m` is {}, and a slant range is not negative", value), line);
+                    return trajectoryRefuse(number, std::format("`range_m` is {}, and a slant range is not negative", value), line);
                 }
                 delays.push_back(delayFor(value));
                 break;
             }
         }
         previousLine = number;
+        return {};
     };
 
     if (havePending) {
-        knot(pendingLine, pendingKnot);
+        if (const auto first = knot(pendingLine, pendingKnot); !first) {
+            return std::unexpected(first.error());
+        }
     }
     while (lines.next(raw)) {
-        detail::trajectoryCheckBytes(lines.number, raw);
+        if (const auto bytes = detail::trajectoryCheckBytes(lines.number, raw); !bytes) {
+            return std::unexpected(bytes.error());
+        }
         detail::TrajectoryFields fields{raw};
         std::string_view         first;
         if (!fields.next(first) || first.front() == '#') {
             continue;
         }
-        knot(lines.number, raw);
+        if (const auto added = knot(lines.number, raw); !added) {
+            return std::unexpected(added.error());
+        }
     }
 
     if (times.size() < PiecewiseLinearSchedule::kMinKnots || times.size() > PiecewiseLinearSchedule::kMaxKnots) {
-        trajectoryRefuse(lines.number, std::format("{} knots — the table holds between {} and {}", times.size(), PiecewiseLinearSchedule::kMinKnots, PiecewiseLinearSchedule::kMaxKnots), "");
+        return trajectoryRefuse(lines.number, std::format("{} knots — the table holds between {} and {}", times.size(), PiecewiseLinearSchedule::kMinKnots, PiecewiseLinearSchedule::kMaxKnots), "");
     }
 
     Trajectory out;
     out.carrier_hz = carrierHz;
     out.source     = std::move(source);
-    if (!offsets.empty()) {
-        out.frequency.emplace(times, offsets);
-    }
-    if (!delays.empty()) {
-        out.delay.emplace(times, delays);
+    try {
+        // A converted value can still leave the schedule's domain, such as a range rate whose offset overflows.
+        if (!offsets.empty()) {
+            out.frequency.emplace(times, offsets);
+        }
+        if (!delays.empty()) {
+            out.delay.emplace(times, delays);
+        }
+    } catch (const gr::exception& refused) {
+        return std::unexpected(gr::Error(refused));
     }
     return out;
 }
 
 /// @brief The same, from a file. The message includes the path, and a failure names the file it tried to open.
-[[nodiscard]] inline Trajectory loadTrajectoryFile(const std::filesystem::path& path) {
+[[nodiscard]] inline std::expected<Trajectory, gr::Error> loadTrajectoryFile(const std::filesystem::path& path, std::source_location loc = std::source_location::current()) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
-        throw std::invalid_argument(std::format("gr::timing::loadTrajectoryFile: cannot read `{}`", path.string()));
+        return std::unexpected(gr::Error(std::format("gr::timing::loadTrajectoryFile: cannot read `{}`", path.string()), loc));
     }
     const std::string text{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-    try {
-        return loadTrajectory(text);
-    } catch (const std::invalid_argument& error) {
-        throw std::invalid_argument(std::format("gr::timing::loadTrajectoryFile: `{}`: {}", path.string(), error.what()));
-    }
+    return loadTrajectory(text).transform_error([&path, loc](const gr::Error& error) { return gr::Error(std::format("gr::timing::loadTrajectoryFile: `{}`: {}", path.string(), error.message), loc); });
 }
 
 /**
@@ -550,10 +586,11 @@ inline void trajectoryCheckBytes(std::size_t line, std::string_view raw) {
  * A consistent pair does not give zero. The size of the figure follows from the arithmetic. Take a
  * piecewise-linear table sampled every `h` seconds from a curve whose second derivative is bounded by `a`. Its
  * secant slope differs from the true derivative by at most `a*h/2`. A consistent pair stays within this bound.
+ * A carrier that is not positive and finite is an error.
  */
-[[nodiscard]] inline double worstRangeRateMismatch(const DelaySchedule& delay, const FrequencySchedule& frequency, double carrierHz) {
+[[nodiscard]] inline std::expected<double, gr::Error> worstRangeRateMismatch(const DelaySchedule& delay, const FrequencySchedule& frequency, double carrierHz, std::source_location loc = std::source_location::current()) {
     if (!(carrierHz > 0.) || !std::isfinite(carrierHz)) {
-        throw std::invalid_argument(std::format("gr::timing::worstRangeRateMismatch: carrier {} Hz — the carrier must be positive and finite", carrierHz));
+        return std::unexpected(gr::Error(std::format("gr::timing::worstRangeRateMismatch: carrier {} Hz — the carrier must be positive and finite", carrierHz), loc));
     }
 
     double worst = 0.;
