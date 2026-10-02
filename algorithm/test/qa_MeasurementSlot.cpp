@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <thread>
 
-#include <gnuradio-4.0/algorithm/MeasurementSlot.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementSlot.hpp>
 
 using namespace boost::ut;
 using gr::measurement::MeasurementSlot;

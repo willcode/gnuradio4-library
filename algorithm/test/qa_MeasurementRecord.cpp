@@ -6,7 +6,7 @@
 #include <span>
 #include <string>
 
-#include <gnuradio-4.0/algorithm/MeasurementRecord.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementRecord.hpp>
 
 using namespace boost::ut;
 using gr::measurement::makeScalarRecord;
