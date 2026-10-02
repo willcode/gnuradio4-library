@@ -9,6 +9,7 @@
 #include <format>
 #include <numbers>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -46,7 +47,7 @@ void benchPhaseUnwrap() {
         std::vector<float>              phase(kSamples);
 
         const auto name                                                    = std::format("CycleUnwrapper::process, N={}", kSamples);
-        ::benchmark::benchmark<kRepeats>(std::string_view(name), kSamples) = [&] { unwrapper.process(in, cycles, phase); };
+        ::benchmark::benchmark<kRepeats>(std::string_view(name), kSamples) = [&] { std::ignore = unwrapper.process(in, cycles, phase); };
 
         const auto bare                                                    = std::format("atan2 alone,             N={}", kSamples);
         ::benchmark::benchmark<kRepeats>(std::string_view(bare), kSamples) = [&] {

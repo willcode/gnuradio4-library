@@ -10,7 +10,6 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/measurement/PhaseUnwrap.hpp>
@@ -60,8 +59,8 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(unwrapOriginFrom("zero").value() == UnwrapOrigin::zero);
         expect(!unwrapOriginFrom("origin").has_value());
         expect(unwrapOriginName(UnwrapOrigin::zero) == "zero");
-        expect(throws<std::invalid_argument>([] { (void)CycleUnwrapper(UnwrapOrigin::zero, 0.); })) << "a max step fraction of zero is not in (0, 1]";
-        expect(throws<std::invalid_argument>([] { (void)CycleUnwrapper(UnwrapOrigin::zero, 1.5); }));
+        expect(throws<gr::exception>([] { (void)CycleUnwrapper(UnwrapOrigin::zero, 0.); })) << "a max step fraction of zero is not in (0, 1]";
+        expect(throws<gr::exception>([] { (void)CycleUnwrapper(UnwrapOrigin::zero, 1.5); }));
         expect(nothrow([] { (void)CycleUnwrapper(UnwrapOrigin::zero, 1.); })) << "and the bound itself is admitted";
     };
 
@@ -81,7 +80,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         for (std::size_t at = 0UZ; at < samples; at += kChunk) {
             const std::size_t          n  = std::min(kChunk, samples - at);
             const std::vector<Complex> in = tone(0.4, n, at);
-            unwrapper.process(in, std::span<std::int64_t>(cycles).first(n), std::span<float>(phase).first(n));
+            expect(unwrapper.process(in, std::span<std::int64_t>(cycles).first(n), std::span<float>(phase).first(n)).has_value());
             for (std::size_t k = 0UZ; k < n; ++k) {
                 if (at + k > 0UZ) {
                     const float delta = phase[k] - previous;
@@ -109,7 +108,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         CycleUnwrapper            forward;
         std::vector<std::int64_t> cycles(samples);
         std::vector<float>        phase(samples);
-        forward.process(tone(0.4, samples), cycles, phase);
+        expect(forward.process(tone(0.4, samples), cycles, phase).has_value());
         expect(forward.cycles() == kTurns) << "0.4 cycles per sample unwraps exactly";
         expect(forward.nSuspectSteps() == 0ULL);
 
@@ -118,14 +117,14 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         // Nyquist restated for phase. The aliased answer is the correct output of a correct algorithm on an input that
         // does not determine the question.
         CycleUnwrapper aliased;
-        aliased.process(tone(0.6, samples), cycles, phase);
+        expect(aliased.process(tone(0.6, samples), cycles, phase).has_value());
         expect(aliased.cycles() == -kTurns) << "0.6 cycles per sample reads the alias at -0.4, exactly";
         expect(aliased.nSuspectSteps() == 0ULL) << "and the step is 0.8*pi either way, so the observability hook does not fire -- it is a hook, not a detector";
 
         // A step that comes close to pi does fire it. At 0.47 cycles per sample the step is 0.94*pi, past
         // the default 0.9, while the unwrap is still exactly right.
         CycleUnwrapper close;
-        close.process(tone(0.47, 1'000UZ), cycles, phase);
+        expect(close.process(tone(0.47, 1'000UZ), cycles, phase).has_value());
         expect(close.nSuspectSteps() == 999ULL) << "every step but the first is flagged";
         expect(close.lastSuspectIndex().value() == 999ULL) << "and the last one names its own absolute index";
 
@@ -140,12 +139,12 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         std::vector<std::int64_t> cyclesA(kSamples);
         std::vector<float>        phaseA(kSamples);
         CycleUnwrapper            asIs(UnwrapOrigin::first_sample);
-        asIs.process(in, cyclesA, phaseA);
+        expect(asIs.process(in, cyclesA, phaseA).has_value());
 
         std::vector<std::int64_t> cyclesB(kSamples);
         std::vector<float>        phaseB(kSamples);
         CycleUnwrapper            zeroed(UnwrapOrigin::zero);
-        zeroed.process(in, cyclesB, phaseB);
+        expect(zeroed.process(in, cyclesB, phaseB).has_value());
 
         expect(phaseA[0] == std::atan2(in[0].imag(), in[0].real())) << "first_sample reports the first phase as it is";
         expect(phaseB[0] == 0.f) << "zero starts at exactly zero";
@@ -168,7 +167,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         std::vector<std::int64_t> cycles(kSamples);
         std::vector<float>        phase(kSamples);
 
-        unwrapper.process(tone(0.1, kSamples), cycles, phase);
+        expect(unwrapper.process(tone(0.1, kSamples), cycles, phase).has_value());
         const std::int64_t before = unwrapper.cycles();
         expect(before > 100LL) << "the count has run up";
         expect(unwrapper.nResets() == 0ULL);
@@ -178,14 +177,14 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         expect(unwrapper.nResets() == 1ULL) << "and the discontinuity is counted rather than hidden";
         expect(!unwrapper.started());
 
-        unwrapper.process(tone(0.1, kSamples, 5'000UZ), cycles, phase);
+        expect(unwrapper.process(tone(0.1, kSamples, 5'000UZ), cycles, phase).has_value());
         expect(unwrapper.cycles() == before) << "and the second stretch counts its own turns";
         expect(unwrapper.nResets() == 1ULL);
 
         // A caller that keeps the count through a gap does not call it. The count then runs on unchanged.
         CycleUnwrapper carried;
-        carried.process(tone(0.1, kSamples), cycles, phase);
-        carried.process(tone(0.1, kSamples, kSamples), cycles, phase);
+        expect(carried.process(tone(0.1, kSamples), cycles, phase).has_value());
+        expect(carried.process(tone(0.1, kSamples, kSamples), cycles, phase).has_value());
         expect(carried.cycles() == 2LL * before) << "an uninterrupted count keeps running";
         expect(carried.nResets() == 0ULL);
     };
@@ -197,7 +196,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         CycleUnwrapper            whole;
         std::vector<std::int64_t> cyclesRef(kSamples);
         std::vector<float>        phaseRef(kSamples);
-        whole.process(in, cyclesRef, phaseRef);
+        expect(whole.process(in, cyclesRef, phaseRef).has_value());
 
         for (const std::size_t chunk : {1UZ, 7UZ, 1'000UZ, 12'345UZ}) {
             CycleUnwrapper            pieced;
@@ -205,7 +204,7 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
             std::vector<float>        phase(kSamples);
             for (std::size_t at = 0UZ; at < kSamples; at += chunk) {
                 const std::size_t n = std::min(chunk, kSamples - at);
-                pieced.process(std::span<const Complex>(in).subspan(at, n), std::span<std::int64_t>(cycles).subspan(at, n), std::span<float>(phase).subspan(at, n));
+                expect(pieced.process(std::span<const Complex>(in).subspan(at, n), std::span<std::int64_t>(cycles).subspan(at, n), std::span<float>(phase).subspan(at, n)).has_value());
             }
             expect(that % std::ranges::equal(cycles, cyclesRef)) << std::format("chunk {} changed the count", chunk);
             expect(that % std::ranges::equal(phase, phaseRef)) << std::format("chunk {} changed the phase", chunk);
@@ -219,16 +218,18 @@ const boost::ut::suite<"PhaseUnwrap"> _phase_unwrap = [] {
         CycleUnwrapper            unwrapper;
         std::vector<std::int64_t> cycles(kSamples);
         std::vector<float>        phase(kSamples);
-        unwrapper.process(tone(0.1, kSamples), cycles, phase);
+        expect(unwrapper.process(tone(0.1, kSamples), cycles, phase).has_value());
 
         expect(unwrapper.cycles() == 10LL) << "0.1 cycles per sample over 100 steps is ten turns";
         expect(unwrapper.processed() == kSamples);
         expect(approx(unwrapper.unwrappedRadians(), kTwoPi * 10., 1e-5)) << "and the convenience reader sums the two parts for the current sample";
 
-        expect(throws<std::invalid_argument>([&] {
-            std::vector<std::int64_t> tooFew(3UZ);
-            unwrapper.process(tone(0.1, 4UZ), tooFew, phase);
-        })) << "one output short of the samples";
+        std::vector<std::int64_t> tooFew(3UZ);
+        const std::uint64_t       before  = unwrapper.processed();
+        const auto                refused = unwrapper.process(tone(0.1, 4UZ), tooFew, phase);
+        expect(fatal(!refused.has_value())) << "one output short of the samples";
+        expect(refused.error().message.contains("4 samples against 3 cycles")) << refused.error().message;
+        expect(eq(unwrapper.processed(), before)) << "a refused call processes nothing";
 
         unwrapper.reset();
         expect(unwrapper.cycles() == 0LL);

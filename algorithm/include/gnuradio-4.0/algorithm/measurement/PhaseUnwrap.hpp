@@ -5,13 +5,16 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <string_view>
+
+#include <gnuradio-4.0/Message.hpp>
 
 /**
  * @brief Instantaneous phase as an exact integer cycle count beside a fractional phase, not as a float sum.
@@ -77,7 +80,7 @@ public:
 
     explicit CycleUnwrapper(UnwrapOrigin origin, double maxStepFraction = 0.9) : _origin(origin), _maxStepFraction(maxStepFraction) {
         if (!(maxStepFraction > 0.) || !(maxStepFraction <= 1.)) {
-            throw std::invalid_argument(std::format("gr::measurement::CycleUnwrapper: max step fraction {} is not in (0, 1]", maxStepFraction));
+            throw gr::exception(std::format("gr::measurement::CycleUnwrapper: max step fraction {} is not in (0, 1]", maxStepFraction));
         }
     }
 
@@ -118,10 +121,12 @@ public:
      * @param in     the complex stream
      * @param cycles whole turns since the origin, exact
      * @param phase  the residual, in radians on `[-pi, pi)`
+     *
+     * An output span shorter than the input is an error, and nothing is processed then.
      */
-    void process(std::span<const std::complex<float>> in, std::span<std::int64_t> cycles, std::span<float> phase) {
+    [[nodiscard]] std::expected<void, gr::Error> process(std::span<const std::complex<float>> in, std::span<std::int64_t> cycles, std::span<float> phase, std::source_location loc = std::source_location::current()) {
         if (cycles.size() < in.size() || phase.size() < in.size()) {
-            throw std::invalid_argument(std::format("gr::measurement::CycleUnwrapper::process: {} samples against {} cycles and {} phases", in.size(), cycles.size(), phase.size()));
+            return std::unexpected(gr::Error(std::format("gr::measurement::CycleUnwrapper::process: {} samples against {} cycles and {} phases", in.size(), cycles.size(), phase.size()), loc));
         }
 
         const float suspect = static_cast<float>(_maxStepFraction) * kPi;
@@ -150,6 +155,7 @@ public:
             phase[k]  = _phase;
             ++_index;
         }
+        return {};
     }
 
     [[nodiscard]] std::int64_t cycles() const noexcept { return _cycles; }
