@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <numbers>
 #include <span>
+#include <tuple>
 
 #include <gnuradio-4.0/algorithm/signal/Phasor.hpp>
 
@@ -223,7 +224,7 @@ private:
         return phasor;
     }
 
-    void initPhasor() noexcept { _tone.configure(_radiansPerSample, static_cast<double>(_phase)); }
+    void initPhasor() noexcept { std::ignore = _tone.configure(_radiansPerSample, static_cast<double>(_phase)); } // both are finite: configure() above substitutes zero for an unusable step or phase
 
     constexpr void advanceState() noexcept { ++_sampleIndex; }
 

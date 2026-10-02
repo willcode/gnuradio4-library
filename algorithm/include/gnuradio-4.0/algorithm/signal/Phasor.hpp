@@ -7,9 +7,12 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <numbers>
+#include <source_location>
 #include <span>
-#include <stdexcept>
+
+#include <gnuradio-4.0/Message.hpp>
 
 namespace gr::signal {
 
@@ -82,31 +85,34 @@ struct Phasor {
 
     [[nodiscard]] static double wrapPhase(double phase) noexcept { return std::remainder(phase, 2. * std::numbers::pi_v<double>); }
 
-    void configure(double increment, double initialPhase) {
+    [[nodiscard]] std::expected<void, gr::Error> configure(double increment, double initialPhase, std::source_location loc = std::source_location::current()) {
         if (!std::isfinite(increment) || !std::isfinite(initialPhase)) {
-            throw std::invalid_argument("gr::signal::Phasor: increment and initial phase must both be finite");
+            return std::unexpected(gr::Error("gr::signal::Phasor: increment and initial phase must both be finite", loc));
         }
         _increment = increment;
         anchor(initialPhase);
+        return {};
     }
 
     /// The increment changes, the phase runs on: a frequency change advances the phase from where it stands
     /// rather than restarting it. The grid re-anchors on the current phase, so the new increment takes effect
     /// from the next sample.
-    void setIncrement(double increment) {
+    [[nodiscard]] std::expected<void, gr::Error> setIncrement(double increment, std::source_location loc = std::source_location::current()) {
         if (!std::isfinite(increment)) {
-            throw std::invalid_argument("gr::signal::Phasor: increment must be finite");
+            return std::unexpected(gr::Error("gr::signal::Phasor: increment must be finite", loc));
         }
         const double current = phase();
         _increment           = increment;
         anchor(current);
+        return {};
     }
 
-    void setPhase(double newPhase) {
+    [[nodiscard]] std::expected<void, gr::Error> setPhase(double newPhase, std::source_location loc = std::source_location::current()) {
         if (!std::isfinite(newPhase)) {
-            throw std::invalid_argument("gr::signal::Phasor: phase must be finite");
+            return std::unexpected(gr::Error("gr::signal::Phasor: phase must be finite", loc));
         }
         anchor(newPhase);
+        return {};
     }
 
     [[nodiscard]] double phase() const noexcept { return wrapPhase(_seedPhase + static_cast<double>(_position) * _increment); }

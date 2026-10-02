@@ -297,7 +297,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         std::vector<std::complex<float>>       out(kSamples);
 
         Phasor<float> phasor;
-        phasor.configure(0., 0.);
+        expect(fatal(phasor.configure(0., 0.).has_value()));
         phasor.mixModulated(std::span<const double>(increments), in, out);
 
         const double       carrierAngle = std::atan2(static_cast<double>(carrier.imag()), static_cast<double>(carrier.real()));
@@ -322,7 +322,7 @@ const boost::ut::suite<"FrequencySchedule"> frequencyScheduleTests = [] {
         std::vector<double>              flat(kSamples, kTwoPi * 5'000. / 48'000.);
         std::vector<std::complex<float>> flatOut(kSamples);
         Phasor<float>                    other;
-        other.configure(0., 0.);
+        expect(fatal(other.configure(0., 0.).has_value()));
         other.mixModulated(std::span<const double>(flat), in, flatOut);
         expect(that % !std::ranges::equal(flatOut, out)) << "a constant offset is not this schedule";
     };

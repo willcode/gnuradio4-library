@@ -33,7 +33,7 @@ struct WindowError {
 template<std::floating_point F>
 [[nodiscard]] WindowError fillError(double increment, std::size_t nSamples, std::size_t window, std::size_t stride) {
     gr::signal::Phasor<F> phasor;
-    phasor.configure(increment, 0.);
+    boost::ut::expect(boost::ut::fatal(phasor.configure(increment, 0.).has_value()));
 
     std::vector<std::complex<F>> buffer(window);
     WindowError                  error;
@@ -164,7 +164,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
         const auto want       = modulatedOracle<F>(std::span<const float>(increments), 0.4);
 
         Phasor<F> phasor;
-        phasor.configure(0., 0.4);
+        expect(fatal(phasor.configure(0., 0.4).has_value()));
         std::vector<std::complex<F>> have(increments.size());
         phasor.fillModulated(std::span<const float>(increments), std::span<std::complex<F>>(have));
 
@@ -186,7 +186,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
         }
 
         Phasor<F> phasor;
-        phasor.configure(0., -1.1);
+        expect(fatal(phasor.configure(0., -1.1).has_value()));
         std::vector<std::complex<F>> have(in.size());
         phasor.mixModulated(std::span<const float>(increments), std::span<const std::complex<F>>(in), std::span<std::complex<F>>(have));
 
@@ -208,7 +208,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
 
         const auto generateInChunks = [&](std::size_t chunk, bool doMix) {
             Phasor<F> phasor;
-            phasor.configure(increment, 0.25);
+            expect(fatal(phasor.configure(increment, 0.25).has_value()));
             std::vector<std::complex<F>> out(nSamples);
             for (std::size_t i = 0UZ; i < nSamples; i += chunk) {
                 const std::size_t n = std::min(chunk, nSamples - i);
@@ -239,7 +239,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
 
         const auto generateInChunks = [&](std::size_t chunk) {
             Phasor<F> phasor;
-            phasor.configure(0., 0.4);
+            expect(fatal(phasor.configure(0., 0.4).has_value()));
             std::vector<std::complex<F>> out(increments.size());
             for (std::size_t i = 0UZ; i < increments.size(); i += chunk) {
                 const std::size_t n = std::min(chunk, increments.size() - i);
@@ -273,13 +273,13 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
         }
 
         Phasor<F> modulated;
-        modulated.configure(0., 0.);
+        expect(fatal(modulated.configure(0., 0.).has_value()));
         std::vector<std::complex<F>> viaModulate(kSamples);
         modulated.fillModulated(std::span<const float>(increments), std::span<std::complex<F>>(viaModulate));
 
         const auto chirpInChunks = [&](std::size_t chunk) {
             Phasor<F> phasor;
-            phasor.configure(kStart, 0.);
+            expect(fatal(phasor.configure(kStart, 0.).has_value()));
             std::vector<std::complex<F>> out(kSamples);
             for (std::size_t i = 0UZ; i < kSamples; i += chunk) {
                 const std::size_t n = std::min(chunk, kSamples - i);
@@ -316,12 +316,12 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
         std::vector<std::complex<F>> in(nSamples, std::complex<F>(F(0.75), F(-0.25)));
 
         Phasor<F> generator;
-        generator.configure(increment, 1.0);
+        expect(fatal(generator.configure(increment, 1.0).has_value()));
         std::vector<std::complex<F>> phases(nSamples);
         generator.fill(std::span<std::complex<F>>(phases));
 
         Phasor<F> mixer;
-        mixer.configure(increment, 1.0);
+        expect(fatal(mixer.configure(increment, 1.0).has_value()));
         std::vector<std::complex<F>> mixed(nSamples);
         mixer.mix(std::span<const std::complex<F>>(in), std::span<std::complex<F>>(mixed));
 
@@ -334,7 +334,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
 
     "advance moves the phase by whole increments and is reversible"_test = [] {
         Phasor<double> phasor;
-        phasor.configure(0.37, 0.1);
+        expect(fatal(phasor.configure(0.37, 0.1).has_value()));
 
         phasor.advance(1);
         expect(approx(phasor.phase(), 0.47, 1e-12));
@@ -348,7 +348,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
     "a generated span leaves the phase where the next sample continues"_test = [] {
         constexpr double increment = 0.37;
         Phasor<double>   phasor;
-        phasor.configure(increment, 0.);
+        expect(fatal(phasor.configure(increment, 0.).has_value()));
 
         std::vector<std::complex<double>> first(100UZ);
         phasor.fill(std::span<std::complex<double>>(first));
@@ -362,9 +362,18 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
 
     "configure refuses non-finite values"_test = [] {
         Phasor<float> phasor;
-        expect(throws([&] { phasor.configure(std::numeric_limits<double>::quiet_NaN(), 0.); }));
-        expect(throws([&] { phasor.configure(0.1, std::numeric_limits<double>::infinity()); }));
-        expect(nothrow([&] { phasor.configure(0.1, 0.2); }));
+        const auto    refused = phasor.configure(std::numeric_limits<double>::quiet_NaN(), 0.);
+        expect(fatal(!refused.has_value()));
+        expect(refused.error().message.contains("must both be finite")) << refused.error().message;
+        expect(!phasor.configure(0.1, std::numeric_limits<double>::infinity()).has_value());
+        expect(phasor.configure(0.1, 0.2).has_value());
+        const auto badIncrement = phasor.setIncrement(std::numeric_limits<double>::infinity());
+        expect(fatal(!badIncrement.has_value()));
+        expect(badIncrement.error().message.contains("increment must be finite")) << badIncrement.error().message;
+        const auto badPhase = phasor.setPhase(std::numeric_limits<double>::quiet_NaN());
+        expect(fatal(!badPhase.has_value()));
+        expect(badPhase.error().message.contains("phase must be finite")) << badPhase.error().message;
+        expect(approx(phasor.phase(), 0.2, 1e-12)) << "a refused setter leaves the phase where it stands";
     };
 
     "spectral honesty: the worst spur stays below the stated floor"_test = [] {
@@ -373,7 +382,7 @@ const boost::ut::suite<"Phasor"> phasorTests = [] {
         const double increment = kTwoPi * 1000.37 / static_cast<double>(nSamples);
 
         gr::signal::Phasor<float> phasor;
-        phasor.configure(increment, 0.);
+        expect(fatal(phasor.configure(increment, 0.).has_value()));
         std::vector<std::complex<float>> tone(nSamples);
         phasor.fill(std::span<std::complex<float>>(tone));
 

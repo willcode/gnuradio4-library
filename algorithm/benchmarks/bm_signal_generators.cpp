@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <format>
 #include <random>
+#include <tuple>
 #include <vector>
 
 template<std::floating_point F, std::size_t NRep = 500UZ>
@@ -265,13 +266,13 @@ void benchPhasor(std::string_view typeName) {
 
         {
             gr::signal::Phasor<F> phasor;
-            phasor.configure(0.2718281828459045, 0.);
+            std::ignore                                               = phasor.configure(0.2718281828459045, 0.);
             const auto bmName                                         = std::format("{:14} - {:6},N={:5}", "phasor fill", typeName, N);
             ::benchmark::benchmark<NRep>(std::string_view(bmName), N) = [&] { phasor.fill(out); };
         }
         {
             gr::signal::Phasor<F> phasor;
-            phasor.configure(0.2718281828459045, 0.);
+            std::ignore                                               = phasor.configure(0.2718281828459045, 0.);
             const auto bmName                                         = std::format("{:14} - {:6},N={:5}", "phasor mix", typeName, N);
             ::benchmark::benchmark<NRep>(std::string_view(bmName), N) = [&] { phasor.mix(in, out); };
         }
@@ -279,7 +280,7 @@ void benchPhasor(std::string_view typeName) {
             // scalar by construction: the per-sample increments break the lane recurrence, so this path pays a
             // sin/cos per sample where the fixed-increment ones pay one per re-seed interval
             gr::signal::Phasor<F> phasor;
-            phasor.configure(0., 0.);
+            std::ignore                                               = phasor.configure(0., 0.);
             const auto bmName                                         = std::format("{:14} - {:6},N={:5}", "phasor fillMod", typeName, N);
             ::benchmark::benchmark<NRep>(std::string_view(bmName), N) = [&] { phasor.fillModulated(std::span<const F>(increments), std::span<std::complex<F>>(out)); };
         }
