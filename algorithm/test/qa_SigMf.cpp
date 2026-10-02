@@ -414,6 +414,12 @@ const suite<"SigMF JSON layer"> _json = [] {
         const auto        again  = json::parse(extras);
         expect(again.has_value());
         expect(*again == parsed->global.extra) << "a carriage document read back by the same parser is exact";
+
+        for (const auto key : sigmf::kGlobalKnownKeys) {
+            expect(!parsed->global.extra.contains(key)) << std::format("{} is read into a field and never carried", key);
+        }
+        expect(std::ranges::equal(sigmf::kCaptureKnownKeys, sigmf::detail::kCaptureKnownKeys));
+        expect(std::ranges::equal(sigmf::kAnnotationKnownKeys, sigmf::detail::kAnnotationKnownKeys));
     };
 };
 

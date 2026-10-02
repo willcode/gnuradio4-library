@@ -233,6 +233,11 @@ struct CivilDate {
 
 } // namespace detail
 
+/// @brief The `core` keys `parse` reads into named fields of a global, a capture and an annotation. Every other member is carried in `extra`.
+using detail::kAnnotationKnownKeys;
+using detail::kCaptureKnownKeys;
+using detail::kGlobalKnownKeys;
+
 /**
  * @brief Read an RFC 3339 UTC timestamp with a mandatory `Z` and any number of fractional digits.
  *
