@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <expected>
 #include <numbers>
 #include <random>
+#include <source_location>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -31,13 +33,13 @@ constexpr auto initialize = [](TValue value, TValue uncertainty = {}) -> T {
 
 template<typename T, std::ranges::range RangeValues, std::ranges::range RangeUnc = std::span<const gr::meta::fundamental_base_value_type_t<T>>, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 requires std::convertible_to<std::ranges::range_value_t<RangeValues>, TValue> && std::convertible_to<std::ranges::range_value_t<RangeUnc>, TValue>
-[[nodiscard]] constexpr gr::DataSet<T> from(std::string name, RangeValues&& valuesRange, RangeUnc&& uncertaintiesRange = {}, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<gr::DataSet<T>, gr::Error> from(std::string name, RangeValues&& valuesRange, RangeUnc&& uncertaintiesRange = {}, std::source_location location = std::source_location::current()) {
     // N.B. nomen est open, consider namespace as part of calling function 'gr::dataset::generate::from(...)'
     auto values        = std::span{std::ranges::data(valuesRange), std::ranges::size(valuesRange)};
     auto uncertainties = std::span{std::ranges::data(uncertaintiesRange), std::ranges::size(uncertaintiesRange)};
 
     if (values.empty()) {
-        throw gr::exception("value span must not be empty", location);
+        return std::unexpected(gr::Error("value span must not be empty", location));
     }
     const auto     count = values.size();
     gr::DataSet<T> ds;
@@ -131,12 +133,12 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>, std::convertible_to<TValue> U>
-[[nodiscard]] constexpr gr::DataSet<T> gaussFunction(std::string name, std::size_t count, U mean = TValue(0), U sigma = U(3), U offset = U(0), U amplitude = U(1)) {
+[[nodiscard]] constexpr std::expected<gr::DataSet<T>, gr::Error> gaussFunction(std::string name, std::size_t count, U mean = TValue(0), U sigma = U(3), U offset = U(0), U amplitude = U(1), std::source_location location = std::source_location::current()) {
     if (count <= 2) {
-        throw std::invalid_argument("Count must be greater than 2");
+        return std::unexpected(gr::Error("Count must be greater than 2", location));
     }
     if (sigma <= 0) {
-        throw std::invalid_argument("Sigma must be positive");
+        return std::unexpected(gr::Error("Sigma must be positive", location));
     }
 
     gr::DataSet<T> ds;
@@ -167,9 +169,9 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] gr::DataSet<T> stepFunction(std::string name, std::size_t count, std::uint64_t stepAt = 0U) {
+[[nodiscard]] std::expected<gr::DataSet<T>, gr::Error> stepFunction(std::string name, std::size_t count, std::uint64_t stepAt = 0U, std::source_location location = std::source_location::current()) {
     if (count == 0UZ) {
-        throw std::invalid_argument("Count must be greater than 0");
+        return std::unexpected(gr::Error("Count must be greater than 0", location));
     }
     if (stepAt == 0UZ) {
         stepAt = count / 2;
@@ -200,9 +202,9 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] gr::DataSet<T> randomStepFunction(std::string name, std::size_t count, std::uint64_t seed = 0U) {
+[[nodiscard]] std::expected<gr::DataSet<T>, gr::Error> randomStepFunction(std::string name, std::size_t count, std::uint64_t seed = 0U, std::source_location location = std::source_location::current()) {
     if (count == 0) {
-        throw std::invalid_argument("Count must be greater than 0");
+        return std::unexpected(gr::Error("Count must be greater than 0", location));
     }
 
     gr::DataSet<T> ds;

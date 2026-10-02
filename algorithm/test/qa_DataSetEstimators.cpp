@@ -29,7 +29,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
     constexpr static std::size_t nSamples = 201UZ;
 
     "triangular DataSet"_test = []<typename T = double> {
-        gr::DataSet<T> ds = generate::from<T>("generic DataSet", std::vector{0, 1, 1, 2, 3, 5, 8, 13});
+        gr::DataSet<T> ds = generate::from<T>("generic DataSet", std::vector{0, 1, 1, 2, 3, 5, 8, 13}).value();
         gr::dataset::draw(ds);
     };
 
@@ -63,7 +63,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         constexpr T sigma         = T(nSamples) / T(10);
         const T     normalisation = sigma * gr::math::sqrt(T(2) * std::numbers::pi_v<T>);
 
-        gr::DataSet<T>                 ds      = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
+        gr::DataSet<T>                 ds      = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation).value();
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
@@ -76,7 +76,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         const T     normalisation = sigma * gr::math::sqrt(T(2) * std::numbers::pi_v<T>);
 
         gr::DataSet<T> ds1 = generate::ramp<T>("ramp", nSamples, value_t(0), value_t(0.2));
-        gr::DataSet<T> ds2 = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
+        gr::DataSet<T> ds2 = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation).value();
         gr::DataSet<T> ds  = addFunction(ds1, ds2);
 
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
@@ -85,7 +85,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
     };
 
     "randomStepFunction DataSet"_test = []<typename T = double> {
-        gr::DataSet<T>                 ds      = generate::randomStepFunction<T>("randomStepFunction", nSamples);
+        gr::DataSet<T>                 ds      = generate::randomStepFunction<T>("randomStepFunction", nSamples).value();
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
@@ -261,7 +261,7 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
     // apart, its minimum sitting at both ends.
     "the minimum is reported where the minimum is"_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
-        auto ds       = generate::from<T>("interior minimum", std::vector<value_t>{5, 2, -3, 4, 1});
+        auto ds       = generate::from<T>("interior minimum", std::vector<value_t>{5, 2, -3, 4, 1}).value();
 
         const auto minimum = estimators::getMinimum(ds).value();
         expect(eq(minimum.value().index, 2UZ));
@@ -274,7 +274,7 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
         expect(eq(estimators::getMinimum(ds, 3UZ, 5UZ).value().value().index, 4UZ)) << "a range that excludes the minimum reports the range's own";
         expect(eq(gr::value(estimators::getMinimum(ds, 3UZ, 5UZ).value().value().value), value_t(1)));
 
-        auto withGaps = generate::from<T>("infinite tail", std::vector<value_t>{4, -2, 3, std::numeric_limits<value_t>::quiet_NaN(), std::numeric_limits<value_t>::infinity()});
+        auto withGaps = generate::from<T>("infinite tail", std::vector<value_t>{4, -2, 3, std::numeric_limits<value_t>::quiet_NaN(), std::numeric_limits<value_t>::infinity()}).value();
         expect(eq(estimators::getMinimum(withGaps).value().value().index, 1UZ)) << "the last finite sample is not the minimum";
         expect(eq(gr::value(estimators::getMinimum(withGaps).value().value().value), value_t(-2)));
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
@@ -299,28 +299,28 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
         static_assert(std::is_same_v<estimators::PromotedAccumulator<float>, float>);
         static_assert(std::is_same_v<estimators::PromotedAccumulator<gr::UncertainValue<float>>, gr::UncertainValue<float>>);
 
-        const gr::DataSet<int> odd = generate::from<int>("int odd", std::vector<int>{1, 5, 2});
+        const gr::DataSet<int> odd = generate::from<int>("int odd", std::vector<int>{1, 5, 2}).value();
         expect(eq(estimators::getMedian(odd).value(), 2)) << std::format("median of an odd count: {}", estimators::getMedian(odd).value());
 
-        const gr::DataSet<int> even = generate::from<int>("int even", std::vector<int>{1, 2, 4, 10});
+        const gr::DataSet<int> even = generate::from<int>("int even", std::vector<int>{1, 2, 4, 10}).value();
         expect(eq(estimators::getMedian(even).value(), 3)) << std::format("median of an even count: {}", estimators::getMedian(even).value());
 
-        const gr::DataSet<int> half = generate::from<int>("int half", std::vector<int>{1, 2, 3, 4});
+        const gr::DataSet<int> half = generate::from<int>("int half", std::vector<int>{1, 2, 3, 4}).value();
         expect(eq(estimators::getMedian(half).value(), 3)) << "a median of 2.5 takes the nearest sample value, away from zero";
 
-        const gr::DataSet<int> negative = generate::from<int>("int negative", std::vector<int>{-4, -3, -2, -1});
+        const gr::DataSet<int> negative = generate::from<int>("int negative", std::vector<int>{-4, -3, -2, -1}).value();
         expect(eq(estimators::getMedian(negative).value(), -3)) << "a median of -2.5 takes the nearest sample value, away from zero";
 
-        const gr::DataSet<unsigned> unsignedEven = generate::from<unsigned>("unsigned even", std::vector<unsigned>{10U, 20U, 30U, 40U});
+        const gr::DataSet<unsigned> unsignedEven = generate::from<unsigned>("unsigned even", std::vector<unsigned>{10U, 20U, 30U, 40U}).value();
         expect(eq(estimators::getMedian(unsignedEven).value(), 25U)) << std::format("median of an unsigned even count: {}", estimators::getMedian(unsignedEven).value());
 
-        const gr::DataSet<int> ramp = generate::from<int>("int ramp", std::vector<int>{0, 2, 4, 6});
+        const gr::DataSet<int> ramp = generate::from<int>("int ramp", std::vector<int>{0, 2, 4, 6}).value();
         expect(eq(estimators::getIntegral(ramp).value(), 9)) << std::format("trapezoids of 1, 3 and 5 over a unit index axis: {}", estimators::getIntegral(ramp).value());
 
-        const gr::DataSet<int> halfRamp = generate::from<int>("int half ramp", std::vector<int>{0, 1, 2, 3});
+        const gr::DataSet<int> halfRamp = generate::from<int>("int half ramp", std::vector<int>{0, 1, 2, 3}).value();
         expect(eq(estimators::getIntegral(halfRamp).value(), 5)) << "an integral of 4.5 takes the nearest sample value, away from zero";
 
-        const gr::DataSet<unsigned> unsignedRamp = generate::from<unsigned>("unsigned ramp", std::vector<unsigned>{1U, 2U, 3U});
+        const gr::DataSet<unsigned> unsignedRamp = generate::from<unsigned>("unsigned ramp", std::vector<unsigned>{1U, 2U, 3U}).value();
         expect(eq(estimators::getIntegral(unsignedRamp).value(), 4U)) << std::format("trapezoids of 1.5 and 2.5 over a unit index axis: {}", estimators::getIntegral(unsignedRamp).value());
     };
 
@@ -335,7 +335,7 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
         for (std::size_t i = 0UZ; i < nPoints; ++i) {
             values[i] = static_cast<float>(offset + amplitude * std::sin(2. * std::numbers::pi * 8. * static_cast<double>(i) / static_cast<double>(nPoints)));
         }
-        const gr::DataSet<float> ds = generate::from<float>("offset sine", values);
+        const gr::DataSet<float> ds = generate::from<float>("offset sine", values).value();
 
         expect(approx(estimators::getMean(ds).value(), static_cast<float>(offset), 1.e-2f)) << std::format("mean: {}", estimators::getMean(ds).value());
         expect(approx(estimators::getStdDev(ds).value(), expected, 0.01f * expected)) << std::format("standard deviation: {}", estimators::getStdDev(ds).value());
@@ -344,11 +344,11 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
 
     // an integral sample type is accumulated above itself, so neither the running division nor a descending unsigned update loses the answer
     "mean and standard deviation of an integral sample type"_test = [] {
-        const gr::DataSet<int> ascending = generate::from<int>("int ascending", std::vector<int>{1, 2, 3});
+        const gr::DataSet<int> ascending = generate::from<int>("int ascending", std::vector<int>{1, 2, 3}).value();
         expect(eq(estimators::getMean(ascending).value(), 2)) << std::format("mean: {}", estimators::getMean(ascending).value());
         expect(eq(estimators::getStdDev(ascending).value(), 0)) << std::format("standard deviation: {}", estimators::getStdDev(ascending).value());
 
-        const gr::DataSet<unsigned> descending = generate::from<unsigned>("unsigned descending", std::vector<unsigned>{30U, 20U, 10U});
+        const gr::DataSet<unsigned> descending = generate::from<unsigned>("unsigned descending", std::vector<unsigned>{30U, 20U, 10U}).value();
         expect(eq(estimators::getMean(descending).value(), 20U)) << std::format("mean: {}", estimators::getMean(descending).value());
         expect(eq(estimators::getStdDev(descending).value(), 8U)) << std::format("standard deviation: {}", estimators::getStdDev(descending).value());
     };
@@ -521,7 +521,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         };
 
         "step"_test = [] {
-            auto ds_step         = generate::randomStepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
+            auto ds_step         = generate::randomStepFunction<T>("step", 6, 3).value(); // [0, 0, 0, 1, 1, 1]
             auto derivative_step = computeDerivative(ds_step).value();
 
             std::vector<T> expected_step = {0.0, 0.0, 1.0, 0.0, 0.0};
@@ -534,7 +534,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
 
     "filter DataSet"_test = []<typename T = double> {
         using value_t             = gr::meta::fundamental_base_value_type_t<T>;
-        auto ds_step              = generate::stepFunction<T>("step", 200, 25);
+        auto ds_step              = generate::stepFunction<T>("step", 200, 25).value();
         auto responseCoefficients = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5)).value();
         auto filtered             = gr::dataset::filter::applyFilter(ds_step, responseCoefficients);
         if constexpr (std::is_same_v<T, float>) {
@@ -546,7 +546,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
     "detectStepStart"_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
         // Create a step signal with a clear step at index 3
-        auto ds_step         = generate::stepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        auto ds_step         = generate::stepFunction<T>("step", 6, 3).value(); // [0, 0, 0, 1, 1, 1]
         auto detectionResult = estimators::detectStepStart(ds_step).value();
 
         expect(detectionResult.has_value()) << "step should be detected.";
@@ -559,8 +559,8 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
             expect(result.isRising) << "step should be rising.";
         }
 
-        auto ds_noisy_step = generate::randomStepFunction<T>("noisy_step", 6, 3); // [0, 0, 0, 1, 1, 1]
-        ds_noisy_step.signal_values[3] += value_t(0.1);                           // slight overshoot
+        auto ds_noisy_step = generate::randomStepFunction<T>("noisy_step", 6, 3).value(); // [0, 0, 0, 1, 1, 1]
+        ds_noisy_step.signal_values[3] += value_t(0.1);                                   // slight overshoot
 
         auto detectionNoisyStep = estimators::detectStepStart(ds_noisy_step).value();
         expect(detectionNoisyStep.has_value()) << "noisy step should still be detected.";
@@ -573,7 +573,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
             expect(result.isRising) << "step should be rising.";
         }
 
-        auto ds_falling_step = generate::randomStepFunction<T>("falling_step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        auto ds_falling_step = generate::randomStepFunction<T>("falling_step", 6, 3).value(); // [0, 0, 0, 1, 1, 1]
         for (auto& val : ds_falling_step.signal_values) {
             val = value_t(1.0) - val;
         }
@@ -592,7 +592,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
     "analyzeStepPulseResponse - Step"_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
         auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5)).value();
-        auto ds_step  = gr::dataset::filter::applyFilter(generate::stepFunction<T>("step", 100, 20), response);
+        auto ds_step  = gr::dataset::filter::applyFilter(generate::stepFunction<T>("step", 100, 20).value(), response);
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step).value();
 
         if constexpr (std::is_same_v<T, float>) {
@@ -618,7 +618,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
     "analyzeStepPulseResponse - Pulse"_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
 
-        auto ds_pulse_proto = generate::stepFunction<T>("pulse", 100, 20);
+        auto ds_pulse_proto = generate::stepFunction<T>("pulse", 100, 20).value();
         for (std::size_t i = 50; i < 70; ++i) {
             ds_pulse_proto.signal_values[i] = value_t(1.0) - value_t(0.01) * value_t(i - 50); // gradual decrease at end-of-flat top
         }
@@ -650,18 +650,36 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         };
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 
+    "generator refusals"_test = []<typename T = double> {
+        const auto empty = generate::from<T>("empty", std::vector<T>{});
+        expect(fatal(!empty.has_value()));
+        expect(empty.error().message.contains("must not be empty")) << empty.error().message;
+        const auto fewPoints = generate::gaussFunction<T>("gauss", 2UZ, T(0));
+        expect(fatal(!fewPoints.has_value()));
+        expect(fewPoints.error().message.contains("greater than 2")) << fewPoints.error().message;
+        const auto flatGauss = generate::gaussFunction<T>("gauss", 8UZ, T(0), T(0));
+        expect(fatal(!flatGauss.has_value()));
+        expect(flatGauss.error().message.contains("Sigma must be positive")) << flatGauss.error().message;
+        const auto noStep = generate::stepFunction<T>("step", 0UZ);
+        expect(fatal(!noStep.has_value()));
+        expect(noStep.error().message.contains("greater than 0")) << noStep.error().message;
+        const auto noRandomStep = generate::randomStepFunction<T>("step", 0UZ);
+        expect(fatal(!noRandomStep.has_value()));
+        expect(noRandomStep.error().message.contains("greater than 0")) << noRandomStep.error().message;
+    };
+
     "step analysis refusals"_test = []<typename T = double> {
-        auto       single   = generate::stepFunction<T>("single", 1UZ);
+        auto       single   = generate::stepFunction<T>("single", 1UZ).value();
         const auto tooShort = estimators::analyzeStepPulseResponse(single);
         expect(fatal(!tooShort.has_value()));
         expect(tooShort.error().message.contains("Not enough data points")) << tooShort.error().message;
 
-        auto       flat   = generate::stepFunction<T>("flat", 8UZ, 20U); // the step lies past the end, so every sample is zero
+        auto       flat   = generate::stepFunction<T>("flat", 8UZ, 20U).value(); // the step lies past the end, so every sample is zero
         const auto noStep = estimators::analyzeStepPulseResponse(flat);
         expect(fatal(!noStep.has_value()));
         expect(noStep.error().message.contains("no step detected")) << noStep.error().message;
 
-        auto inconsistent = generate::stepFunction<T>("inconsistent", 8UZ);
+        auto inconsistent = generate::stepFunction<T>("inconsistent", 8UZ).value();
         inconsistent.signal_values.pop_back();
         const auto invalid = estimators::detectStepStart(inconsistent);
         expect(fatal(!invalid.has_value()));
@@ -673,7 +691,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         constexpr value_t noiseLevel = value_t(0.05);
 
         auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, {.order = 1UZ, .fLow = 0.05, .fs = 1.0}).value();
-        auto val      = gr::dataset::filter::applyFilter<ProcessMode::InPlace>(generate::stepFunction<T>("damped step", 100, 20), response);
+        auto val      = gr::dataset::filter::applyFilter<ProcessMode::InPlace>(generate::stepFunction<T>("damped step", 100, 20).value(), response);
         auto ds_step  = gr::dataset::addNoise<ProcessMode::InPlace>(val, noiseLevel, 0UZ, 42U).value();
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step).value();
 
@@ -735,11 +753,11 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
     "applyMedian"_test = []<typename T>() {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
 
-        auto ds1 = filter::applyMedian<ProcessMode::Copy>(generate::from<T>("median_test", std::vector<value_t>{1, 5, 3, 2, 0, 8}), 3UZ).value();
+        auto ds1 = filter::applyMedian<ProcessMode::Copy>(generate::from<T>("median_test", std::vector<value_t>{1, 5, 3, 2, 0, 8}).value(), 3UZ).value();
         expect(eq(ds1.signal_values[1], T(3))); // median of {1,5,3} is 3
         expect(eq(ds1.signal_values[2], T(3))); // median of {5,3,2} is 3
 
-        auto ds2 = filter::applyMedian<ProcessMode::InPlace>(generate::from<T>("median_test", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}), 3UZ).value();
+        auto ds2 = filter::applyMedian<ProcessMode::InPlace>(generate::from<T>("median_test", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}).value(), 3UZ).value();
         for (std::size_t i = 0UZ; i < ds2.signal_values.size(); ++i) {
             expect(eq(ds2.signal_values[i], T(3))) << "filter outlier around 3";
         }
@@ -747,14 +765,14 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
 
     "applyRms"_test = []<typename T>() {
         using value_t            = gr::meta::fundamental_base_value_type_t<T>;
-        auto           ds        = generate::from<T>("rms_test", std::vector<value_t>{0, 10, 10, 10, 0});
+        auto           ds        = generate::from<T>("rms_test", std::vector<value_t>{0, 10, 10, 10, 0}).value();
         gr::DataSet<T> ds_median = filter::applyRms<ProcessMode::Copy>(ds, 3UZ).value();
         expect(eq(ds_median.signal_values[2], T(0))) << "RMS with identical points => 0 stdev (around mean).";
         expect(eq(ds_median.signal_values[2], estimators::getRms(ds, 1UZ, 3UZ).value())) << "RMS with identical points => 0 stdev (around mean).";
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 
     "applyPeakToPeak"_test = []<typename T>() {
-        auto ds = filter::applyPeakToPeak(generate::from<T>("p2p_test", std::vector<T>{1, 2, 3, 5, 5, 0}), 3UZ).value();
+        auto ds = filter::applyPeakToPeak(generate::from<T>("p2p_test", std::vector<T>{1, 2, 3, 5, 5, 0}).value(), 3UZ).value();
 
         expect(eq(ds.signal_values[0], T(1))); // window is {1, 2}    min=1, max=2 => range = 1
         expect(eq(ds.signal_values[1], T(2))); // window is {1, 2, 3} min=1, max=3 => range = 2
@@ -771,7 +789,7 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
         // comes back as the mean of the two.
         const gr::filter::FilterCoefficients<value_t> twoTap{.b = {value_t(0.5), value_t(0.5)}, .a = {value_t(1)}};
 
-        auto ds = filter::applySymmetricFilter(generate::from<T>("impulse", std::vector<value_t>{1, 0, 0, 0}), twoTap);
+        auto ds = filter::applySymmetricFilter(generate::from<T>("impulse", std::vector<value_t>{1, 0, 0, 0}).value(), twoTap);
 
         const std::vector<value_t> expected{value_t(0.5), value_t(0.25), value_t(0), value_t(0)};
         for (std::size_t i = 0UZ; i < expected.size(); ++i) {
@@ -784,7 +802,7 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
         // In place means the record that comes back is the record that went in: its sample buffer is the
         // one the caller handed over, not a copy of it.
         auto movesTheBuffer = [](auto&& op) {
-            auto       ds     = generate::from<T>("in place", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3});
+            auto       ds     = generate::from<T>("in place", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}).value();
             const auto buffer = ds.signal_values.data();
             auto       out    = op(std::move(ds));
             return out.signal_values.data() == buffer;
@@ -804,7 +822,7 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
             expect(eq(inPlace.signal_values[i], viaCopy.signal_values[i])) << std::format("moving average at index {}", i);
         }
 
-        auto       kept   = generate::from<T>("kept", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3});
+        auto       kept   = generate::from<T>("kept", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}).value();
         const auto buffer = kept.signal_values.data();
         const auto copied = filter::applyMedian<ProcessMode::Copy>(kept, 3UZ).value();
         expect(neq(copied.signal_values.data(), buffer)) << "the copying mode leaves the caller's record where it was";
