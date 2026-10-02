@@ -12,12 +12,12 @@
 #include <numbers>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
 #include <gnuradio-4.0/MemoryAllocators.hpp>
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 
@@ -374,26 +374,26 @@ struct Autocorrelation {
 
     /**
      * @brief Adopt a configuration, sizing every buffer and building the taper and its own autocorrelation.
-     * @throws std::invalid_argument naming the setting and the bound it broke.
+     * @throws gr::exception naming the setting and the bound it broke.
      */
     void prepare(const AcfConfig& config) {
         if (config.windowLength < 16UZ || config.windowLength > 1048576UZ) {
-            throw std::invalid_argument(std::format("gr::analysis::Autocorrelation: windowLength must lie in [16, 1048576], got {}", config.windowLength));
+            throw gr::exception(std::format("gr::analysis::Autocorrelation: windowLength must lie in [16, 1048576], got {}", config.windowLength));
         }
         if (config.maxLag == 0UZ) {
-            throw std::invalid_argument("gr::analysis::Autocorrelation: maxLag is the longest published lag and must be at least 1");
+            throw gr::exception("gr::analysis::Autocorrelation: maxLag is the longest published lag and must be at least 1");
         }
         if (config.maxLag >= config.windowLength) {
-            throw std::invalid_argument(std::format("gr::analysis::Autocorrelation: maxLag ({}) must be below windowLength ({}): at a lag of a whole window there is not one sample pair separated by it inside a window, so the taper's own autocorrelation is zero and the estimate has nothing to average", config.maxLag, config.windowLength));
+            throw gr::exception(std::format("gr::analysis::Autocorrelation: maxLag ({}) must be below windowLength ({}): at a lag of a whole window there is not one sample pair separated by it inside a window, so the taper's own autocorrelation is zero and the estimate has nothing to average", config.maxLag, config.windowLength));
         }
         if (config.nAverages == 0UZ) {
-            throw std::invalid_argument("gr::analysis::Autocorrelation: nAverages counts the windows a record is made of and must be at least 1");
+            throw gr::exception("gr::analysis::Autocorrelation: nAverages counts the windows a record is made of and must be at least 1");
         }
         if (!(config.overlap >= 0.) || !(config.overlap < 1.)) {
-            throw std::invalid_argument(std::format("gr::analysis::Autocorrelation: overlap is the fraction a window shares with the next and must lie in [0, 1), got {}", config.overlap));
+            throw gr::exception(std::format("gr::analysis::Autocorrelation: overlap is the fraction a window shares with the next and must lie in [0, 1), got {}", config.overlap));
         }
         if (!(config.falseAlarmRate > 0.) || !(config.falseAlarmRate < 1.)) {
-            throw std::invalid_argument(std::format("gr::analysis::Autocorrelation: falseAlarmRate is a probability per record and must lie in (0, 1), got {}", config.falseAlarmRate));
+            throw gr::exception(std::format("gr::analysis::Autocorrelation: falseAlarmRate is a probability per record and must lie in (0, 1), got {}", config.falseAlarmRate));
         }
 
         _config          = config;
@@ -434,7 +434,7 @@ struct Autocorrelation {
     /// The accumulation in progress and the window grid are kept.
     void setAveraging(std::size_t nAverages) {
         if (nAverages == 0UZ) {
-            throw std::invalid_argument("gr::analysis::Autocorrelation: nAverages counts the windows a record is made of and must be at least 1");
+            throw gr::exception("gr::analysis::Autocorrelation: nAverages counts the windows a record is made of and must be at least 1");
         }
         _config.nAverages = nAverages;
     }
@@ -442,7 +442,7 @@ struct Autocorrelation {
     /// @brief Set the per-record false-alarm rate the published threshold is computed for.
     void setFalseAlarmRate(double pFa) {
         if (!(pFa > 0.) || !(pFa < 1.)) {
-            throw std::invalid_argument(std::format("gr::analysis::Autocorrelation: falseAlarmRate is a probability per record and must lie in (0, 1), got {}", pFa));
+            throw gr::exception(std::format("gr::analysis::Autocorrelation: falseAlarmRate is a probability per record and must lie in (0, 1), got {}", pFa));
         }
         _config.falseAlarmRate = pFa;
     }

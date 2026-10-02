@@ -10,7 +10,6 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -542,25 +541,25 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
 
         AcfConfig tooShort    = config;
         tooShort.windowLength = 8UZ;
-        expect(throws<std::invalid_argument>([&] { kernel.prepare(tooShort); }));
+        expect(throws<gr::exception>([&] { kernel.prepare(tooShort); }));
         AcfConfig zeroLag = config;
         zeroLag.maxLag    = 0UZ;
-        expect(throws<std::invalid_argument>([&] { kernel.prepare(zeroLag); }));
+        expect(throws<gr::exception>([&] { kernel.prepare(zeroLag); }));
         AcfConfig lagAtWindow = config;
         lagAtWindow.maxLag    = lagAtWindow.windowLength;
-        expect(throws<std::invalid_argument>([&] { kernel.prepare(lagAtWindow); }));
+        expect(throws<gr::exception>([&] { kernel.prepare(lagAtWindow); }));
         AcfConfig noAverages = config;
         noAverages.nAverages = 0UZ;
-        expect(throws<std::invalid_argument>([&] { kernel.prepare(noAverages); }));
+        expect(throws<gr::exception>([&] { kernel.prepare(noAverages); }));
         AcfConfig fullOverlap = config;
         fullOverlap.overlap   = 1.;
-        expect(throws<std::invalid_argument>([&] { kernel.prepare(fullOverlap); }));
+        expect(throws<gr::exception>([&] { kernel.prepare(fullOverlap); }));
         AcfConfig zeroRate      = config;
         zeroRate.falseAlarmRate = 0.;
-        expect(throws<std::invalid_argument>([&] { kernel.prepare(zeroRate); }));
+        expect(throws<gr::exception>([&] { kernel.prepare(zeroRate); }));
         expect(nothrow([&] { kernel.prepare(config); }));
-        expect(throws<std::invalid_argument>([&] { kernel.setAveraging(0UZ); }));
-        expect(throws<std::invalid_argument>([&] { kernel.setFalseAlarmRate(1.); }));
+        expect(throws<gr::exception>([&] { kernel.setAveraging(0UZ); }));
+        expect(throws<gr::exception>([&] { kernel.setFalseAlarmRate(1.); }));
     };
 };
 
