@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <complex>
 #include <execution>
 #include <expected>
@@ -609,9 +610,7 @@ private:
 
     void transformRadix2(std::ranges::input_range auto& inPlace) {
         const std::size_t N = inPlace.size();
-        if (!std::has_single_bit(N)) {
-            throw std::invalid_argument(std::format("Input data must be power-of-two, input size: {}", inPlace.size()));
-        }
+        assert(std::has_single_bit(N)); // computeInto() takes this path for a power of two only
 
         for (std::size_t i = 0UZ; i < N; ++i) {
             const std::size_t j = bitReverseTable[i];
@@ -657,9 +656,7 @@ private:
         }
 
         // convolve input with chirp function
-        if (a.size() != bluesteinChirpFFT.size()) {
-            throw std::domain_error("mismatched lengths for convolution");
-        }
+        assert(a.size() == bluesteinChirpFFT.size()); // ensureBluesteinTable(n) sized the chirp for this n
         if (!fftCache) {
             fftCache = std::make_unique<FFT<TOutput, TOutput>>();
         }
