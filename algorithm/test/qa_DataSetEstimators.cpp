@@ -524,7 +524,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
     "filter DataSet"_test = []<typename T = double> {
         using value_t             = gr::meta::fundamental_base_value_type_t<T>;
         auto ds_step              = generate::stepFunction<T>("step", 200, 25);
-        auto responseCoefficients = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5));
+        auto responseCoefficients = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5)).value();
         auto filtered             = gr::dataset::filter::applyFilter(ds_step, responseCoefficients);
         if constexpr (std::is_same_v<T, float>) {
             gr::dataset::draw(ds_step, DefaultChartConfig{});
@@ -580,7 +580,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
 
     "analyzeStepPulseResponse - Step"_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
-        auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5));
+        auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5)).value();
         auto ds_step  = gr::dataset::filter::applyFilter(generate::stepFunction<T>("step", 100, 20), response);
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step);
 
@@ -615,7 +615,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
             ds_pulse_proto.signal_values[i] = 0.0; // final level
         }
 
-        auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5));
+        auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5)).value();
         auto ds_pulse = gr::dataset::filter::applyFilter(ds_pulse_proto, response);
         auto metrics  = estimators::analyzeStepPulseResponse(ds_pulse);
 
@@ -643,7 +643,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         using value_t                = gr::meta::fundamental_base_value_type_t<T>;
         constexpr value_t noiseLevel = value_t(0.05);
 
-        auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, {.order = 1UZ, .fLow = 0.05, .fs = 1.0});
+        auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, {.order = 1UZ, .fLow = 0.05, .fs = 1.0}).value();
         auto val      = gr::dataset::filter::applyFilter<ProcessMode::InPlace>(generate::stepFunction<T>("damped step", 100, 20), response);
         auto ds_step  = gr::dataset::addNoise<ProcessMode::InPlace>(val, noiseLevel, 0UZ, 42U);
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step);

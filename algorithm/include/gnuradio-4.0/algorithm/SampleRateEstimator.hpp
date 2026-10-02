@@ -6,6 +6,7 @@
 #include <span>
 #include <type_traits>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 
 namespace gr::algorithm {
@@ -97,11 +98,15 @@ struct SampleRateEstimator {
         return static_cast<float>((estRate - _nominalRate) / _nominalRate * 1e6);
     }
 
+    /// @brief Redesign the period-smoothing low-pass. A design the parameters do not admit throws `gr::exception`.
     void rebuildFilter() {
         if (_updateRate > 0.0 && filter_cutoff_hz > 0.f) {
             double cutoff = std::min(static_cast<double>(filter_cutoff_hz), _updateRate * 0.4);
             auto   coeffs = filter::iir::designFilter<double>(filter::Type::LOWPASS, filter::FilterParameters{.order = filter_order, .fLow = cutoff, .fs = _updateRate}, filter::iir::Design::BUTTERWORTH);
-            _lpFilter     = filter::Filter<double>(coeffs);
+            if (!coeffs) {
+                throw gr::exception(coeffs.error().message, coeffs.error().sourceLocation);
+            }
+            _lpFilter = filter::Filter<double>(*coeffs);
             _lpFilter.reset(_periodEst);
         }
     }

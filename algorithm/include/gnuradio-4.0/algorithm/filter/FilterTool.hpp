@@ -5,11 +5,13 @@
 #include <cmath>
 #include <complex>
 #include <execution>
+#include <expected>
 #include <format>
 #include <iterator>
 #include <numbers>
 #include <numeric>
 #include <ranges>
+#include <source_location>
 #include <type_traits>
 #include <unordered_set>
 #include <vector>
@@ -553,22 +555,23 @@ template<Frequency frequencyType, ResponseType responseType>
     return ret;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations calculateFilterBessel(std::size_t order) {
+/// @brief The Bessel prototype's poles and gain for @p order 1 to 10; any other order is an error.
+[[nodiscard]] inline constexpr std::expected<PoleZeroLocations, gr::Error> calculateFilterBessel(std::size_t order, std::source_location location = std::source_location::current()) {
     // pole location data: Steve Winder, "Filter Design," Newnes Press, 1998.
     using C = std::complex<double>;
     switch (order) {
     case 0: [[fallthrough]];
-    case 1: return {.poles = {C{-1.0000}}, .gain = 1.0};
-    case 2: return {.poles = {C{-1.1030, 0.6368}, C{-1.1030, -0.6368}}, .gain = 1.6221};
-    case 3: return {.poles = {C{-1.0509}, C{-1.3270, 1.0025}, C{-1.3270, -1.0025}}, .gain = 2.9067};
-    case 4: return {.poles = {C{-1.3596, 0.4071}, C{-1.3596, -0.4071}, C{-0.9877, 1.2476}, C{-0.9877, -1.2476}}, .gain = 5.1002};
-    case 5: return {.poles = {C{-1.3851}, C{-0.9606, 1.4756}, C{-0.9606, -1.4756}, C{-1.5069, 0.7201}, C{-1.5069, -0.7201}}, .gain = 11.9773};
-    case 6: return {.poles = {C{-1.5735, 0.3213}, C{-1.5735, -0.3213}, C{-1.3836, 0.9727}, C{-1.3836, -0.9727}, C{-0.9318, 1.6640}, C{-0.9318, -1.6640}}, .gain = 26.8334};
-    case 7: return {.poles = {C{-1.6130}, C{-1.3797, 0.5896}, C{-1.3797, -0.5896}, C{-1.1397, 1.1923}, C{-1.1397, -1.1923}, C{-0.9104, 1.8375}, C{-0.9104, -1.8375}}, .gain = 41.5419};
-    case 8: return {.poles = {C{-1.7627, 0.2737}, C{-1.7627, -0.2737}, C{-0.8955, 2.0044}, C{-0.8955, -2.0044}, C{-1.3780, 0.8253}, C{-1.3780, -0.8253}, C{-1.6419, 1.3926}, C{-1.6419, -1.3926}}, .gain = 183.3982};
-    case 9: return {.poles = {C{-1.8081}, C{-1.6532, 0.5126}, C{-1.6532, -0.5126}, C{-1.16532, 1.0319}, C{-1.16532, -1.0319}, C{-1.3683, 1.5685}, C{-1.3683, -1.5685}, C{-0.8788, 2.1509}, C{-0.8788, -2.1509}}, .gain = 306.9539};
-    case 10: return {.poles = {C{-1.9335, 0.2424}, C{-1.9335, -0.2424}, C{-0.8684, 2.2996}, C{-0.8684, -2.2996}, C{-1.8478, 0.7295}, C{-1.8478, -0.7295}, C{-1.6669, 1.2248}, C{-1.6669, -1.2248}, C{-1.3649, 1.7388}, C{-1.3649, -1.7388}}, .gain = 1893.1098};
-    default: throw std::out_of_range("supported orders are 1 to 10");
+    case 1: return PoleZeroLocations{.poles = {C{-1.0000}}, .gain = 1.0};
+    case 2: return PoleZeroLocations{.poles = {C{-1.1030, 0.6368}, C{-1.1030, -0.6368}}, .gain = 1.6221};
+    case 3: return PoleZeroLocations{.poles = {C{-1.0509}, C{-1.3270, 1.0025}, C{-1.3270, -1.0025}}, .gain = 2.9067};
+    case 4: return PoleZeroLocations{.poles = {C{-1.3596, 0.4071}, C{-1.3596, -0.4071}, C{-0.9877, 1.2476}, C{-0.9877, -1.2476}}, .gain = 5.1002};
+    case 5: return PoleZeroLocations{.poles = {C{-1.3851}, C{-0.9606, 1.4756}, C{-0.9606, -1.4756}, C{-1.5069, 0.7201}, C{-1.5069, -0.7201}}, .gain = 11.9773};
+    case 6: return PoleZeroLocations{.poles = {C{-1.5735, 0.3213}, C{-1.5735, -0.3213}, C{-1.3836, 0.9727}, C{-1.3836, -0.9727}, C{-0.9318, 1.6640}, C{-0.9318, -1.6640}}, .gain = 26.8334};
+    case 7: return PoleZeroLocations{.poles = {C{-1.6130}, C{-1.3797, 0.5896}, C{-1.3797, -0.5896}, C{-1.1397, 1.1923}, C{-1.1397, -1.1923}, C{-0.9104, 1.8375}, C{-0.9104, -1.8375}}, .gain = 41.5419};
+    case 8: return PoleZeroLocations{.poles = {C{-1.7627, 0.2737}, C{-1.7627, -0.2737}, C{-0.8955, 2.0044}, C{-0.8955, -2.0044}, C{-1.3780, 0.8253}, C{-1.3780, -0.8253}, C{-1.6419, 1.3926}, C{-1.6419, -1.3926}}, .gain = 183.3982};
+    case 9: return PoleZeroLocations{.poles = {C{-1.8081}, C{-1.6532, 0.5126}, C{-1.6532, -0.5126}, C{-1.16532, 1.0319}, C{-1.16532, -1.0319}, C{-1.3683, 1.5685}, C{-1.3683, -1.5685}, C{-0.8788, 2.1509}, C{-0.8788, -2.1509}}, .gain = 306.9539};
+    case 10: return PoleZeroLocations{.poles = {C{-1.9335, 0.2424}, C{-1.9335, -0.2424}, C{-0.8684, 2.2996}, C{-0.8684, -2.2996}, C{-1.8478, 0.7295}, C{-1.8478, -0.7295}, C{-1.6669, 1.2248}, C{-1.6669, -1.2248}, C{-1.3649, 1.7388}, C{-1.3649, -1.7388}}, .gain = 1893.1098};
+    default: return std::unexpected(gr::Error("supported orders are 1 to 10", location));
     }
 }
 
@@ -696,9 +699,9 @@ std::vector<std::complex<T>> sortComplexWithConjugates(const std::vector<std::co
 /// the roots or the coefficients: forming a conjugate pair's quadratic {1, -2·Re(p), |p|²} in a type too narrow
 /// cancels 1 + a₁ + a₂ to zero once the pole sits within an ULP of z = 1 — in float already at fc/fs = 5e-6, and in
 /// double at fc/fs = 1e-8, where a long double coefficient still holds the pole. That cancellation moves the pole
-/// onto the unit circle.
+/// onto the unit circle. A complex root without its conjugate next to it is an error.
 template<typename T, std::ranges::input_range Range>
-[[nodiscard]] std::vector<T> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder) { // NOSONAR (S5425) — forwarding-ref kept for non-const-iterable views
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder, std::source_location location = std::source_location::current()) { // NOSONAR (S5425) — forwarding-ref kept for non-const-iterable views
     if (roots.empty()) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnull-dereference" // gcc13 false positive
@@ -728,14 +731,14 @@ template<typename T, std::ranges::input_range Range>
 
         if (static_cast<double>(std::abs(root.imag())) > epsilon) { // complex root
             if (i + 1 >= roots.size()) {
-                throw std::runtime_error(std::format("Unmatched complex root at i={}: {}", i, root)); // Unpaired complex root.
+                return std::unexpected(gr::Error(std::format("Unmatched complex root at i={}: {}", i, root), location)); // Unpaired complex root.
             }
 
             // ensure the next root is the conjugate pair.
             const auto& next_root = roots[i + 1];
             if (static_cast<double>(std::abs(root.real() - next_root.real())) > epsilon || static_cast<double>(std::abs(root.imag() + next_root.imag())) > epsilon) {
                 std::string fmt = "Complex roots {} vs. {} are not conjugate pairs.\nroots:\n{}"; // workaround for missing std::runtime_format (C++26)
-                throw std::runtime_error(std::vformat(fmt, std::make_format_args(root, next_root, roots)));
+                return std::unexpected(gr::Error(std::vformat(fmt, std::make_format_args(root, next_root, roots)), location));
             }
 
             // use the quadratic factor for the complex root and its conjugate; |p|² is formed in Wide from the
@@ -962,22 +965,31 @@ template<typename T>
     return bandStop;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations designAnalogFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
+/// @brief The analog prototype of @p filterDesign moved to the corners of @p params. A Bessel order outside 1 to 10, or a
+/// corner the filter type needs that is not finite, is an error.
+[[nodiscard]] inline constexpr std::expected<PoleZeroLocations, gr::Error> designAnalogFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH, std::source_location location = std::source_location::current()) {
     // step 1: continuous-time analog prototype
     PoleZeroLocations analogPoleZeros;
     switch (filterDesign) { // only the Elliptic and inverse Chebyshev (Type II) filters have zeros.
     case Design::BUTTERWORTH: analogPoleZeros = calculateFilterButterworth(params.order); break;
     case Design::CHEBYSHEV1: analogPoleZeros = calculateFilterChebyshevType1(params.order, params.rippleDb); break;
     case Design::CHEBYSHEV2: analogPoleZeros = calculateFilterChebyshevType2(params.order, params.attenuationDb); break;
-    case Design::BESSEL: analogPoleZeros = calculateFilterBessel(params.order); break;
+    case Design::BESSEL: {
+        std::expected<PoleZeroLocations, gr::Error> bessel = calculateFilterBessel(params.order, location);
+        if (!bessel) {
+            return std::unexpected(bessel.error());
+        }
+        analogPoleZeros = std::move(*bessel);
+        break;
+    }
     }
 
     // step 2: frequency transformation (s to analog filter with desired cutoff frequencies)
     if (filterType != Type::HIGHPASS && !std::isfinite(params.fLow)) {
-        throw std::invalid_argument("FilterParameters::fLow is NaN -> please set");
+        return std::unexpected(gr::Error("FilterParameters::fLow is NaN -> please set", location));
     }
     if (filterType != Type::LOWPASS && !std::isfinite(params.fHigh)) {
-        throw std::invalid_argument("FilterParameters::fHigh is NaN -> please set");
+        return std::unexpected(gr::Error("FilterParameters::fHigh is NaN -> please set", location));
     }
 
     switch (filterType) {
@@ -989,10 +1001,21 @@ template<typename T>
     return analogPoleZeros;
 }
 
+/// @brief What `designFilter` returns: one section for a section size of zero, a list of sections otherwise.
+template<typename T, std::size_t maxSectionSize>
+using DesignedSections = std::conditional_t<maxSectionSize == 0UZ, FilterCoefficients<T>, std::vector<FilterCoefficients<T>>>;
+
+/// @brief The digital IIR filter of @p filterDesign for @p params: one section when @p maxSectionSize is zero, sections
+/// of at most @p maxSectionSize poles otherwise. A parameter outside its domain, a gain the design cannot reach, or a
+/// section the type `T` cannot hold stable is an error.
 template<std::floating_point T, std::size_t maxSectionSize = std::is_same_v<std::remove_cvref_t<T>, double> ? 4UZ : 2UZ /* == 2 -> aka. 'biquads' */>
 requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pairs
-[[nodiscard]] inline constexpr auto designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
-    PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, params, filterDesign);
+[[nodiscard]] inline constexpr std::expected<DesignedSections<T, maxSectionSize>, gr::Error> designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH, std::source_location location = std::source_location::current()) {
+    std::expected<PoleZeroLocations, gr::Error> analog = designAnalogFilter(filterType, params, filterDesign, location);
+    if (!analog) {
+        return std::unexpected(analog.error());
+    }
+    PoleZeroLocations& analogPoleZeros = *analog;
 
     T referenceFrequency;
     switch (filterType) {
@@ -1003,7 +1026,7 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
     }
 
     if (!std::isfinite(params.fs)) {
-        throw std::invalid_argument("FilterParameters::fs is NaN -> please set");
+        return std::unexpected(gr::Error("FilterParameters::fs is NaN -> please set", location));
     }
     // Step 3: discretisation using bi-linear transform (s -> z)
     PoleZeroLocations digitalPoleZeros = analogToDigitalTransform(analogPoleZeros, params.fs);
@@ -1014,16 +1037,25 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
 
     if constexpr (maxSectionSize == 0) {
         // Step 4: Coefficient Calculation and Gain Adjustment
-        FilterCoefficients<T> singleSection;
-        singleSection.a = expandRootsToPolynomial<T>(digitalPoleZeros.poles, params.order); // 'a' coefficients (denominator)
-        singleSection.b = expandRootsToPolynomial<T>(digitalPoleZeros.zeros, params.order); // 'b' coefficients (numerator)
+        FilterCoefficients<T>                    singleSection;
+        std::expected<std::vector<T>, gr::Error> denominator = expandRootsToPolynomial<T>(digitalPoleZeros.poles, params.order, location); // 'a' coefficients
+        std::expected<std::vector<T>, gr::Error> numerator   = expandRootsToPolynomial<T>(digitalPoleZeros.zeros, params.order, location); // 'b' coefficients
+        if (!denominator) {
+            return std::unexpected(denominator.error());
+        }
+        if (!numerator) {
+            return std::unexpected(numerator.error());
+        }
+        singleSection.a = std::move(*denominator);
+        singleSection.b = std::move(*numerator);
 
         const auto [ok, actualGain] = normaliseFilterCoefficients(singleSection, referenceFrequency / static_cast<T>(params.fs), static_cast<T>(params.gain));
         if (ok) {
             return singleSection;
         }
-        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-            magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+        return std::unexpected(gr::Error(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                                             magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh),
+            location));
     } else { // Step 4: convert the poles and zeros into biquad sections.
         constexpr double epsilon = 1e-10;
 
@@ -1060,9 +1092,17 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
                 }
 
                 // calculate the coefficients from these poles and zeros
-                FilterCoefficients<T> section;
-                section.a = expandRootsToPolynomial<T>(sectionPoles, numPoles);
-                section.b = expandRootsToPolynomial<T>(sectionZeros, numPoles); // Ensure it's the same order as the denominator
+                FilterCoefficients<T>                    section;
+                std::expected<std::vector<T>, gr::Error> denominator = expandRootsToPolynomial<T>(sectionPoles, numPoles, location);
+                std::expected<std::vector<T>, gr::Error> numerator   = expandRootsToPolynomial<T>(sectionZeros, numPoles, location); // the same order as the denominator
+                if (!denominator) {
+                    return std::unexpected(denominator.error());
+                }
+                if (!numerator) {
+                    return std::unexpected(numerator.error());
+                }
+                section.a = std::move(*denominator);
+                section.b = std::move(*numerator);
 
                 if (hasPoleOnOrOutsideUnitCircle(section.a)) {
                     unstableDenominator = section.a;
@@ -1072,8 +1112,9 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
                 // Adjust the gain for each section if necessary
                 const auto [ok, actualGain] = normaliseFilterCoefficients(section, referenceFrequency / static_cast<T>(params.fs), static_cast<T>(params.gain));
                 if (!ok) {
-                    throw std::invalid_argument(std::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                        magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+                    return std::unexpected(gr::Error(std::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                                                         magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh),
+                        location));
                 }
                 sections.push_back(section);
             }
@@ -1082,21 +1123,24 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
                 return sections;
             }
             if (sectionSize <= 2UZ) {
-                throw std::invalid_argument(std::format("({}, {}, {}) section denominator {} in {} has a pole on or outside the unit circle for fs = {} f = [{},{}]", //
-                    magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, unstableDenominator, gr::meta::type_name<T>(), params.fs, params.fLow, params.fHigh));
+                return std::unexpected(gr::Error(std::format("({}, {}, {}) section denominator {} in {} has a pole on or outside the unit circle for fs = {} f = [{},{}]", //
+                                                     magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, unstableDenominator, gr::meta::type_name<T>(), params.fs, params.fLow, params.fHigh),
+                    location));
             }
             sectionSize = std::max(2UZ, (sectionSize / 4UZ) * 2UZ); // halved, and kept even so a conjugate pair stays in one section
         }
     }
 }
 
+/// @brief A two-pole resonator at @p frequency with pole radius @p poleRadius and unit gain at DC. A frequency outside
+/// (0, fs/2) or a radius outside (0, 1) is an error.
 template<std::floating_point T>
-FilterCoefficients<T> designResonatorDigital(T samplingRate, T frequency, T poleRadius, std::source_location location = std::source_location::current()) {
+[[nodiscard]] std::expected<FilterCoefficients<T>, gr::Error> designResonatorDigital(T samplingRate, T frequency, T poleRadius, std::source_location location = std::source_location::current()) {
     if (samplingRate <= T(0) || frequency <= T(0) || frequency >= samplingRate / T(2)) {
-        throw gr::exception(std::format("samplingRateHz {} and frequencyHz {} must be > 0.", samplingRate, frequency), location);
+        return std::unexpected(gr::Error(std::format("samplingRateHz {} and frequencyHz {} must be > 0.", samplingRate, frequency), location));
     }
     if (poleRadius <= T(0) || poleRadius >= T(1)) {
-        throw gr::exception(std::format("poleRadius {} must be in (0,1).", poleRadius), location);
+        return std::unexpected(gr::Error(std::format("poleRadius {} must be in (0,1).", poleRadius), location));
     }
 
     const T theta = T(2) * std::numbers::pi_v<T> * frequency / samplingRate;
@@ -1105,25 +1149,27 @@ FilterCoefficients<T> designResonatorDigital(T samplingRate, T frequency, T pole
     return FilterCoefficients<T>{.b = {T(1) + a1 + a2, T(0), T(0)}, .a = {T(1), a1, a2}}; // b0 = 1 + a1 + a2 (DC normalisation)
 }
 
+/// @brief `designResonatorDigital` with the pole radius from the damping ratio @p zetaDamping.
 template<std::floating_point T>
-FilterCoefficients<T> designResonatorPhysical(T samplingRate, T frequency, T zetaDamping, std::source_location location = std::source_location::current()) {
+[[nodiscard]] std::expected<FilterCoefficients<T>, gr::Error> designResonatorPhysical(T samplingRate, T frequency, T zetaDamping, std::source_location location = std::source_location::current()) {
     if (frequency <= T(0)) {
-        throw gr::exception(std::format("frequency {} must be > 0.", frequency), location);
+        return std::unexpected(gr::Error(std::format("frequency {} must be > 0.", frequency), location));
     }
     if (zetaDamping < T(0)) {
-        throw gr::exception(std::format("zetaDamping {} must be >= 0.", zetaDamping), location);
+        return std::unexpected(gr::Error(std::format("zetaDamping {} must be >= 0.", zetaDamping), location));
     }
     T rApprox = std::exp(-zetaDamping * T(2) * std::numbers::pi_v<T> * frequency / samplingRate); // approximation: r ~ exp(-ζ * omega0 / fs))
     return designResonatorDigital<T>(samplingRate, frequency, std::min(rApprox, T(0.9999)), location);
 }
 
+/// @brief `designResonatorDigital` with the pole radius from the quality factor @p Q.
 template<std::floating_point T>
-FilterCoefficients<T> designResonatorRF(T samplingRateHz, T frequency, T Q, std::source_location location = std::source_location::current()) {
+[[nodiscard]] std::expected<FilterCoefficients<T>, gr::Error> designResonatorRF(T samplingRateHz, T frequency, T Q, std::source_location location = std::source_location::current()) {
     if (frequency <= 0.0) {
-        throw gr::exception(std::format("frequency {} must be > 0.", frequency), location);
+        return std::unexpected(gr::Error(std::format("frequency {} must be > 0.", frequency), location));
     }
     if (Q <= 0.0) {
-        throw gr::exception(std::format("Q {} must be > 0.", Q), location);
+        return std::unexpected(gr::Error(std::format("Q {} must be > 0.", Q), location));
     }
 
     const T BW      = frequency / Q;                                            // approximates 3dB BW
@@ -1194,8 +1240,9 @@ template<std::floating_point T>
     return 0.;
 }
 
+/// @brief The windowed-sinc FIR filter for @p params. A gain the design cannot reach is an error.
 template<std::floating_point T>
-[[nodiscard]] inline constexpr FilterCoefficients<T> designFilter(const Type filterType, FilterParameters params, gr::algorithm::window::Type window = algorithm::window::Type::Kaiser) {
+[[nodiscard]] inline constexpr std::expected<FilterCoefficients<T>, gr::Error> designFilter(const Type filterType, FilterParameters params, gr::algorithm::window::Type window = algorithm::window::Type::Kaiser, std::source_location location = std::source_location::current()) {
     const std::size_t N = estimateNumberOfTapsKaiser(params.attenuationDb, 2. * std::numbers::pi * estimateRequiredTransitionWidth(filterType, params));
 
     // design high-pass FIR filter using the window method
@@ -1206,8 +1253,9 @@ template<std::floating_point T>
         if (ok) {
             return lowPassCoefficients;
         }
-        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+        return std::unexpected(gr::Error(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                                             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh),
+            location));
     }
     case Type::HIGHPASS: {
         // generate low-pass filter coefficients with "mirror" frequency (f_s/2 - f_c)
@@ -1222,8 +1270,9 @@ template<std::floating_point T>
         if (ok) {
             return highPassCoefficients;
         }
-        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+        return std::unexpected(gr::Error(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                                             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh),
+            location));
     }
     case Type::BANDPASS: {
         auto bandPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
@@ -1235,8 +1284,9 @@ template<std::floating_point T>
         if (ok) {
             return bandPassCoefficients;
         }
-        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+        return std::unexpected(gr::Error(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                                             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh),
+            location));
     }
     case Type::BANDSTOP: {
         auto       bandStopCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
@@ -1254,11 +1304,12 @@ template<std::floating_point T>
         if (ok) {
             return bandStopCoefficients;
         }
-        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+        return std::unexpected(gr::Error(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                                             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh),
+            location));
     }
     }
-    throw std::runtime_error("unexpectedly reached this end");
+    return std::unexpected(gr::Error("unexpectedly reached this end", location));
 }
 
 } // namespace fir
