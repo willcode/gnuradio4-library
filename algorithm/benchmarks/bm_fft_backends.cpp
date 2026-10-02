@@ -8,6 +8,7 @@
 #include <print>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
@@ -188,14 +189,14 @@ void benchFourStepParts(std::size_t N, std::size_t threads) {
     // Compare it with "second batch in place", the same work through PocketFFT's driver.
     std::vector<gr::algorithm::SimdFFT<float, gr::algorithm::Transform::Complex>> engines(threads);
     for (auto& engine : engines) {
-        engine.resize(n2);
+        std::ignore = engine.resize(n2);
     }
     const double simdBatch = timed([&] {
         pocketfft::detail::threading::thread_map(threads, [&] {
             const std::size_t index = pocketfft::detail::threading::thread_id();
             const std::size_t count = pocketfft::detail::threading::num_threads();
             for (std::size_t r = index; r < n1; r += count) {
-                engines[index].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>( //
+                std::ignore = engines[index].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>( //
                     std::span<const float>(reinterpret_cast<const float*>(work.data() + r * n2), 2UZ * n2), std::span<float>(reinterpret_cast<float*>(out.data() + r * n2), 2UZ * n2));
             }
         });
@@ -234,8 +235,8 @@ void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::ve
     std::vector<gr::algorithm::SimdFFT<float, gr::algorithm::Transform::Complex>> columns(threads);
     std::vector<gr::algorithm::SimdFFT<float, gr::algorithm::Transform::Complex>> rows(threads);
     for (std::size_t t = 0; t < threads; ++t) {
-        columns[t].resize(n1);
-        rows[t].resize(n2);
+        std::ignore = columns[t].resize(n1);
+        std::ignore = rows[t].resize(n2);
     }
 
     constexpr std::size_t kBlock   = 32UZ;
@@ -257,7 +258,7 @@ void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::ve
         });
         parallel([&](std::size_t id, std::size_t count) { // the n2 columns, each of length n1
             for (std::size_t r = id; r < n2; r += count) {
-                columns[id].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>(reading(a.data() + r * n1, n1), writing(b.data() + r * n1, n1));
+                std::ignore = columns[id].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>(reading(a.data() + r * n1, n1), writing(b.data() + r * n1, n1));
             }
         });
         parallel([&](std::size_t id, std::size_t count) { // the twiddles, applied in the transpose back to {n1, n2}
@@ -273,7 +274,7 @@ void benchSimdFourStep(const Aligned<std::complex<float>>& signal, const std::ve
         });
         parallel([&](std::size_t id, std::size_t count) { // the n1 rows, each of length n2
             for (std::size_t r = id; r < n1; r += count) {
-                rows[id].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>(reading(a.data() + r * n2, n2), writing(b.data() + r * n2, n2));
+                std::ignore = rows[id].transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Ordered>(reading(a.data() + r * n2, n2), writing(b.data() + r * n2, n2));
             }
         });
         parallel([&](std::size_t id, std::size_t count) { // bin k2*n1 + k1 is at [k1][k2], so transpose the record once more

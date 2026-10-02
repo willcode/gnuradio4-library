@@ -53,6 +53,8 @@ SOFTWARE.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <expected>
+#include <format>
 #include <memory>
 #include <numbers>
 #include <source_location>
@@ -269,13 +271,13 @@ constexpr void realPreprocess(std::size_t Ncvec, std::span<const T> inputSpan, s
  * @example
  * SimdFFT<float, Transform::Real, 1024> fft;
  * // alt: SimdFFT<float, Transform::Real> fft(1025);
- * fft.transform(forward, unordered, input, output);
+ * auto done = fft.transform(forward, unordered, input, output); // a gr::Error on a size or alignment mismatch
  * // Scale for inverse: for(auto& x : output) x /= 1024;
  *
  * or:
  * @example
  * SimdFFT<float, Transform::Complex, 1024> fft;
- * fft.transform(forward, unordered, input, output);
+ * auto done = fft.transform(forward, unordered, input, output);
  */
 template<std::floating_point T, Transform fftTransform, std::size_t N = std::dynamic_extent>
 struct SimdFFT {
@@ -306,7 +308,9 @@ struct SimdFFT {
     requires(!IsDynamic::value)
     {
         static_assert(canProcessSize(N), "cannot process this size: min>=16C2C (32: R2C) & radix-2, -3, -5 & 'x min' compatible");
-        computeTwiddles();
+        if (auto planned = computeTwiddles(); !planned) {
+            throw gr::exception(planned.error().message);
+        }
     }
 
     /// @brief construct runtime-sized FFT handler
@@ -314,7 +318,9 @@ struct SimdFFT {
     explicit SimdFFT(std::size_t n = 64UZ, std::source_location loc = std::source_location::current())
     requires(IsDynamic::value)
         : _N(0UZ) {
-        resize(n, loc);
+        if (auto sized = resize(n, loc); !sized) {
+            throw gr::exception(sized.error().message, loc);
+        }
     }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept {
@@ -324,17 +330,18 @@ struct SimdFFT {
             return N;
         }
     }
-    constexpr void resize(std::size_t n, std::source_location loc = std::source_location::current())
+    /// @brief resize a runtime-sized FFT; an incompatible n returns an error and keeps the previous size
+    [[nodiscard]] constexpr std::expected<void, gr::Error> resize(std::size_t n, std::source_location loc = std::source_location::current())
     requires(IsDynamic::value)
     {
         if (_N == n) {
-            return;
+            return {};
+        }
+        if (!canProcessSize(n)) {
+            return std::unexpected(gr::Error(std::format("incompatible sizes for {}2C: N ({}) must be multiple of 2,3,4,5 and >{}", fftTransform == Transform::Real ? "R" : "C", n, minSize()), loc));
         }
         _N = n;
-        if (!canProcessSize(size())) {
-            throw gr::exception(std::format("incompatible sizes for {}2C: N ({}) must be multiple of 2,3,4,5 and >{}", fftTransform == Transform::Real ? "R" : "C", size(), minSize()), loc);
-        }
-        computeTwiddles();
+        return computeTwiddles(loc);
     }
     [[nodiscard]] static constexpr std::size_t simdSize() noexcept { return vector_type::size(); }
     [[nodiscard]] static constexpr std::size_t minSize() {
@@ -382,7 +389,7 @@ struct SimdFFT {
     [[nodiscard]] std::span<T>       scratch() noexcept { return _scratch; }
     [[nodiscard]] std::span<const T> scratch() const noexcept { return _scratch; }
 
-    void computeTwiddles() {
+    [[nodiscard]] std::expected<void, gr::Error> computeTwiddles(std::source_location loc = std::source_location::current()) {
         // not too performance critical, computed usually only once
         constexpr std::size_t L       = simdSize();
         const std::size_t     nScalar = ceil_div(size(), L);
@@ -466,9 +473,11 @@ struct SimdFFT {
             prod *= _radixPlan[2 + k];
         }
         if (prod != nScalar) {
-            throw gr::exception(std::format("{} transform (N={}) factorization mismatch: prod(radices={})={} != size()/SIMD_width={} (N={}, SIMD_width={})", //
-                fftTransform, size(), _radixPlan, prod, nScalar, size(), vector_type::size()));
+            return std::unexpected(gr::Error(std::format("{} transform (N={}) factorization mismatch: prod(radices={})={} != size()/SIMD_width={} (N={}, SIMD_width={})", //
+                                                 fftTransform, size(), _radixPlan, prod, nScalar, size(), vector_type::size()),
+                loc));
         }
+        return {};
     }
 
     /// @brief Perform forward/backward FFT with optional reordering
@@ -476,43 +485,44 @@ struct SimdFFT {
     /// @param ordering ordered (canonical interleaved) or unordered (SIMD-optimized, ~20% faster)
     /// @param in Input buffer (real: N samples, complex: 2*N samples)
     /// @param out Output buffer (same size as input), may alias input
-    /// @throws gr::exception on size mismatch or unsupported configuration
+    /// @return a gr::Error on a size mismatch, an unsupported configuration or a misaligned buffer
     ///
     /// @example real-valued transform, unordered (fastest, usually used for convolution):
     /// fft.transform(forward, unordered, input, spectrum);
     ///
     /// @example complex-valued transform, ordered (canonical frequency bins):
     /// fft.transform(forward, ordered, timeDomain, freqDomain)
-    void transform(forward_t, ordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Forward, Order::Ordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
-    void transform(backward_t, ordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Backward, Order::Ordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
-    void transform(forward_t, unordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Forward, Order::Unordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
-    void transform(backward_t, unordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Backward, Order::Unordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
+    [[nodiscard]] std::expected<void, gr::Error> transform(forward_t, ordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { return transform<Direction::Forward, Order::Ordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
+    [[nodiscard]] std::expected<void, gr::Error> transform(backward_t, ordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { return transform<Direction::Backward, Order::Ordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
+    [[nodiscard]] std::expected<void, gr::Error> transform(forward_t, unordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { return transform<Direction::Forward, Order::Unordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
+    [[nodiscard]] std::expected<void, gr::Error> transform(backward_t, unordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { return transform<Direction::Backward, Order::Unordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
 
     template<Direction direction, Order ordering, InBuf<T> Rin, OutBuf<T> Rout>
-    void transform(Rin&& in, Rout&& out, std::source_location loc = std::source_location::current()) {
+    [[nodiscard]] std::expected<void, gr::Error> transform(Rin&& in, Rout&& out, std::source_location loc = std::source_location::current()) {
         const auto inputSpan  = std::span<const T>(std::ranges::data(in), std::ranges::size(in));
         auto       outputSpan = std::span<T>(std::ranges::data(out), std::ranges::size(out));
 
         const std::size_t need = (fftTransform == Transform::Real) ? size() : 2 * size();
         if (inputSpan.size() < need || outputSpan.size() < need) {
-            throw gr::exception(std::format("size mismatch: input({}) output({}) setup({})", inputSpan.size(), outputSpan.size(), need), loc);
+            return std::unexpected(gr::Error(std::format("size mismatch: input({}) output({}) setup({})", inputSpan.size(), outputSpan.size(), need), loc));
         }
         if (!SimdFFT<T, fftTransform, N>::canProcessSize(size(), ordering)) {
             if constexpr (ordering == Order::Ordered && fftTransform == Transform::Real) {
-                throw gr::exception(std::format("{} {} FFT not supported for N={} (requires N % 32 == 0)", ordering, fftTransform, size()), loc);
+                return std::unexpected(gr::Error(std::format("{} {} FFT not supported for N={} (requires N % 32 == 0)", ordering, fftTransform, size()), loc));
             } else {
-                throw gr::exception(std::format("{} {} FFT with N={} not supported (must factor into {{2,3,4,5}} and >={})", ordering, fftTransform, size(), minSize()), loc);
+                return std::unexpected(gr::Error(std::format("{} {} FFT with N={} not supported (must factor into {{2,3,4,5}} and >={})", ordering, fftTransform, size(), minSize()), loc));
             }
         }
 
         if (!details::isAligned<kAlignment>(inputSpan.data())) {
-            throw gr::exception(std::format("input is not {}-bytes aligned", kAlignment), loc);
+            return std::unexpected(gr::Error(std::format("input is not {}-bytes aligned", kAlignment), loc));
         }
         if (!details::isAligned<kAlignment>(outputSpan.data())) {
-            throw gr::exception(std::format("output is not {}-bytes aligned", kAlignment), loc);
+            return std::unexpected(gr::Error(std::format("output is not {}-bytes aligned", kAlignment), loc));
         }
 
         transformInternal<direction, ordering>(inputSpan, outputSpan, scratch());
+        return {};
     }
 
     /// @brief reorder between SIMD-tiled and canonical interleaved format

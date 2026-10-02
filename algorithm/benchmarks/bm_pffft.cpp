@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <tuple>
 
 #define NUM_FFT_ALGOS 2
 enum {
@@ -154,8 +155,8 @@ double cal_benchmark(std::size_t N) {
     tstop             = t0 + 0.25; /* benchmark duration: 250 ms */
     do {
         for (std::size_t k = 0; k < 512; ++k) {
-            setup.transform(forward, unordered, input, output);
-            setup.transform(backward, unordered, input, output);
+            std::ignore = setup.transform(forward, unordered, input, output);
+            std::ignore = setup.transform(backward, unordered, input, output);
             ++iter;
         }
         t1 = uclock_sec();
@@ -210,8 +211,8 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         max_iter   = 0;
         do {
             for (std::size_t k = 0UZ; k < step_iter; ++k) {
-                setup.template transform<Direction::Forward, Order::Unordered>(input, output);
-                setup.template transform<Direction::Backward, Order::Unordered>(input, output);
+                std::ignore = setup.template transform<Direction::Forward, Order::Unordered>(input, output);
+                std::ignore = setup.template transform<Direction::Backward, Order::Unordered>(input, output);
                 ++max_iter;
             }
             t1 = uclock_sec();
@@ -236,8 +237,8 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         max_iter   = 0;
         do {
             for (std::size_t k = 0; k < step_iter; ++k) {
-                setup.template transform<Direction::Forward, Order::Ordered>(input, output);
-                setup.template transform<Direction::Backward, Order::Ordered>(input, output);
+                std::ignore = setup.template transform<Direction::Forward, Order::Ordered>(input, output);
+                std::ignore = setup.template transform<Direction::Backward, Order::Ordered>(input, output);
                 ++max_iter;
             }
             t1 = uclock_sec();

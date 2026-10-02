@@ -36,13 +36,13 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
             expect(!SimdFFT<T, Transform::Real>::canProcessSize(invalidN, Order::Ordered));
             expect(!SimdFFT<T, Transform::Complex>::canProcessSize(invalidN, Order::Ordered) || invalidN == 48); // 48 is OK for complex
 
-            // verify exception thrown
-            expect(throws<gr::exception>([&invalidN] {
-                SimdFFT<T, Transform::Real>               setup(invalidN);
-                std::vector<T, gr::allocator::Aligned<T>> in(invalidN);
-                std::vector<T, gr::allocator::Aligned<T>> out(invalidN);
-                setup.transform(forward, ordered, in, out);
-            })) << std::format("N={} should throw", invalidN);
+            // the constructor throws; resize returns the fault and keeps the previous size
+            expect(throws<gr::exception>([&invalidN] { SimdFFT<T, Transform::Real> setup(invalidN); })) << std::format("N={} should throw", invalidN);
+            SimdFFT<T, Transform::Real> resized(64UZ);
+            const auto                  refused = resized.resize(invalidN);
+            expect(fatal(!refused.has_value())) << std::format("N={} should be refused", invalidN);
+            expect(refused.error().message.contains("incompatible sizes")) << refused.error().message;
+            expect(eq(resized.size(), 64UZ)) << "a refused resize keeps the previous size";
         } | std::array{7UZ, 11UZ, 14UZ, 17UZ, 31UZ, 35UZ, 48UZ, 49UZ}; // primes and non-factorable
 
         // the compile-time-sized constructor accepts every size canProcessSize() accepts
@@ -55,11 +55,25 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
             std::vector<T, gr::allocator::Aligned<T>> in(128UZ);
             std::vector<T, gr::allocator::Aligned<T>> out(128UZ);
             in[0] = T(1);
-            c2c.transform(forward, ordered, in, out);
+            boost::ut::expect(boost::ut::fatal(c2c.transform(forward, ordered, in, out).has_value()));
             for (std::size_t k = 0UZ; k < 64UZ; ++k) {
                 expect(approx(out[2UZ * k], T(1), T(1e-4))) << std::format("delta spectrum bin {} real", k);
                 expect(approx(out[2UZ * k + 1UZ], T(0), T(1e-4))) << std::format("delta spectrum bin {} imag", k);
             }
+        };
+
+        "transform refuses a short or misaligned buffer"_test = [] {
+            SimdFFT<T, Transform::Complex>            setup(64UZ);
+            std::vector<T, gr::allocator::Aligned<T>> in(128UZ);
+            std::vector<T, gr::allocator::Aligned<T>> out(128UZ);
+            const auto                                shortOut = setup.transform(forward, ordered, in, std::span<T>(out.data(), 64UZ));
+            expect(fatal(!shortOut.has_value()));
+            expect(shortOut.error().message.contains("size mismatch")) << shortOut.error().message;
+            std::vector<T, gr::allocator::Aligned<T>> wide(130UZ);
+            const auto                                misaligned = setup.transform(forward, ordered, std::span<const T>(wide.data() + 1, 128UZ), out);
+            expect(fatal(!misaligned.has_value()));
+            expect(misaligned.error().message.contains("aligned")) << misaligned.error().message;
+            expect(setup.transform(forward, ordered, in, out).has_value()) << "the same buffers, aligned and full, are accepted";
         };
 
         using enum Transform;
@@ -107,7 +121,7 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
                     }
 
                     SimdFFT<T, Flag::transform> setup(N);
-                    setup.template transform<Direction::Forward, Flag::ordering>(input, output);
+                    boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Forward, Flag::ordering>(input, output).has_value()));
 
                     // compute magnitudes
                     const std::size_t num_bins = is_real ? (N / 2 + 1) : N;
@@ -163,7 +177,7 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
                 }
 
                 SimdFFT<T, Flag::transform> setup(N);
-                setup.template transform<Direction::Forward, Flag::ordering>(input, spectrum);
+                boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Forward, Flag::ordering>(input, spectrum).has_value()));
                 T spectrum_energy = T{0};
                 for (std::size_t i = 0; i < nSamples; ++i) {
                     spectrum_energy += std::abs(spectrum[i]);
@@ -171,7 +185,7 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
 
                 std::string spectrumE = std::format("spectrum energy: {}, first few values: {} {} {} {}", //
                     spectrum_energy, spectrum[0], spectrum[1], spectrum[2], spectrum[3]);
-                setup.template transform<Direction::Backward, Flag::ordering>(spectrum, reconstructed);
+                boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Backward, Flag::ordering>(spectrum, reconstructed).has_value()));
 
                 for (auto& val : reconstructed) {
                     val /= N;
@@ -231,8 +245,8 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
                 }
 
                 SimdFFT<T, Flag::transform> setup(N);
-                setup.template transform<Direction::Forward, Flag::ordering>(input, spectrum);
-                setup.template transform<Direction::Backward, Flag::ordering>(spectrum, reconstructed);
+                boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Forward, Flag::ordering>(input, spectrum).has_value()));
+                boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Backward, Flag::ordering>(spectrum, reconstructed).has_value()));
 
                 for (auto& val : reconstructed) {
                     val /= N;
@@ -385,7 +399,7 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
             std::vector<T, gr::allocator::Aligned<T>> output(N);
 
             SimdFFT<T, Real> setup(N);
-            setup.template transform<Direction::Forward, Ordered>(input, output);
+            boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Forward, Ordered>(input, output).has_value()));
 
             // all energy should be at DC
             expect(le(std::abs(output[0] - T(1.5) * T(N)), T(1e-4f))) << "DC component";
@@ -404,7 +418,7 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
 
             std::vector<T, gr::allocator::Aligned<T>> output(N);
             SimdFFT<T, Real>                          setup(N);
-            setup.template transform<Direction::Forward, Ordered>(input, output);
+            boost::ut::expect(boost::ut::fatal(setup.template transform<Direction::Forward, Ordered>(input, output).has_value()));
 
             // all energy at Nyquist (bin N/2)
             expect(gt(std::abs(output[1]), T(0.9) * T(N))) << "Nyquist magnitude";
@@ -425,9 +439,9 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
             }
 
             SimdFFT<T, Complex> setup(N);
-            setup.transform(forward, ordered, x, fx);
-            setup.transform(forward, ordered, y, fy);
-            setup.transform(forward, ordered, sum, fsum);
+            boost::ut::expect(boost::ut::fatal(setup.transform(forward, ordered, x, fx).has_value()));
+            boost::ut::expect(boost::ut::fatal(setup.transform(forward, ordered, y, fy).has_value()));
+            boost::ut::expect(boost::ut::fatal(setup.transform(forward, ordered, sum, fsum).has_value()));
 
             // check FFT(x+y) = FFT(x) + FFT(y)
             T max_error = T{0};
@@ -499,7 +513,7 @@ void checkRealAgainstDft(std::size_t n, const RealDftReference& reference) {
     }
 
     SimdFFT<T, Transform::Real> plan(n);
-    plan.template transform<Direction::Forward, Order::Ordered>(input, output);
+    boost::ut::expect(boost::ut::fatal(plan.template transform<Direction::Forward, Order::Ordered>(input, output).has_value()));
 
     // the ordered real layout: [0] the DC bin, [1] the Nyquist bin, ([2k], [2k+1]) the k-th bin
     double     numerator   = 0.;
@@ -523,7 +537,7 @@ void checkRealAgainstDft(std::size_t n, const RealDftReference& reference) {
         spectrum[2UZ * k]       = static_cast<T>(reference.spectrum[k].real());
         spectrum[2UZ * k + 1UZ] = static_cast<T>(reference.spectrum[k].imag());
     }
-    plan.template transform<Direction::Backward, Order::Ordered>(spectrum, reconstructed);
+    boost::ut::expect(boost::ut::fatal(plan.template transform<Direction::Backward, Order::Ordered>(spectrum, reconstructed).has_value()));
 
     numerator   = 0.;
     denominator = 0.;

@@ -5,6 +5,7 @@
 #include <bit>
 #include <complex>
 #include <execution>
+#include <expected>
 #include <numbers>
 #include <ranges>
 #include <stdexcept>
@@ -276,8 +277,8 @@ struct FFT {
 
     template<typename InRange, typename OutRange>
     bool trySimdFFT(const InRange& in, OutRange&& out) {
-        if (simdFFT.size() != in.size()) {
-            simdFFT.resize(in.size());
+        if (simdFFT.size() != in.size() && !simdFFT.resize(in.size())) {
+            return false;
         }
         if constexpr (kTransform == Transform::Complex) {
             return trySimdFFT_C2C(in, out, in.size());
@@ -527,8 +528,7 @@ private:
             if (gr::allocator::isAligned(in.data(), 64UZ) && gr::allocator::isAligned(out.data(), 64UZ)) { // zero-copy path (same precision and aligned)
                 std::span<const ValueType> inputSpan(reinterpret_cast<const ValueType*>(in.data()), nElements);
                 std::span<ValueType>       outputSpan(reinterpret_cast<ValueType*>(out.data()), nElements);
-                simdFFT.template transform<kDirection, Order::Ordered>(inputSpan, outputSpan);
-                return true;
+                return simdFFT.template transform<kDirection, Order::Ordered>(inputSpan, outputSpan).has_value();
             } // future else: copy and avoid reinterpret_cast (slightly UB)
         }
 
@@ -546,7 +546,9 @@ private:
             alignedInputBuffer[i] = static_cast<ValueType>(inputPtr[i]);
         }
 
-        simdFFT.template transform<kDirection, Order::Ordered>(alignedInputBuffer, alignedOutputBuffer);
+        if (!simdFFT.template transform<kDirection, Order::Ordered>(alignedInputBuffer, alignedOutputBuffer)) {
+            return false;
+        }
 
         // copy output with type conversion if needed
         auto* outputPtr = reinterpret_cast<ValueType*>(out.data());
@@ -566,15 +568,16 @@ private:
             alignedOutputBuffer.resize(N); // packed real: [DC, Nyq, re1, im1, ...]
         }
 
+        std::expected<void, gr::Error> done;
         if constexpr (std::is_same_v<InputValueType, ValueType>) {
             if (gr::allocator::isAligned(in.data(), 64UZ)) { // input is cacheline-aligned
-                simdFFT.template transform<kDirection, Order::Ordered>(std::span<const ValueType>{in.data(), N}, alignedOutputBuffer);
+                done = simdFFT.template transform<kDirection, Order::Ordered>(std::span<const ValueType>{in.data(), N}, alignedOutputBuffer);
             } else { // not cacheline-aligned -> copy to aligned scratch
                 if (alignedInputBuffer.size() != N) {
                     alignedInputBuffer.resize(N);
                 }
                 std::memcpy(alignedInputBuffer.data(), in.data(), N * sizeof(ValueType));
-                simdFFT.template transform<kDirection, Order::Ordered>(std::span<const ValueType>{alignedInputBuffer.data(), N}, alignedOutputBuffer);
+                done = simdFFT.template transform<kDirection, Order::Ordered>(std::span<const ValueType>{alignedInputBuffer.data(), N}, alignedOutputBuffer);
             }
         } else { // type conversion needed
             if (alignedInputBuffer.size() != N) {
@@ -583,7 +586,10 @@ private:
             for (std::size_t i = 0; i < N; ++i) { // element-wise conversion (memcpy is invalid across types)
                 alignedInputBuffer[i] = static_cast<ValueType>(in[i]);
             }
-            simdFFT.template transform<kDirection, Order::Ordered>(std::span<const ValueType>{alignedInputBuffer.data(), N}, alignedOutputBuffer);
+            done = simdFFT.template transform<kDirection, Order::Ordered>(std::span<const ValueType>{alignedInputBuffer.data(), N}, alignedOutputBuffer);
+        }
+        if (!done) {
+            return false;
         }
 
         // unpack to full spectrum: [DC, Nyquist, re1, im1, re2, im2, ...] → N complex values
