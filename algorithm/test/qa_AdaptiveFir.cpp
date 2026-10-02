@@ -12,11 +12,11 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/AdaptiveFir.hpp>
 #include <gnuradio-4.0/algorithm/digital/Constellation.hpp>
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
@@ -406,9 +406,9 @@ const boost::ut::suite<"AdaptiveFir modulus reference"> adaptiveFirModulusTests 
         const Alphabet qpsk = Alphabet::qpsk();
         const Alphabet psk8 = Alphabet::psk8();
 
-        const double bpskRatio = modulusReference(bpsk.points());
-        const double qpskRatio = modulusReference(qpsk.points());
-        const double psk8Ratio = modulusReference(psk8.points());
+        const double bpskRatio = modulusReference(bpsk.points()).value();
+        const double qpskRatio = modulusReference(qpsk.points()).value();
+        const double psk8Ratio = modulusReference(psk8.points()).value();
 
         std::println("AdaptiveFir modulus reference: bpsk {:.17g}, qpsk {:.17g}, 8psk {:.17g}", bpskRatio, qpskRatio, psk8Ratio);
 
@@ -419,7 +419,7 @@ const boost::ut::suite<"AdaptiveFir modulus reference"> adaptiveFirModulusTests 
 
     "a unit-power 16qam alphabet has a modulus reference of 1.32"_test = [] {
         const auto   qam16 = gr::digital::Constellation<double>::qam(16UZ);
-        const double ratio = modulusReference(qam16.points());
+        const double ratio = modulusReference(qam16.points()).value();
 
         std::println("AdaptiveFir modulus reference: unit-power 16qam {:.17g}", ratio);
 
@@ -427,10 +427,12 @@ const boost::ut::suite<"AdaptiveFir modulus reference"> adaptiveFirModulusTests 
     };
 
     "the modulus reference needs an alphabet that carries power"_test = [] {
-        expect(throws<std::invalid_argument>([] { std::ignore = modulusReference(std::span<const Complex>{}); })) << "an empty alphabet";
+        const auto empty = modulusReference(std::span<const Complex>{});
+        expect(!empty.has_value() && empty.error().message.contains("empty")) << "an empty alphabet";
 
         const std::vector<Complex> silent(4UZ, Complex{});
-        expect(throws<std::invalid_argument>([&silent] { std::ignore = modulusReference(std::span<const Complex>(silent)); })) << "an alphabet of zeros";
+        const auto                 powerless = modulusReference(std::span<const Complex>(silent));
+        expect(!powerless.has_value() && powerless.error().message.contains("no power")) << "an alphabet of zeros";
     };
 };
 
@@ -441,7 +443,7 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
         AdaptiveFir<double> filter;
 
         for (const std::size_t nTaps : {0UZ, 2UZ, 10UZ, kMaxTaps + 1UZ, kMaxTaps + 2UZ, 1000UZ}) {
-            expect(throws<std::invalid_argument>([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
+            expect(throws<gr::exception>([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
         }
         for (const std::size_t nTaps : {1UZ, 3UZ, kMaxTaps}) {
             expect(nothrow([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
@@ -452,7 +454,7 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
         AdaptiveFir<double> filter;
 
         for (const double stepSize : {0., 1., -0.1, 1.5, std::numeric_limits<double>::quiet_NaN()}) {
-            expect(throws<std::invalid_argument>([&filter, stepSize] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, stepSize, 1.); })) << std::format("step size {}", stepSize);
+            expect(throws<gr::exception>([&filter, stepSize] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, stepSize, 1.); })) << std::format("step size {}", stepSize);
         }
         expect(nothrow([&filter] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.5, 1.); })) << "a step size in range";
     };
@@ -461,10 +463,10 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
         AdaptiveFir<double> filter;
 
         for (const double referenceRatio : {0., -1., std::numeric_limits<double>::quiet_NaN()}) {
-            expect(throws<std::invalid_argument>([&filter, referenceRatio] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Cma, 0.01, referenceRatio); })) << std::format("modulus reference {}", referenceRatio);
+            expect(throws<gr::exception>([&filter, referenceRatio] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Cma, 0.01, referenceRatio); })) << std::format("modulus reference {}", referenceRatio);
         }
         for (const double bound : {1., 0.5, 0., -10.}) {
-            expect(throws<std::invalid_argument>([&filter, bound] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1., bound); })) << std::format("divergence bound {}", bound);
+            expect(throws<gr::exception>([&filter, bound] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1., bound); })) << std::format("divergence bound {}", bound);
         }
         expect(nothrow([&filter] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1., 1.0001); })) << "a divergence bound just above the spike's own energy";
     };
@@ -489,8 +491,10 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
         expect(adaptiveAlgorithmFrom("cma") == AdaptiveAlgorithm::Cma);
 
         for (const std::string_view name : {"", "LMS", "Lms", "rls", "cma ", " lms", "constant_modulus"}) {
-            expect(throws<std::invalid_argument>([name] { std::ignore = adaptiveAlgorithmFrom(name); })) << std::format("'{}' is not an algorithm name", name);
+            expect(!adaptiveAlgorithmFrom(name).has_value()) << std::format("'{}' is not an algorithm name", name);
         }
+        const auto unknown = adaptiveAlgorithmFrom("rls");
+        expect(!unknown.has_value() && unknown.error().message.contains("'rls'")) << "the error quotes the name";
     };
 };
 

@@ -5,11 +5,13 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
+
+#include <gnuradio-4.0/Message.hpp>
 
 namespace gr::digital {
 
@@ -20,7 +22,8 @@ enum class AdaptiveAlgorithm {
     Cma   ///< constant modulus, blind: the reference is the constellation's own modulus statistic
 };
 
-[[nodiscard]] inline AdaptiveAlgorithm adaptiveAlgorithmFrom(std::string_view name) {
+/// The adaptation rule @p name selects; a `gr::Error` quoting @p name for anything but the three names.
+[[nodiscard]] inline std::expected<AdaptiveAlgorithm, gr::Error> adaptiveAlgorithmFrom(std::string_view name) {
     if (name == "lms") {
         return AdaptiveAlgorithm::Lms;
     }
@@ -30,7 +33,7 @@ enum class AdaptiveAlgorithm {
     if (name == "cma") {
         return AdaptiveAlgorithm::Cma;
     }
-    throw std::invalid_argument(std::format("gr::digital::AdaptiveFir: unknown algorithm '{}'; lms, nlms or cma", name));
+    return std::unexpected(gr::Error(std::format("gr::digital::AdaptiveFir: unknown algorithm '{}'; lms, nlms or cma", name)));
 }
 
 /**
@@ -76,6 +79,8 @@ struct AdaptiveFir {
     /**
      * @brief Sizes the filter, sets its rule, and initializes the taps to the center spike.
      *
+     * Throws `gr::exception` for a parameter outside the range stated below.
+     *
      * @param nTaps            odd, 1 to kMaxTaps; the center-spike delay is (nTaps-1)/2 samples
      * @param algorithm        which update rule to run
      * @param stepSize         mu, in (0, 1)
@@ -84,16 +89,16 @@ struct AdaptiveFir {
      */
     void configure(std::size_t nTaps, AdaptiveAlgorithm algorithm, double stepSize, double referenceRatio, double divergenceBound = 100.) {
         if (nTaps < 1UZ || nTaps > kMaxTaps || (nTaps % 2UZ) == 0UZ) {
-            throw std::invalid_argument(std::format("gr::digital::AdaptiveFir: {} taps; the range is 1 to {} and the count must be odd so the spike has a center", nTaps, kMaxTaps));
+            throw gr::exception(std::format("gr::digital::AdaptiveFir: {} taps; the range is 1 to {} and the count must be odd so the spike has a center", nTaps, kMaxTaps));
         }
         if (!(stepSize > 0.) || !(stepSize < 1.)) {
-            throw std::invalid_argument(std::format("gr::digital::AdaptiveFir: step size {} is outside (0, 1)", stepSize));
+            throw gr::exception(std::format("gr::digital::AdaptiveFir: step size {} is outside (0, 1)", stepSize));
         }
         if (!(referenceRatio > 0.)) {
-            throw std::invalid_argument(std::format("gr::digital::AdaptiveFir: the modulus reference {} must be positive", referenceRatio));
+            throw gr::exception(std::format("gr::digital::AdaptiveFir: the modulus reference {} must be positive", referenceRatio));
         }
         if (!(divergenceBound > 1.)) {
-            throw std::invalid_argument(std::format("gr::digital::AdaptiveFir: the divergence bound {} must exceed the energy of the initial spike", divergenceBound));
+            throw gr::exception(std::format("gr::digital::AdaptiveFir: the divergence bound {} must exceed the energy of the initial spike", divergenceBound));
         }
 
         _nTaps           = nTaps;
@@ -213,10 +218,11 @@ struct AdaptiveFir {
 };
 
 /// `R2 = E[|a|^4] / E[|a|^2]` over an alphabet, the modulus statistic the constant-modulus rule drives toward.
+/// An empty alphabet or one without power is a `gr::Error`.
 template<std::floating_point F>
-[[nodiscard]] double modulusReference(std::span<const std::complex<F>> alphabet) {
+[[nodiscard]] std::expected<double, gr::Error> modulusReference(std::span<const std::complex<F>> alphabet) {
     if (alphabet.empty()) {
-        throw std::invalid_argument("gr::digital::modulusReference: the alphabet is empty");
+        return std::unexpected(gr::Error("gr::digital::modulusReference: the alphabet is empty"));
     }
     double second = 0.;
     double fourth = 0.;
@@ -228,7 +234,7 @@ template<std::floating_point F>
         fourth += squared * squared;
     }
     if (!(second > 0.)) {
-        throw std::invalid_argument("gr::digital::modulusReference: the alphabet carries no power");
+        return std::unexpected(gr::Error("gr::digital::modulusReference: the alphabet carries no power"));
     }
     return fourth / second;
 }
