@@ -6,12 +6,14 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/math/Decibel.hpp>
 
 /**
@@ -198,13 +200,15 @@ public:
         ++_n;
     }
 
-    void add(std::span<const std::complex<float>> in0, std::span<const std::complex<float>> in1) {
+    /// @brief Accumulate paired samples. Spans of unequal length are an error, and nothing is accumulated then.
+    [[nodiscard]] std::expected<void, gr::Error> add(std::span<const std::complex<float>> in0, std::span<const std::complex<float>> in1, std::source_location loc = std::source_location::current()) {
         if (in0.size() != in1.size()) {
-            throw std::invalid_argument(std::format("gr::measurement::BranchCovariance::add: {} samples on branch 0 against {} on branch 1", in0.size(), in1.size()));
+            return std::unexpected(gr::Error(std::format("gr::measurement::BranchCovariance::add: {} samples on branch 0 against {} on branch 1", in0.size(), in1.size()), loc));
         }
         for (std::size_t k = 0UZ; k < in0.size(); ++k) {
             add(in0[k], in1[k]);
         }
+        return {};
     }
 
     [[nodiscard]] std::size_t          count() const noexcept { return _n; }
@@ -218,17 +222,19 @@ public:
      * @param mode        maximal ratio, or the stronger branch alone
      * @param norm        what the weights are scaled to
      * @param noisePowers empty for equal branch noise, or exactly two positive entries to whiten by
+     *
+     * Another count of noise powers, or one that is not positive and finite, is an error.
      */
-    [[nodiscard]] PolarizationEstimate solve(PolarizationMode mode = PolarizationMode::mrc, PolarizationNormalization norm = PolarizationNormalization::unit_noise, std::span<const double> noisePowers = {}) const {
+    [[nodiscard]] std::expected<PolarizationEstimate, gr::Error> solve(PolarizationMode mode = PolarizationMode::mrc, PolarizationNormalization norm = PolarizationNormalization::unit_noise, std::span<const double> noisePowers = {}, std::source_location loc = std::source_location::current()) const {
         double n0 = 1.;
         double n1 = 1.;
         if (!noisePowers.empty()) {
             if (noisePowers.size() != 2UZ) {
-                throw std::invalid_argument(std::format("gr::measurement::BranchCovariance::solve: {} noise powers — two branches take two", noisePowers.size()));
+                return std::unexpected(gr::Error(std::format("gr::measurement::BranchCovariance::solve: {} noise powers — two branches take two", noisePowers.size()), loc));
             }
             for (const double power : noisePowers) {
                 if (!std::isfinite(power) || !(power > 0.)) {
-                    throw std::invalid_argument(std::format("gr::measurement::BranchCovariance::solve: a noise power of {} is not positive and finite", power));
+                    return std::unexpected(gr::Error(std::format("gr::measurement::BranchCovariance::solve: a noise power of {} is not positive and finite", power), loc));
                 }
             }
             n0 = noisePowers[0];
@@ -330,16 +336,17 @@ private:
  *
  * Each output sample costs two complex multiply-accumulates. The orthogonal output costs two more. There is no
  * transcendental function and no branch. Pass an empty @p ortho to skip the second output and its arithmetic.
+ * Unequal inputs or an output span that is too short is an error, and nothing is written then.
  */
-inline void polarizationCombine(std::span<const std::complex<float>> in0, std::span<const std::complex<float>> in1, const PolarizationEstimate& estimate, std::span<std::complex<float>> out, std::span<std::complex<float>> ortho = {}) {
+[[nodiscard]] inline std::expected<void, gr::Error> polarizationCombine(std::span<const std::complex<float>> in0, std::span<const std::complex<float>> in1, const PolarizationEstimate& estimate, std::span<std::complex<float>> out, std::span<std::complex<float>> ortho = {}, std::source_location loc = std::source_location::current()) {
     if (in0.size() != in1.size()) {
-        throw std::invalid_argument(std::format("gr::measurement::polarizationCombine: {} samples on branch 0 against {} on branch 1", in0.size(), in1.size()));
+        return std::unexpected(gr::Error(std::format("gr::measurement::polarizationCombine: {} samples on branch 0 against {} on branch 1", in0.size(), in1.size()), loc));
     }
     if (out.size() < in0.size()) {
-        throw std::invalid_argument(std::format("gr::measurement::polarizationCombine: {} outputs for {} samples", out.size(), in0.size()));
+        return std::unexpected(gr::Error(std::format("gr::measurement::polarizationCombine: {} outputs for {} samples", out.size(), in0.size()), loc));
     }
     if (!ortho.empty() && ortho.size() < in0.size()) {
-        throw std::invalid_argument(std::format("gr::measurement::polarizationCombine: {} orthogonal outputs for {} samples", ortho.size(), in0.size()));
+        return std::unexpected(gr::Error(std::format("gr::measurement::polarizationCombine: {} orthogonal outputs for {} samples", ortho.size(), in0.size()), loc));
     }
 
     const std::complex<float> w0 = static_cast<std::complex<float>>(std::conj(estimate.weight0));
@@ -355,6 +362,7 @@ inline void polarizationCombine(std::span<const std::complex<float>> in0, std::s
             ortho[k] = u0 * in0[k] + u1 * in1[k];
         }
     }
+    return {};
 }
 
 } // namespace gr::measurement

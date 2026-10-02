@@ -9,7 +9,6 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/measurement/PolarizationCombiner.hpp>
@@ -80,8 +79,8 @@ struct Scene {
 [[nodiscard]] double realizedSnr(const Scene& scene, const PolarizationEstimate& estimate) {
     std::vector<Complex> signal(scene.signal0.size());
     std::vector<Complex> noise(scene.noise0.size());
-    polarizationCombine(scene.signal0, scene.signal1, estimate, signal);
-    polarizationCombine(scene.noise0, scene.noise1, estimate, noise);
+    expect(polarizationCombine(scene.signal0, scene.signal1, estimate, signal).has_value());
+    expect(polarizationCombine(scene.noise0, scene.noise1, estimate, noise).has_value());
     return meanPower(signal) / meanPower(noise);
 }
 
@@ -114,7 +113,7 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
                 const Complex b = 0.7f * a + noise.complexSample();
                 covariance.add(a, b);
             }
-            const PolarizationEstimate estimate = covariance.solve();
+            const PolarizationEstimate estimate = covariance.solve().value();
             const double               sum      = estimate.branchSnr0 + estimate.branchSnr1;
             worst                               = std::max(worst, std::abs(sum - estimate.combinedSnr) / estimate.combinedSnr);
         }
@@ -132,8 +131,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         const Scene                   scene = makeScene(noise, {1., 0.}, h1, kNoise, kNoise, kWindow);
 
         BranchCovariance covariance;
-        covariance.add(scene.branch0, scene.branch1);
-        const PolarizationEstimate estimate = covariance.solve();
+        expect(covariance.add(scene.branch0, scene.branch1).has_value());
+        const PolarizationEstimate estimate = covariance.solve().value();
 
         const double tolerance = 4. / std::sqrt(static_cast<double>(kWindow));
         std::println("channel recovery at M = {}: relative phase {:.5f} against -2, amplitude ratio {:.5f} against 2, tolerance {:.5f}", kWindow, estimate.relativePhase, estimate.amplitudeRatio, tolerance);
@@ -171,8 +170,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
             const Scene applied  = makeScene(noise, {1., 0.}, arm.h1, kNoise, kNoise, kWindow);
 
             BranchCovariance covariance;
-            covariance.add(training.branch0, training.branch1);
-            const PolarizationEstimate estimate = covariance.solve();
+            expect(covariance.add(training.branch0, training.branch1).has_value());
+            const PolarizationEstimate estimate = covariance.solve().value();
 
             const double combined = realizedSnr(applied, estimate);
             const double branch0  = meanPower(applied.signal0) / meanPower(applied.noise0);
@@ -197,8 +196,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         for (std::size_t window = 0UZ; window < 8UZ; ++window) {
             const Scene      scene = makeScene(noise, {1., 0.}, h1, 0.05, 0.05, kWindow);
             BranchCovariance covariance;
-            covariance.add(scene.branch0, scene.branch1);
-            const PolarizationEstimate estimate = covariance.solve();
+            expect(covariance.add(scene.branch0, scene.branch1).has_value());
+            const PolarizationEstimate estimate = covariance.solve().value();
 
             // An eigenvector is defined up to a unit-modulus scalar. A solver that did not pin one would put a random
             // phase on the combined output at each of these boundaries.
@@ -224,8 +223,8 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         const Scene                   scene = makeScene(noise, {1., 0.}, h1, 0.01, 0.01, kWindow);
 
         BranchCovariance covariance;
-        covariance.add(scene.branch0, scene.branch1);
-        const PolarizationEstimate estimate = covariance.solve();
+        expect(covariance.add(scene.branch0, scene.branch1).has_value());
+        const PolarizationEstimate estimate = covariance.solve().value();
 
         // The algebraic identity first. `u = [-conj(w_1), conj(w_0)]` is orthogonal to `w` by construction.
         const std::complex<double> inner = std::conj(estimate.weight0) * estimate.ortho0 + std::conj(estimate.weight1) * estimate.ortho1;
@@ -233,7 +232,7 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
 
         std::vector<Complex> combined(kWindow);
         std::vector<Complex> ortho(kWindow);
-        polarizationCombine(scene.signal0, scene.signal1, estimate, combined, ortho);
+        expect(polarizationCombine(scene.signal0, scene.signal1, estimate, combined, ortho).has_value());
         const double leak = toDb(meanPower(ortho) / meanPower(combined));
         std::println("the orthogonal port carries the signal {:.1f} dB below the combined port", leak);
         expect(lt(leak, -40.)) << "the null is a null";
@@ -255,9 +254,9 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
             const Scene                scene     = makeScene(noise, {1., 0.}, h1, 0.05, 0.05, kWindow);
 
             BranchCovariance covariance;
-            covariance.add(scene.branch0, scene.branch1);
-            const PolarizationEstimate chosen = covariance.solve(PolarizationMode::selection);
-            const PolarizationEstimate mrc    = covariance.solve(PolarizationMode::mrc);
+            expect(covariance.add(scene.branch0, scene.branch1).has_value());
+            const PolarizationEstimate chosen = covariance.solve(PolarizationMode::selection).value();
+            const PolarizationEstimate mrc    = covariance.solve(PolarizationMode::mrc).value();
 
             if (selected >= 0 && chosen.selectedBranch != selected) {
                 ++switches;
@@ -285,7 +284,7 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
             const Complex sample{static_cast<float>(std::cos(0.31 * static_cast<double>(k))), static_cast<float>(std::sin(0.31 * static_cast<double>(k)))};
             noiseless.add(sample, sample);
         }
-        const PolarizationEstimate hot = noiseless.solve();
+        const PolarizationEstimate hot = noiseless.solve().value();
         expect(hot.saturatedSnr) << "an unbounded ratio is flagged";
         expect(hot.branchSnr0 == kPolarizationSaturation) << "and reported at the stated 60 dB cap";
         expect(hot.combinedSnr == kPolarizationSaturation);
@@ -300,15 +299,15 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         noise.fillComplex(only0);
 
         BranchCovariance lonely;
-        lonely.add(only0, empty);
-        const PolarizationEstimate degenerate = lonely.solve();
+        expect(lonely.add(only0, empty).has_value());
+        const PolarizationEstimate degenerate = lonely.solve().value();
         expect(degenerate.saturatedRatio) << "the unbounded amplitude ratio is flagged";
         expect(degenerate.amplitudeRatio == kPolarizationSaturation);
         expect(degenerate.weight0 == std::complex<double>{1., 0.});
         expect(degenerate.weight1 == std::complex<double>{0., 0.});
 
         std::vector<Complex> out(kWindow);
-        polarizationCombine(only0, empty, degenerate, out);
+        expect(polarizationCombine(only0, empty, degenerate, out).has_value());
         expect(that % std::ranges::equal(out, only0)) << "and the output is branch 0, bit for bit";
 
         // A ratio of zero reads in dB at the stated floor, and the gain over the branches stays finite.
@@ -328,10 +327,10 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         const std::vector<double>     powers = {0.02, 0.2};
 
         BranchCovariance covariance;
-        covariance.add(scene.branch0, scene.branch1);
+        expect(covariance.add(scene.branch0, scene.branch1).has_value());
 
-        const PolarizationEstimate whitened = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise, powers);
-        const PolarizationEstimate assumed  = covariance.solve();
+        const PolarizationEstimate whitened = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise, powers).value();
+        const PolarizationEstimate assumed  = covariance.solve().value();
 
         const double branch0 = meanPower(scene.signal0) / meanPower(scene.noise0);
         const double branch1 = meanPower(scene.signal1) / meanPower(scene.noise1);
@@ -342,8 +341,10 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         expect(approx(toDb(best), toDb(branch0 + branch1), 0.05)) << "whitening reaches the optimum with a ten-to-one noise imbalance";
         expect(gt(best, naive)) << "and the equal-noise assumption does not";
 
-        expect(throws<std::invalid_argument>([&] { (void)covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise, std::vector<double>{1.}); })) << "two branches take two noise powers";
-        expect(throws<std::invalid_argument>([&] { (void)covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise, std::vector<double>{1., 0.}); })) << "and both must be positive";
+        const auto oneNoisePower = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise, std::vector<double>{1.});
+        expect(fatal(!oneNoisePower.has_value())) << "two branches take two noise powers";
+        expect(oneNoisePower.error().message.contains("1 noise powers")) << oneNoisePower.error().message;
+        expect(!covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise, std::vector<double>{1., 0.}).has_value()) << "and both must be positive";
     };
 
     "the covariance does not depend on how the stream is chunked"_test = [] {
@@ -354,13 +355,13 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         const Scene                   scene = makeScene(noise, {1., 0.}, {0.6, 0.3}, 0.05, 0.05, kWindow);
 
         BranchCovariance whole;
-        whole.add(scene.branch0, scene.branch1);
+        expect(whole.add(scene.branch0, scene.branch1).has_value());
 
         for (const std::size_t chunk : {1UZ, 7UZ, 1'000UZ, 12'345UZ}) {
             BranchCovariance pieced;
             for (std::size_t at = 0UZ; at < kWindow; at += chunk) {
                 const std::size_t n = std::min(chunk, kWindow - at);
-                pieced.add(std::span<const Complex>(scene.branch0).subspan(at, n), std::span<const Complex>(scene.branch1).subspan(at, n));
+                expect(pieced.add(std::span<const Complex>(scene.branch0).subspan(at, n), std::span<const Complex>(scene.branch1).subspan(at, n)).has_value());
             }
             expect(pieced.a() == whole.a()) << std::format("chunk {} changed the covariance", chunk);
             expect(pieced.b() == whole.b());
@@ -379,20 +380,26 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         const std::vector<Complex> in1{{5.f, 6.f}, {7.f, 8.f}};
         std::vector<Complex>       out(2UZ);
         std::vector<Complex>       ortho(2UZ);
-        polarizationCombine(in0, in1, first, out, ortho);
+        expect(polarizationCombine(in0, in1, first, out, ortho).has_value());
         expect(that % std::ranges::equal(out, in0)) << "branch 0 passes through bit for bit before anything is measured";
         expect(that % std::ranges::equal(ortho, in1)) << "and branch 1 goes to the orthogonal port";
 
         const PolarizationEstimate second = polarizationPassthrough(1UZ);
-        polarizationCombine(in0, in1, second, out, ortho);
+        expect(polarizationCombine(in0, in1, second, out, ortho).has_value());
         expect(that % std::ranges::equal(out, in1));
 
-        expect(throws<std::invalid_argument>([&] { polarizationCombine(in0, std::span<const Complex>(in1).first(1UZ), first, out); })) << "the two branches are consumed in lockstep";
-        expect(throws<std::invalid_argument>([&] { polarizationCombine(in0, in1, first, std::span<Complex>(out).first(1UZ)); })) << "one output short";
-        expect(throws<std::invalid_argument>([&] { polarizationCombine(in0, in1, first, out, std::span<Complex>(ortho).first(1UZ)); })) << "one orthogonal output short";
+        const auto unpaired = polarizationCombine(in0, std::span<const Complex>(in1).first(1UZ), first, out);
+        expect(fatal(!unpaired.has_value())) << "the two branches are consumed in lockstep";
+        expect(unpaired.error().message.contains("against 1 on branch 1")) << unpaired.error().message;
+        expect(!polarizationCombine(in0, in1, first, std::span<Complex>(out).first(1UZ)).has_value()) << "one output short";
+        expect(!polarizationCombine(in0, in1, first, out, std::span<Complex>(ortho).first(1UZ)).has_value()) << "one orthogonal output short";
 
-        BranchCovariance covariance;
-        expect(throws<std::invalid_argument>([&] { covariance.add(in0, std::span<const Complex>(in1).first(1UZ)); }));
+        BranchCovariance  covariance;
+        const std::size_t before  = covariance.count();
+        const auto        refused = covariance.add(in0, std::span<const Complex>(in1).first(1UZ));
+        expect(fatal(!refused.has_value()));
+        expect(refused.error().message.contains("BranchCovariance::add")) << refused.error().message;
+        expect(eq(covariance.count(), before)) << "a refused pair accumulates nothing";
         expect(covariance.count() == 0UZ);
         expect(covariance.a() == 0.) << "an empty covariance divides by nothing";
     };
@@ -405,10 +412,10 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         const Scene                   scene = makeScene(noise, {1., 0.}, {0.7, 0.2}, 0.05, 0.05, kWindow);
 
         BranchCovariance covariance;
-        covariance.add(scene.branch0, scene.branch1);
+        expect(covariance.add(scene.branch0, scene.branch1).has_value());
 
-        const PolarizationEstimate unitNoise  = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise);
-        const PolarizationEstimate unitSignal = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_signal);
+        const PolarizationEstimate unitNoise  = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_noise).value();
+        const PolarizationEstimate unitSignal = covariance.solve(PolarizationMode::mrc, PolarizationNormalization::unit_signal).value();
 
         expect(unitNoise.scale == 1.);
         expect(approx(std::norm(unitNoise.weight0) + std::norm(unitNoise.weight1), 1., 1e-12)) << "unit_noise keeps a unit weight vector, so the output noise power is one branch's";
@@ -417,7 +424,7 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         // identifiable. unit_signal is the scale that makes the combined output's signal power one, and it reports that
         // scale.
         std::vector<Complex> signal(kWindow);
-        polarizationCombine(scene.signal0, scene.signal1, unitSignal, signal);
+        expect(polarizationCombine(scene.signal0, scene.signal1, unitSignal, signal).has_value());
         std::println("unit_signal scale {:.6f}, realized output signal power {:.6f}", unitSignal.scale, meanPower(signal));
         expect(approx(meanPower(signal), 1., 0.02)) << "the combined output's signal power is 1";
         expect(approx(unitSignal.scale, 1. / std::sqrt(unitSignal.lambdaPlus - unitSignal.lambdaMinus), 1e-12));

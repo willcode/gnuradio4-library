@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <format>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -36,21 +37,21 @@ void benchPolarizationCombiner() {
         noise.fillComplex(branch1);
 
         gr::measurement::BranchCovariance covariance;
-        covariance.add(branch0, branch1);
-        const gr::measurement::PolarizationEstimate estimate = covariance.solve();
+        std::ignore                                          = covariance.add(branch0, branch1);
+        const gr::measurement::PolarizationEstimate estimate = covariance.solve().value();
 
         std::vector<Complex> out(kSamples);
         std::vector<Complex> ortho(kSamples);
 
         const auto combined                                                    = std::format("polarizationCombine, no orthogonal port, N={}", kSamples);
-        ::benchmark::benchmark<kRepeats>(std::string_view(combined), kSamples) = [&] { gr::measurement::polarizationCombine(branch0, branch1, estimate, out); };
+        ::benchmark::benchmark<kRepeats>(std::string_view(combined), kSamples) = [&] { std::ignore = gr::measurement::polarizationCombine(branch0, branch1, estimate, out); };
         const auto both                                                        = std::format("polarizationCombine, with it,           N={}", kSamples);
-        ::benchmark::benchmark<kRepeats>(std::string_view(both), kSamples)     = [&] { gr::measurement::polarizationCombine(branch0, branch1, estimate, out, ortho); };
+        ::benchmark::benchmark<kRepeats>(std::string_view(both), kSamples)     = [&] { std::ignore = gr::measurement::polarizationCombine(branch0, branch1, estimate, out, ortho); };
 
         const auto accumulate                                                    = std::format("BranchCovariance::add,                  N={}", kSamples);
         ::benchmark::benchmark<kRepeats>(std::string_view(accumulate), kSamples) = [&] {
             gr::measurement::BranchCovariance window;
-            window.add(branch0, branch1);
+            std::ignore = window.add(branch0, branch1);
             ::benchmark::force_to_memory(window);
         };
         ::benchmark::results::add_separator();
