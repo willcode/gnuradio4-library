@@ -6,14 +6,15 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <numbers>
 #include <numeric>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 
 namespace gr::digital {
@@ -25,7 +26,8 @@ enum class CpmPulseShape {
     Gaussian      ///< a Gaussian of bandwidth-symbol-time product bt convolved with one symbol of rectangle: GFSK
 };
 
-[[nodiscard]] inline CpmPulseShape cpmPulseShapeFrom(std::string_view name) {
+/// The pulse family @p name selects; a `gr::Error` quoting @p name for anything but the three names.
+[[nodiscard]] inline std::expected<CpmPulseShape, gr::Error> cpmPulseShapeFrom(std::string_view name) {
     if (name == "rect") {
         return CpmPulseShape::Rect;
     }
@@ -35,7 +37,7 @@ enum class CpmPulseShape {
     if (name == "gaussian") {
         return CpmPulseShape::Gaussian;
     }
-    throw std::invalid_argument(std::format("gr::digital::CpmPulse: unknown pulse '{}'; rect, raised_cosine or gaussian", name));
+    return std::unexpected(gr::Error(std::format("gr::digital::CpmPulse: unknown pulse '{}'; rect, raised_cosine or gaussian", name)));
 }
 
 /**
@@ -79,6 +81,8 @@ struct CpmPulse {
     /**
      * @brief Designs the frequency pulse and clears the symbol history.
      *
+     * Throws `gr::exception` for a parameter outside the range stated below.
+     *
      * @param shape             which family the pulse comes from
      * @param symbolSpan        L, the symbols the pulse spans; 1 is full response
      * @param samplesPerSymbol  output samples per symbol, at least 2
@@ -87,16 +91,16 @@ struct CpmPulse {
      */
     void configure(CpmPulseShape shape, std::size_t symbolSpan, std::size_t samplesPerSymbol, double modulationIndex, double bt) {
         if (samplesPerSymbol < 2UZ) {
-            throw std::invalid_argument(std::format("gr::digital::CpmPulse: {} samples per symbol; two is the fewest a phase trajectory can be drawn on", samplesPerSymbol));
+            throw gr::exception(std::format("gr::digital::CpmPulse: {} samples per symbol; two is the fewest a phase trajectory can be drawn on", samplesPerSymbol));
         }
         if (symbolSpan < 1UZ || symbolSpan > kMaxSymbolSpan) {
-            throw std::invalid_argument(std::format("gr::digital::CpmPulse: pulse spans {} symbols; the range is 1 to {}", symbolSpan, kMaxSymbolSpan));
+            throw gr::exception(std::format("gr::digital::CpmPulse: pulse spans {} symbols; the range is 1 to {}", symbolSpan, kMaxSymbolSpan));
         }
         if (!(modulationIndex > 0.) || !(modulationIndex <= kMaxModulationIndex)) {
-            throw std::invalid_argument(std::format("gr::digital::CpmPulse: modulation index {} is outside (0, {}]", modulationIndex, kMaxModulationIndex));
+            throw gr::exception(std::format("gr::digital::CpmPulse: modulation index {} is outside (0, {}]", modulationIndex, kMaxModulationIndex));
         }
         if (shape == CpmPulseShape::Gaussian && !(bt > 0.)) {
-            throw std::invalid_argument(std::format("gr::digital::CpmPulse: bandwidth-symbol-time product {} must be positive", bt));
+            throw gr::exception(std::format("gr::digital::CpmPulse: bandwidth-symbol-time product {} must be positive", bt));
         }
 
         _samplesPerSymbol = samplesPerSymbol;
@@ -198,7 +202,7 @@ private:
 
         const double total = std::accumulate(g.begin(), g.end(), 0.);
         if (!(total > 0.)) {
-            throw std::invalid_argument("gr::digital::CpmPulse: the designed pulse carries no area to normalize");
+            throw gr::exception("gr::digital::CpmPulse: the designed pulse carries no area to normalize");
         }
         const double norm = 1. / (2. * total);
         std::ranges::transform(g, g.begin(), [norm](double v) { return norm * v; });

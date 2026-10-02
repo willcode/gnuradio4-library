@@ -12,11 +12,11 @@
 #include <numeric>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/CpmPulse.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
@@ -346,21 +346,21 @@ const boost::ut::suite<"CpmPulse configuration"> cpmPulseConfigurationTests = []
     "configure refuses geometry outside the supported range"_test = [] {
         CpmPulse<double> kernel;
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 0UZ, 0.5, 0.3); })) << "zero samples per symbol";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 1UZ, 0.5, 0.3); })) << "one sample per symbol";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 0UZ, 0.5, 0.3); })) << "zero samples per symbol";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 1UZ, 0.5, 0.3); })) << "one sample per symbol";
         expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 2UZ, 0.5, 0.3); })) << "two samples per symbol";
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 0UZ, 4UZ, 0.5, 0.3); })) << "zero symbol span";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, CpmPulse<double>::kMaxSymbolSpan + 1UZ, 4UZ, 0.5, 0.3); })) << "one symbol past the longest span";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, 0UZ, 4UZ, 0.5, 0.3); })) << "zero symbol span";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, CpmPulse<double>::kMaxSymbolSpan + 1UZ, 4UZ, 0.5, 0.3); })) << "one symbol past the longest span";
         expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, CpmPulse<double>::kMaxSymbolSpan, 4UZ, 0.5, 0.3); })) << "the longest supported span";
     };
 
     "configure refuses modulation indices outside (0, 4]"_test = [] {
         CpmPulse<double> kernel;
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, 0., 0.3); })) << "modulation index zero";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, -1., 0.3); })) << "negative modulation index";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, 4.5, 0.3); })) << "modulation index past the ceiling";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, 0., 0.3); })) << "modulation index zero";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, -1., 0.3); })) << "negative modulation index";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, 4.5, 0.3); })) << "modulation index past the ceiling";
         expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, CpmPulse<double>::kMaxModulationIndex, 0.3); })) << "the largest accepted modulation index";
         expect(eq(kernel.modulationIndex(), CpmPulse<double>::kMaxModulationIndex));
     };
@@ -368,8 +368,8 @@ const boost::ut::suite<"CpmPulse configuration"> cpmPulseConfigurationTests = []
     "bt is validated where the design reads it"_test = [] {
         CpmPulse<double> kernel;
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Gaussian, 3UZ, 4UZ, 0.5, 0.); })) << "gaussian with a zero bandwidth-symbol-time product";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Gaussian, 3UZ, 4UZ, 0.5, -1.); })) << "gaussian with a negative bandwidth-symbol-time product";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Gaussian, 3UZ, 4UZ, 0.5, 0.); })) << "gaussian with a zero bandwidth-symbol-time product";
+        expect(throws<gr::exception>([&] { kernel.configure(CpmPulseShape::Gaussian, 3UZ, 4UZ, 0.5, -1.); })) << "gaussian with a negative bandwidth-symbol-time product";
 
         for (const double bt : {0., -1.}) {
             expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, 3UZ, 4UZ, 0.5, bt); })) << std::format("rect with bt {}", bt);
@@ -385,8 +385,10 @@ const boost::ut::suite<"CpmPulse configuration"> cpmPulseConfigurationTests = []
         expect(cpmPulseShapeFrom("gaussian") == CpmPulseShape::Gaussian);
 
         for (const std::string_view name : {"", "Rect", "RECT", "gauss", "raised cosine", "raisedcosine", "gmsk"}) {
-            expect(throws<std::invalid_argument>([name] { std::ignore = cpmPulseShapeFrom(name); })) << std::format("'{}' is not a pulse name", name);
+            expect(!cpmPulseShapeFrom(name).has_value()) << std::format("'{}' is not a pulse name", name);
         }
+        const auto unknown = cpmPulseShapeFrom("gmsk");
+        expect(!unknown.has_value() && unknown.error().message.contains("'gmsk'")) << "the error quotes the name";
     };
 };
 
