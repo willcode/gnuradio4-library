@@ -11,6 +11,7 @@
 #include <format>
 #include <numbers>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -69,11 +70,11 @@ void benchFractionalDelay() {
 
             std::vector<std::uint64_t> delays(kSamples);
             for (std::size_t k = 0UZ; k < kSamples; ++k) {
-                delays[k] = gr::filter::fractionalDelayQ32(400. + 100. * std::sin(static_cast<double>(k) * 1e-4));
+                delays[k] = gr::filter::fractionalDelayQ32(400. + 100. * std::sin(static_cast<double>(k) * 1e-4)).value();
             }
 
             const auto name                                                    = std::format("delay line, L={:3} q={} B={:3}, N={}", arm.bank, arm.order, line.tapsPerArm(), kSamples);
-            ::benchmark::benchmark<kRepeats>(std::string_view(name), kSamples) = [&] { line.process(in, delays, out); };
+            ::benchmark::benchmark<kRepeats>(std::string_view(name), kSamples) = [&] { std::ignore = line.process(in, delays, out); };
         }
         ::benchmark::results::add_separator();
     };
@@ -90,7 +91,7 @@ void benchFractionalDelay() {
 
         schedule.valuesFor(clock, 1'000'000ULL, seconds);
         const auto convert                                                 = std::format("fractionalDelayQ32 over a span,   N={}", kSamples);
-        ::benchmark::benchmark<200UZ>(std::string_view(convert), kSamples) = [&] { gr::filter::fractionalDelayQ32(seconds, 1e6, delays); };
+        ::benchmark::benchmark<200UZ>(std::string_view(convert), kSamples) = [&] { std::ignore = gr::filter::fractionalDelayQ32(seconds, 1e6, delays); };
         ::benchmark::results::add_separator();
     };
 }

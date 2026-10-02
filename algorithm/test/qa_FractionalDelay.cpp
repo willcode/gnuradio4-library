@@ -10,7 +10,6 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/filter/FractionalDelay.hpp>
@@ -115,11 +114,11 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
             for (const double f0 : {0.05, 0.15, 0.25, 0.35}) {
                 for (const double delay : {0., 0.25, 0.5, 0.75, 1.5, 7.125}) {
                     const std::vector<Complex> in = tone(f0, kSamples);
-                    std::vector<std::uint64_t> delays(kSamples, fractionalDelayQ32(delay));
+                    std::vector<std::uint64_t> delays(kSamples, fractionalDelayQ32(delay).value());
                     std::vector<Complex>       out(kSamples);
 
                     line.reset();
-                    line.process(in, delays, out);
+                    expect(line.process(in, delays, out).has_value());
 
                     // The first `history + tapsPerArm` outputs are the filter's transient over the zeroed history.
                     const std::size_t skip = line.historySamples() + line.tapsPerArm();
@@ -156,10 +155,10 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         const std::vector<Complex> in = tone(f0, kSamples);
         std::vector<std::uint64_t> delays(kSamples);
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
-            delays[k] = fractionalDelayQ32(kDelay0 + perTap * static_cast<double>(k));
+            delays[k] = fractionalDelayQ32(kDelay0 + perTap * static_cast<double>(k)).value();
         }
         std::vector<Complex> out(kSamples);
-        line.process(in, delays, out);
+        expect(line.process(in, delays, out).has_value());
 
         const std::size_t   skip = line.historySamples() + line.tapsPerArm();
         std::vector<double> residual(kSamples - skip);
@@ -203,8 +202,8 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         schedule.valuesFor(clock, 0ULL, walked);
 
         std::vector<std::uint64_t> delays(kSamples);
-        fractionalDelayQ32(walked, kSampleRate, delays);
-        expect(delays.front() == fractionalDelayQ32(8.339e-3 * kSampleRate)) << "the first sample carries the first knot";
+        expect(fatal(fractionalDelayQ32(walked, kSampleRate, delays).has_value()));
+        expect(delays.front() == fractionalDelayQ32(8.339e-3 * kSampleRate).value()) << "the first sample carries the first knot";
         expect(delays.front() > delays.back()) << "and the table's fall shows up as a fall in the delay";
 
         const std::uint64_t maxWhole = delays.front() >> 32;
@@ -216,7 +215,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
 
         const std::vector<Complex> in = tone(0.1, kSamples);
         std::vector<Complex>       out(kSamples);
-        expect(nothrow([&] { line.process(in, delays, out); }));
+        expect(line.process(in, delays, out).has_value());
     };
 
     "the stream does not depend on how it is chunked"_test = [] {
@@ -229,20 +228,20 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         for (std::size_t k = 0UZ; k < kSamples; ++k) {
             // A delay that moves within a chunk and across chunk boundaries. A per-call reset of the read position
             // would show up and would not cancel.
-            delays[k] = fractionalDelayQ32(30. + 12. * std::sin(kTwoPi * static_cast<double>(k) / 7'000.));
+            delays[k] = fractionalDelayQ32(30. + 12. * std::sin(kTwoPi * static_cast<double>(k) / 7'000.)).value();
         }
 
         for (const int order : {0, 1, 3}) {
             FractionalDelayLine<Complex> whole(32UZ, order, design.taps, 64ULL);
             std::vector<Complex>         reference(kSamples);
-            whole.process(in, delays, reference);
+            expect(whole.process(in, delays, reference).has_value());
 
             for (const std::size_t chunk : {1UZ, 7UZ, 1'000UZ, 12'345UZ}) {
                 FractionalDelayLine<Complex> pieced(32UZ, order, design.taps, 64ULL);
                 std::vector<Complex>         got(kSamples);
                 for (std::size_t at = 0UZ; at < kSamples; at += chunk) {
                     const std::size_t n = std::min(chunk, kSamples - at);
-                    pieced.process(std::span<const Complex>(in).subspan(at, n), std::span<const std::uint64_t>(delays).subspan(at, n), std::span<Complex>(got).subspan(at, n));
+                    expect(pieced.process(std::span<const Complex>(in).subspan(at, n), std::span<const std::uint64_t>(delays).subspan(at, n), std::span<Complex>(got).subspan(at, n)).has_value());
                 }
                 expect(that % std::ranges::equal(reference, got)) << std::format("order {}, chunk {} changed the stream", order, chunk);
             }
@@ -268,39 +267,51 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     "what the line refuses"_test = [] {
         const gr::filter::ResamplerDesign design = designFractionalDelay(8UZ, kRolloff);
 
-        expect(throws<std::invalid_argument>([&] { (void)FractionalDelayLine<Complex>(0UZ, 1, design.taps); })) << "a bank with no arms";
-        expect(throws<std::invalid_argument>([&] { (void)FractionalDelayLine<Complex>(8UZ, 2, design.taps); })) << "an order that is not 0, 1 or 3";
-        expect(throws<std::invalid_argument>([&] { (void)FractionalDelayLine<Complex>(8UZ, 1, std::span<const float>{}); })) << "no taps";
+        expect(throws<gr::exception>([&] { (void)FractionalDelayLine<Complex>(0UZ, 1, design.taps); })) << "a bank with no arms";
+        expect(throws<gr::exception>([&] { (void)FractionalDelayLine<Complex>(8UZ, 2, design.taps); })) << "an order that is not 0, 1 or 3";
+        expect(throws<gr::exception>([&] { (void)FractionalDelayLine<Complex>(8UZ, 1, std::span<const float>{}); })) << "no taps";
 
         FractionalDelayLine<Complex> line(8UZ, 1, design.taps, 4ULL);
         const std::vector<Complex>   in(64UZ);
         std::vector<Complex>         out(64UZ);
 
-        expect(throws<std::invalid_argument>([&] { line.process(in, std::vector<std::uint64_t>(63UZ), out); })) << "one delay short of the samples";
-        expect(throws<std::invalid_argument>([&] { line.process(in, std::vector<std::uint64_t>(64UZ), std::span<Complex>(out).first(63UZ)); })) << "one output short";
-        expect(throws<std::invalid_argument>([&] { line.process(in, std::vector<std::uint64_t>(64UZ, fractionalDelayQ32(5.)), out); })) << "a delay past the history the line was sized for";
-        expect(nothrow([&] { line.process(in, std::vector<std::uint64_t>(64UZ, fractionalDelayQ32(4.)), out); })) << "and the bound itself is admitted";
+        expect(throws<gr::exception>([&] { line.setTaps(std::span<const float>{}); })) << "a setting with no taps";
+        expect(throws<gr::exception>([&] { line.setMaxDelay(kMaxFractionalDelaySamples); })) << "a history the fixed point cannot carry";
+        expect(throws<gr::exception>([&] { line.growMaxDelay(kMaxFractionalDelaySamples); }));
+        expect(eq(line.maxDelaySamples(), 4ULL)) << "a refused setting leaves the line as it was";
 
-        expect(throws<std::invalid_argument>([] { (void)fractionalDelayQ32(-1.); })) << "a negative delay is a read from the future";
-        expect(throws<std::invalid_argument>([] { (void)fractionalDelayQ32(std::numeric_limits<double>::quiet_NaN()); }));
-        expect(throws<std::invalid_argument>([] { (void)fractionalDelayQ32(static_cast<double>(kMaxFractionalDelaySamples)); })) << "2^31 samples is where the fixed point runs out";
-        expect(nothrow([] { (void)fractionalDelayQ32(static_cast<double>(kMaxFractionalDelaySamples) - 1.); }));
+        const auto unpaired = line.process(in, std::vector<std::uint64_t>(63UZ), out);
+        expect(fatal(!unpaired.has_value())) << "one delay short of the samples";
+        expect(unpaired.error().message.contains("must be paired")) << unpaired.error().message;
+        expect(!line.process(in, std::vector<std::uint64_t>(64UZ), std::span<Complex>(out).first(63UZ)).has_value()) << "one output short";
+        expect(!line.process(in, std::vector<std::uint64_t>(64UZ, fractionalDelayQ32(5.).value()), out).has_value()) << "a delay past the history the line was sized for";
+        expect(line.process(in, std::vector<std::uint64_t>(64UZ, fractionalDelayQ32(4.).value()), out).has_value()) << "and the bound itself is admitted";
+
+        const auto negative = fractionalDelayQ32(-1.);
+        expect(fatal(!negative.has_value())) << "a negative delay is a read from the future";
+        expect(negative.error().message.contains("not a finite non-negative number")) << negative.error().message;
+        expect(!fractionalDelayQ32(std::numeric_limits<double>::quiet_NaN()).has_value());
+        expect(!fractionalDelayQ32(static_cast<double>(kMaxFractionalDelaySamples)).has_value()) << "2^31 samples is where the fixed point runs out";
+        expect(fractionalDelayQ32(static_cast<double>(kMaxFractionalDelaySamples) - 1.).has_value());
 
         std::vector<std::uint64_t> two(2UZ);
-        expect(throws<std::invalid_argument>([&] { fractionalDelayQ32(std::vector<double>{1e-3, 2e-3, 3e-3}, 48'000., two); })) << "the span conversion is paired too";
-        expect(throws<std::invalid_argument>([&] { fractionalDelayQ32(std::vector<double>{1e-3, 2e-3}, -1., two); })) << "a rate that is not positive";
+        const auto                 unpairedSpan = fractionalDelayQ32(std::vector<double>{1e-3, 2e-3, 3e-3}, 48'000., two);
+        expect(fatal(!unpairedSpan.has_value())) << "the span conversion is paired too";
+        expect(unpairedSpan.error().message.contains("3 delays against 2 outputs")) << unpairedSpan.error().message;
+        expect(!fractionalDelayQ32(std::vector<double>{1e-3, 2e-3}, -1., two).has_value()) << "a rate that is not positive";
+        expect(!fractionalDelayQ32(std::vector<double>{1e-3, -2e-3}, 48'000., two).has_value()) << "a refused delay inside the span";
     };
 
     "the fixed point is exact where it says it is"_test = [] {
-        expect(fractionalDelayQ32(0.) == 0ULL);
-        expect(fractionalDelayQ32(1.) == kArbitraryOne);
-        expect(fractionalDelayQ32(0.5) == kArbitraryOne / 2ULL);
-        expect(fractionalDelayQ32(7.125) == 7ULL * kArbitraryOne + kArbitraryOne / 8ULL) << "an eighth is a whole number of Q32 steps";
+        expect(fractionalDelayQ32(0.).value() == 0ULL);
+        expect(fractionalDelayQ32(1.).value() == kArbitraryOne);
+        expect(fractionalDelayQ32(0.5).value() == kArbitraryOne / 2ULL);
+        expect(fractionalDelayQ32(7.125).value() == 7ULL * kArbitraryOne + kArbitraryOne / 8ULL) << "an eighth is a whole number of Q32 steps";
 
         // The claim in the header. A `double`'s spacing is seven orders below what the representation keeps. Two delays
         // a `2^-32` sample apart land on adjacent fixed-point values, not on the same one.
         constexpr double kStep = 1. / 4'294'967'296.;
-        expect(fractionalDelayQ32(3. + kStep) - fractionalDelayQ32(3.) == 1ULL);
+        expect(fractionalDelayQ32(3. + kStep).value() - fractionalDelayQ32(3.).value() == 1ULL);
     };
 };
 

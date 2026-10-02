@@ -5,11 +5,13 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/ArbitraryResampler.hpp>
 
 /**
@@ -79,13 +81,14 @@ inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
  */
 [[nodiscard]] inline ResamplerDesign designFractionalDelay(std::size_t bankSize, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1) { return designArbitraryResampler(bankSize, 1.0, rolloff, attenuationDb, maxRippleDb); }
 
-/// @brief A delay in whole and fractional samples as the `Q32` the line consumes.
-[[nodiscard]] inline std::uint64_t fractionalDelayQ32(double delaySamples) {
+/// @brief A delay in whole and fractional samples as the `Q32` the line consumes. A delay that is negative, not
+/// finite or past `kMaxFractionalDelaySamples` is an error.
+[[nodiscard]] inline std::expected<std::uint64_t, gr::Error> fractionalDelayQ32(double delaySamples, std::source_location loc = std::source_location::current()) {
     if (!std::isfinite(delaySamples) || delaySamples < 0.) {
-        throw std::invalid_argument(std::format("gr::filter::fractionalDelayQ32: a delay of {} samples is not a finite non-negative number", delaySamples));
+        return std::unexpected(gr::Error(std::format("gr::filter::fractionalDelayQ32: a delay of {} samples is not a finite non-negative number", delaySamples), loc));
     }
     if (delaySamples >= static_cast<double>(kMaxFractionalDelaySamples)) {
-        throw std::invalid_argument(std::format("gr::filter::fractionalDelayQ32: {} samples is at or past the {} the fixed point carries", delaySamples, kMaxFractionalDelaySamples));
+        return std::unexpected(gr::Error(std::format("gr::filter::fractionalDelayQ32: {} samples is at or past the {} the fixed point carries", delaySamples, kMaxFractionalDelaySamples), loc));
     }
     return static_cast<std::uint64_t>(std::llround(delaySamples * static_cast<double>(kArbitraryOne)));
 }
@@ -95,18 +98,24 @@ inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
  *
  * The delays are in seconds, one per sample. This function converts a delay from `double` to fixed point. It is a free
  * function and not a step inside `process`. The schedule walk and the delay line stay independent. The line takes fixed
- * point from any source. A caller with no schedule does not need one.
+ * point from any source. A caller with no schedule does not need one. A mismatched length, a sample rate that is not
+ * positive and finite, or a delay the scalar form refuses is an error. The outputs before a refused delay are written.
  */
-inline void fractionalDelayQ32(std::span<const double> delaySeconds, double sampleRateHz, std::span<std::uint64_t> out) {
+[[nodiscard]] inline std::expected<void, gr::Error> fractionalDelayQ32(std::span<const double> delaySeconds, double sampleRateHz, std::span<std::uint64_t> out, std::source_location loc = std::source_location::current()) {
     if (out.size() != delaySeconds.size()) {
-        throw std::invalid_argument(std::format("gr::filter::fractionalDelayQ32: {} delays against {} outputs", delaySeconds.size(), out.size()));
+        return std::unexpected(gr::Error(std::format("gr::filter::fractionalDelayQ32: {} delays against {} outputs", delaySeconds.size(), out.size()), loc));
     }
     if (!std::isfinite(sampleRateHz) || !(sampleRateHz > 0.)) {
-        throw std::invalid_argument(std::format("gr::filter::fractionalDelayQ32: a sample rate of {} Hz is not positive and finite", sampleRateHz));
+        return std::unexpected(gr::Error(std::format("gr::filter::fractionalDelayQ32: a sample rate of {} Hz is not positive and finite", sampleRateHz), loc));
     }
     for (std::size_t i = 0UZ; i < delaySeconds.size(); ++i) {
-        out[i] = fractionalDelayQ32(delaySeconds[i] * sampleRateHz);
+        const std::expected<std::uint64_t, gr::Error> q32 = fractionalDelayQ32(delaySeconds[i] * sampleRateHz, loc);
+        if (!q32) {
+            return std::unexpected(q32.error());
+        }
+        out[i] = *q32;
     }
+    return {};
 }
 
 /**
@@ -124,6 +133,9 @@ inline void fractionalDelayQ32(std::span<const double> delaySeconds, double samp
  * past the window's anchor. The anchor is therefore placed one sample behind the output. Every read then stays
  * inside the caller's span. That sample makes the output independent of the call split. Without it the last
  * output of each call would depend on the first sample of the next call.
+ *
+ * The constructor, `setTaps`, `setMaxDelay` and `growMaxDelay` throw `gr::exception` for a value outside their
+ * domain. `process` returns its error.
  */
 template<typename T>
 requires PolyphaseSample<T>
@@ -145,13 +157,13 @@ public:
      */
     FractionalDelayLine(std::size_t bankSize, int order, std::span<const float> taps, std::uint64_t maxWholeDelay = 0ULL) : _bankSize(bankSize), _order(order) {
         if (bankSize == 0UZ) {
-            throw std::invalid_argument("FractionalDelayLine: the bank must have at least one arm");
+            throw gr::exception("FractionalDelayLine: the bank must have at least one arm");
         }
         if (order != 0 && order != 1 && order != 3) {
-            throw std::invalid_argument("FractionalDelayLine: the interpolation order is 0, 1 or 3");
+            throw gr::exception("FractionalDelayLine: the interpolation order is 0, 1 or 3");
         }
         if (taps.empty()) {
-            throw std::invalid_argument("FractionalDelayLine: no taps");
+            throw gr::exception("FractionalDelayLine: no taps");
         }
         build(taps);
         setMaxDelay(maxWholeDelay);
@@ -169,7 +181,7 @@ public:
      */
     void setTaps(std::span<const float> taps) {
         if (taps.empty()) {
-            throw std::invalid_argument("FractionalDelayLine: no taps");
+            throw gr::exception("FractionalDelayLine: no taps");
         }
         build(taps);
         setMaxDelay(_maxWholeDelay);
@@ -178,7 +190,7 @@ public:
     /// @brief Size the history for delays up to @p maxWholeDelay whole samples, and clear it.
     void setMaxDelay(std::uint64_t maxWholeDelay) {
         if (maxWholeDelay >= kMaxFractionalDelaySamples) {
-            throw std::invalid_argument(std::format("FractionalDelayLine: a history for {} samples is at or past the {} the fixed point carries", maxWholeDelay, kMaxFractionalDelaySamples));
+            throw gr::exception(std::format("FractionalDelayLine: a history for {} samples is at or past the {} the fixed point carries", maxWholeDelay, kMaxFractionalDelaySamples));
         }
         _maxWholeDelay = maxWholeDelay;
         _history       = historyNeeded(maxWholeDelay);
@@ -199,7 +211,7 @@ public:
             return;
         }
         if (maxWholeDelay >= kMaxFractionalDelaySamples) {
-            throw std::invalid_argument(std::format("FractionalDelayLine: a history for {} samples is at or past the {} the fixed point carries", maxWholeDelay, kMaxFractionalDelaySamples));
+            throw gr::exception(std::format("FractionalDelayLine: a history for {} samples is at or past the {} the fixed point carries", maxWholeDelay, kMaxFractionalDelaySamples));
         }
         const std::size_t grown = historyNeeded(maxWholeDelay);
         std::vector<T>    next(grown + _windowLength, T{});
@@ -241,19 +253,19 @@ public:
      * @param delayQ32  one delay per input sample, in whole samples in the high 32 bits
      * @param out       at least `in.size()` outputs
      *
-     * Throws for a delay whose whole part exceeds the history the line was sized for. It does not read past
-     * the history. The check is one pass of compares over the delay span. The per-sample cost is in the dot
-     * products, and the check adds little to it.
+     * Returns an error for unpaired spans, too few outputs, or a delay whose whole part exceeds the history the
+     * line was sized for, and then writes nothing. It does not read past the history. The check is one pass of
+     * compares over the delay span. The per-sample cost is in the dot products, and the check adds little to it.
      */
-    void process(std::span<const T> in, std::span<const std::uint64_t> delayQ32, std::span<T> out) {
+    [[nodiscard]] std::expected<void, gr::Error> process(std::span<const T> in, std::span<const std::uint64_t> delayQ32, std::span<T> out, std::source_location loc = std::source_location::current()) {
         if (in.size() != delayQ32.size()) {
-            throw std::invalid_argument(std::format("FractionalDelayLine::process: {} samples against {} delays — the two must be paired", in.size(), delayQ32.size()));
+            return std::unexpected(gr::Error(std::format("FractionalDelayLine::process: {} samples against {} delays — the two must be paired", in.size(), delayQ32.size()), loc));
         }
         if (out.size() < in.size()) {
-            throw std::invalid_argument(std::format("FractionalDelayLine::process: {} outputs for {} samples", out.size(), in.size()));
+            return std::unexpected(gr::Error(std::format("FractionalDelayLine::process: {} outputs for {} samples", out.size(), in.size()), loc));
         }
         if (in.empty()) {
-            return;
+            return {};
         }
 
         std::uint64_t worst = 0ULL;
@@ -261,7 +273,7 @@ public:
             worst = std::max(worst, delay);
         }
         if ((worst >> kArbitraryFractionBits) > _maxWholeDelay) {
-            throw std::invalid_argument(std::format("FractionalDelayLine::process: a delay of {} whole samples past the {} this line holds history for", worst >> kArbitraryFractionBits, _maxWholeDelay));
+            return std::unexpected(gr::Error(std::format("FractionalDelayLine::process: a delay of {} whole samples past the {} this line holds history for", worst >> kArbitraryFractionBits, _maxWholeDelay), loc));
         }
 
         const std::size_t n       = in.size();
@@ -302,6 +314,7 @@ public:
             std::copy_n(_window.begin() + static_cast<std::ptrdiff_t>(n), _history - n, _window.begin());
             std::copy_n(in.begin(), n, _window.begin() + static_cast<std::ptrdiff_t>(_history - n));
         }
+        return {};
     }
 
 private:
