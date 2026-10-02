@@ -685,12 +685,13 @@ namespace detail {
 /// @brief 1 at the center tap and 0 elsewhere.
 [[nodiscard]] inline constexpr double delta(double k) noexcept { return k == 0.0 ? 1.0 : 0.0; }
 
-/// @brief Window @p term over an odd length, second half copied so the taps are symmetric to the bit.
+/// @brief Window @p term over an odd length, second half copied so the taps are symmetric to the bit. A window the
+/// spec cannot build is an error.
 template<typename Term>
-[[nodiscard]] inline std::vector<double> symmetricKernel(std::size_t n, WindowSpec window, Term&& term) {
-    const auto shape = gr::algorithm::window::create<double>(window.type, n, window.param);
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> symmetricKernel(std::size_t n, WindowSpec window, Term&& term, std::source_location location) {
+    const auto shape = gr::algorithm::window::create<double>(window.type, n, window.param, location);
     if (!shape) {
-        throw std::invalid_argument(shape.error().message);
+        return std::unexpected(shape.error());
     }
     const std::vector<double>& w   = *shape;
     const std::size_t          mid = (n - 1UZ) / 2UZ;
@@ -758,30 +759,34 @@ template<typename Term>
  * normalized at its own reference the identity holds only to the two normalization factors'
  * departure from unity, which is a few parts in ten thousand.
  *
- * Frequencies are cycles per sample; a stated cutoff is the -6 dB point.
+ * Frequencies are cycles per sample; a stated cutoff is the -6 dB point. A window the spec cannot build is an error.
  */
-[[nodiscard]] inline std::vector<double> lowpassKernel(std::size_t n, double cutoff, WindowSpec window) {
-    return detail::symmetricKernel(oddLength(n), window, [cutoff](double k) { return detail::idealLowpass(cutoff, k); });
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> lowpassKernel(std::size_t n, double cutoff, WindowSpec window, std::source_location location = std::source_location::current()) {
+    return detail::symmetricKernel(oddLength(n), window, [cutoff](double k) { return detail::idealLowpass(cutoff, k); }, location);
 }
 
 /// @copydoc lowpassKernel
-[[nodiscard]] inline std::vector<double> highpassKernel(std::size_t n, double cutoff, WindowSpec window) {
-    return detail::symmetricKernel(oddLength(n), window, [cutoff](double k) { return detail::delta(k) - detail::idealLowpass(cutoff, k); });
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> highpassKernel(std::size_t n, double cutoff, WindowSpec window, std::source_location location = std::source_location::current()) {
+    return detail::symmetricKernel(oddLength(n), window, [cutoff](double k) { return detail::delta(k) - detail::idealLowpass(cutoff, k); }, location);
 }
 
 /// @copydoc lowpassKernel
-[[nodiscard]] inline std::vector<double> bandpassKernel(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window) {
-    return detail::symmetricKernel(oddLength(n, 5), window, [lowCutoff, highCutoff](double k) { return detail::idealLowpass(highCutoff, k) - detail::idealLowpass(lowCutoff, k); });
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> bandpassKernel(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, std::source_location location = std::source_location::current()) {
+    return detail::symmetricKernel(oddLength(n, 5), window, [lowCutoff, highCutoff](double k) { return detail::idealLowpass(highCutoff, k) - detail::idealLowpass(lowCutoff, k); }, location);
 }
 
 /// @copydoc lowpassKernel
-[[nodiscard]] inline std::vector<double> bandstopKernel(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window) {
-    return detail::symmetricKernel(oddLength(n, 5), window, [lowCutoff, highCutoff](double k) { return detail::delta(k) - detail::idealLowpass(highCutoff, k) + detail::idealLowpass(lowCutoff, k); });
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> bandstopKernel(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, std::source_location location = std::source_location::current()) {
+    return detail::symmetricKernel(oddLength(n, 5), window, [lowCutoff, highCutoff](double k) { return detail::delta(k) - detail::idealLowpass(highCutoff, k) + detail::idealLowpass(lowCutoff, k); }, location);
 }
 
 /// @brief A windowed-sinc low-pass, normalized to `A(0) = gain`. @p cutoff is the -6 dB point in cycles per sample.
 [[nodiscard]] inline std::expected<std::vector<float>, gr::Error> lowpass(std::size_t n, double cutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
-    std::vector<double> h = lowpassKernel(n, cutoff, window);
+    std::expected<std::vector<double>, gr::Error> kernel = lowpassKernel(n, cutoff, window, location);
+    if (!kernel) {
+        return std::unexpected(kernel.error());
+    }
+    std::vector<double>& h = *kernel;
     if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.0, gain, location); !normalized) {
         return std::unexpected(normalized.error());
     }
@@ -800,7 +805,11 @@ template<typename Term>
  * would divide by zero.
  */
 [[nodiscard]] inline std::expected<std::vector<float>, gr::Error> highpass(std::size_t n, double cutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
-    std::vector<double> h = highpassKernel(n, cutoff, window);
+    std::expected<std::vector<double>, gr::Error> kernel = highpassKernel(n, cutoff, window, location);
+    if (!kernel) {
+        return std::unexpected(kernel.error());
+    }
+    std::vector<double>& h = *kernel;
     if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.5, gain, location); !normalized) {
         return std::unexpected(normalized.error());
     }
@@ -816,7 +825,11 @@ template<typename Term>
  * @p transitionWidth, where a caller sizes from one, applies to both edges and is taken once.
  */
 [[nodiscard]] inline std::expected<std::vector<float>, gr::Error> bandpass(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
-    std::vector<double> h = bandpassKernel(n, lowCutoff, highCutoff, window);
+    std::expected<std::vector<double>, gr::Error> kernel = bandpassKernel(n, lowCutoff, highCutoff, window, location);
+    if (!kernel) {
+        return std::unexpected(kernel.error());
+    }
+    std::vector<double>& h = *kernel;
     if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.5 * (lowCutoff + highCutoff), gain, location); !normalized) {
         return std::unexpected(normalized.error());
     }
@@ -830,7 +843,11 @@ template<typename Term>
  * whenever the window is one at its own center, and it degrades gracefully where a window is not.
  */
 [[nodiscard]] inline std::expected<std::vector<float>, gr::Error> bandstop(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
-    std::vector<double> h = bandstopKernel(n, lowCutoff, highCutoff, window);
+    std::expected<std::vector<double>, gr::Error> kernel = bandstopKernel(n, lowCutoff, highCutoff, window, location);
+    if (!kernel) {
+        return std::unexpected(kernel.error());
+    }
+    std::vector<double>& h = *kernel;
     if (const std::expected<void, gr::Error> normalized = normalizeAt(h, 0.0, gain, location); !normalized) {
         return std::unexpected(normalized.error());
     }
@@ -854,7 +871,11 @@ template<typename Term>
  * @param highCutoff upper -6 dB point in cycles per sample, greater than @p lowCutoff
  */
 [[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> complexBandpass(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
-    std::vector<double> proto = lowpassKernel(oddLength(n, 5), 0.5 * (highCutoff - lowCutoff), window);
+    std::expected<std::vector<double>, gr::Error> kernel = lowpassKernel(oddLength(n, 5), 0.5 * (highCutoff - lowCutoff), window, location);
+    if (!kernel) {
+        return std::unexpected(kernel.error());
+    }
+    std::vector<double>& proto = *kernel;
     if (const std::expected<void, gr::Error> normalized = normalizeAt(proto, 0.0, gain, location); !normalized) {
         return std::unexpected(normalized.error());
     }
@@ -875,7 +896,11 @@ template<typename Term>
  * the delta on, and the band-stop is empty in turn.
  */
 [[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> complexBandstop(std::size_t n, double lowCutoff, double highCutoff, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
-    std::vector<double> proto = lowpassKernel(oddLength(n, 5), 0.5 * (highCutoff - lowCutoff), window);
+    std::expected<std::vector<double>, gr::Error> kernel = lowpassKernel(oddLength(n, 5), 0.5 * (highCutoff - lowCutoff), window, location);
+    if (!kernel) {
+        return std::unexpected(kernel.error());
+    }
+    std::vector<double>& proto = *kernel;
     if (const std::expected<void, gr::Error> normalized = normalizeAt(proto, 0.0, 1.0, location); !normalized) {
         return std::unexpected(normalized.error());
     }
@@ -1065,14 +1090,16 @@ template<typename Term>
  * `H = -j` across the band: positive frequencies are rotated by -90 degrees. An analytic signal is
  * `x[n-M] + j*y[n]`, this output paired with the input delayed by M samples.
  *
+ * A window the spec cannot build is an error.
+ *
  * @param n length; `hilbertLength` rounds to the parity that spends every tap
  */
-[[nodiscard]] inline std::vector<float> hilbert(std::size_t n, WindowSpec window, double gain = 1.0) {
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> hilbert(std::size_t n, WindowSpec window, double gain = 1.0, std::source_location location = std::source_location::current()) {
     const std::size_t len   = oddLength(n);
     const std::size_t mid   = (len - 1UZ) / 2UZ;
-    const auto        shape = gr::algorithm::window::create<double>(window.type, len, window.param);
+    const auto        shape = gr::algorithm::window::create<double>(window.type, len, window.param, location);
     if (!shape) {
-        throw std::invalid_argument(shape.error().message);
+        return std::unexpected(shape.error());
     }
     const std::vector<double>& w = *shape;
 

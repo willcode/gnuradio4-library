@@ -561,6 +561,13 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         expect(throws<gr::exception>([&] { kernel.setAveraging(0UZ); }));
         expect(throws<gr::exception>([&] { kernel.setFalseAlarmRate(1.); }));
     };
+
+    "the segmenter refuses a taper the window cannot build"_test = [] {
+        gr::analysis::WindowedSegmenter<float> segmenter;
+        expect(throws<gr::exception>([&] { segmenter.prepare(1UZ, 0UZ, 0., gr::algorithm::window::Type::Kaiser); })) << "a one-sample Kaiser window";
+        expect(nothrow([&] { segmenter.prepare(16UZ, 4UZ, 0., gr::algorithm::window::Type::Kaiser); }));
+        expect(eq(segmenter.taper.size(), 16UZ));
+    };
 };
 
 int main() { /* not needed for UT */ }

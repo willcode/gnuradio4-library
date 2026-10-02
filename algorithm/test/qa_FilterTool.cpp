@@ -904,6 +904,17 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
         expect(gt(fir::kaiserBeta(80.0), fir::kaiserBeta(50.0)));
     };
 
+    "a window the parameters cannot build is an error"_test = [] {
+        const FilterParameters kParams{.order = 4UZ, .fLow = 100., .fHigh = 200., .param = -1., .fs = 1000.};
+        const auto             lowPass = fir::designFilter<double>(gr::filter::Type::LOWPASS, kParams, Kaiser);
+        expect(fatal(!lowPass.has_value())) << "a negative Kaiser beta";
+        expect(lowPass.error().message.contains("Kaiser beta must be non-negative")) << lowPass.error().message;
+        expect(!fir::designFilter<double>(gr::filter::Type::HIGHPASS, kParams, Kaiser).has_value()) << "HIGHPASS";
+        expect(!fir::designFilter<double>(gr::filter::Type::BANDPASS, kParams, Kaiser).has_value()) << "BANDPASS";
+        expect(!fir::designFilter<double>(gr::filter::Type::BANDSTOP, kParams, Kaiser).has_value()) << "BANDSTOP";
+        expect(!fir::generateCoefficients<double>(31UZ, Kaiser, 0.1, -1.).has_value()) << "generateCoefficients";
+    };
+
     // A(f) against |H(f)|: the same size everywhere, and a sign the magnitude has thrown away
     "the signed amplitude carries the sign the magnitude drops"_test = [] {
         constexpr auto kParams  = FilterParameters{.order = 4UZ, .fLow = 100., .fHigh = 300., .fs = 1000.};

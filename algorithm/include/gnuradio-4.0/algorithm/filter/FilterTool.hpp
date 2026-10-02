@@ -1181,20 +1181,21 @@ template<std::floating_point T>
 
 namespace fir {
 
+/// @brief The windowed-sinc low-pass of @p N taps at @p fc cycles per sample. A window the parameters cannot build is an error.
 template<std::floating_point T>
-[[nodiscard]] inline constexpr FilterCoefficients<T> generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T param = std::numeric_limits<T>::quiet_NaN()) {
+[[nodiscard]] inline constexpr std::expected<FilterCoefficients<T>, gr::Error> generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T param = std::numeric_limits<T>::quiet_NaN(), std::source_location location = std::source_location::current()) {
     const T    M    = static_cast<T>(N - 1) / static_cast<T>(2);
     const auto sinc = [](T x, T a = std::numbers::pi_v<T>) noexcept -> T { return x == static_cast<T>(0) ? static_cast<T>(1) : std::sin(a * x) / (a * x); };
 
     std::vector<T> coefficients(N);
-    if (auto shaped = gr::algorithm::window::create(coefficients, window, param); !shaped) {
-        throw std::invalid_argument(shaped.error().message);
+    if (auto shaped = gr::algorithm::window::create(coefficients, window, param, location); !shaped) {
+        return std::unexpected(shaped.error());
     }
 
     std::size_t index = 0; // Index variable to keep track of the current index
     std::ranges::transform(coefficients, coefficients.begin(), [&index, M, fc, &sinc](T coeff) { return coeff * static_cast<T>(2) * fc * sinc(static_cast<T>(2) * fc * (static_cast<T>(index++) - M)); });
 
-    return {coefficients};
+    return FilterCoefficients<T>{coefficients};
 }
 
 /**
@@ -1250,7 +1251,11 @@ template<std::floating_point T>
     // design high-pass FIR filter using the window method
     switch (filterType) {
     case Type::LOWPASS: {
-        auto lowPassCoefficients    = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
+        auto lowPassShaped = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param), location);
+        if (!lowPassShaped) {
+            return std::unexpected(lowPassShaped.error());
+        }
+        auto& lowPassCoefficients   = *lowPassShaped;
         const auto [ok, actualGain] = normaliseFilterCoefficients(lowPassCoefficients, static_cast<T>(0), static_cast<T>(params.gain));
         if (ok) {
             return lowPassCoefficients;
@@ -1261,7 +1266,11 @@ template<std::floating_point T>
     }
     case Type::HIGHPASS: {
         // generate low-pass filter coefficients with "mirror" frequency (f_s/2 - f_c)
-        auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>((0.5 - params.fHigh / params.fs)), static_cast<T>(params.param));
+        auto highPassShaped = generateCoefficients<T>(N, window, static_cast<T>((0.5 - params.fHigh / params.fs)), static_cast<T>(params.param), location);
+        if (!highPassShaped) {
+            return std::unexpected(highPassShaped.error());
+        }
+        auto& highPassCoefficients = *highPassShaped;
 
         for (std::size_t n = 0UZ; n < N; ++n) {
             // apply spectral inversion by multiplying each coefficient with (-1)^n
@@ -1277,8 +1286,13 @@ template<std::floating_point T>
             location));
     }
     case Type::BANDPASS: {
-        auto bandPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
-        auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.param));
+        auto lowEdge  = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param), location);
+        auto highEdge = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.param), location);
+        if (!lowEdge || !highEdge) {
+            return std::unexpected(lowEdge ? highEdge.error() : lowEdge.error());
+        }
+        auto&       bandPassCoefficients = *lowEdge;
+        const auto& highPassCoefficients = *highEdge;
 
         std::transform(highPassCoefficients.b.begin(), highPassCoefficients.b.end(), bandPassCoefficients.b.begin(), bandPassCoefficients.b.begin(), std::minus<>());
 
@@ -1291,8 +1305,13 @@ template<std::floating_point T>
             location));
     }
     case Type::BANDSTOP: {
-        auto       bandStopCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
-        const auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.param));
+        auto lowEdge  = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param), location);
+        auto highEdge = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.param), location);
+        if (!lowEdge || !highEdge) {
+            return std::unexpected(lowEdge ? highEdge.error() : lowEdge.error());
+        }
+        auto&       bandStopCoefficients = *lowEdge;
+        const auto& highPassCoefficients = *highEdge;
 
         for (std::size_t n = 0; n < N; ++n) {
             bandStopCoefficients.b[n] -= highPassCoefficients.b[n];

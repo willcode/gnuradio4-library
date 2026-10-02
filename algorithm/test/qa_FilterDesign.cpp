@@ -458,10 +458,10 @@ const boost::ut::suite<"FIR band transform design"> bandDesignTests = [] {
         // w*2f*sinc(2fk) plus w*(delta(k) - 2f*sinc(2fk)) is w*delta(k) term by term, with nothing
         // left to round. This catches a sign error that the response checks would not.
         for (const std::size_t n : {31UZ, 87UZ, 175UZ}) {
-            const std::vector<double> low  = lowpassKernel(n, 0.125, kaiser60);
-            const std::vector<double> high = highpassKernel(n, 0.125, kaiser60);
-            const std::vector<double> pass = bandpassKernel(n, 0.1, 0.2, kaiser60);
-            const std::vector<double> stop = bandstopKernel(n, 0.1, 0.2, kaiser60);
+            const std::vector<double> low  = lowpassKernel(n, 0.125, kaiser60).value();
+            const std::vector<double> high = highpassKernel(n, 0.125, kaiser60).value();
+            const std::vector<double> pass = bandpassKernel(n, 0.1, 0.2, kaiser60).value();
+            const std::vector<double> stop = bandstopKernel(n, 0.1, 0.2, kaiser60).value();
             const std::size_t         mid  = (n - 1UZ) / 2UZ;
 
             for (std::size_t i = 0UZ; i < low.size(); ++i) {
@@ -726,7 +726,7 @@ const boost::ut::suite<"complex FIR band design"> complexDesignTests = [] {
 
         for (const std::size_t requested : {31UZ, 32UZ}) {
             const std::size_t   len   = oddLength(requested, 5UZ);
-            std::vector<double> proto = lowpassKernel(len, 0.5 * (highCutoff - lowCutoff), kaiser60);
+            std::vector<double> proto = lowpassKernel(len, 0.5 * (highCutoff - lowCutoff), kaiser60).value();
             normalizeAt(proto, 0.0, 1.0).value();
 
             const std::size_t                 mid = (len - 1UZ) / 2UZ;
@@ -883,7 +883,7 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
     "half a Hilbert transformer's taps are exactly zero"_test = [&] {
         for (const int n : {11, 31, 63, 127}) {
             for (const WindowSpec& window : windows) {
-                const std::vector<float> taps = hilbert(static_cast<std::size_t>(n), window);
+                const std::vector<float> taps = hilbert(static_cast<std::size_t>(n), window).value();
                 const int                mid  = (n - 1) / 2;
 
                 expect(eq(static_cast<double>(taps[static_cast<std::size_t>(mid)]), 0.0)) << "the center tap";
@@ -903,7 +903,7 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
 
     "the response is structurally zero at DC and at Nyquist"_test = [&] {
         for (const int n : {31, 63}) {
-            const std::vector<float> taps = hilbert(static_cast<std::size_t>(n), windows[0]);
+            const std::vector<float> taps = hilbert(static_cast<std::size_t>(n), windows[0]).value();
             expect(lt(std::abs(amplitudeAtOdd(taps, 0.0)), 1e-12)) << "type III: H(0) = 0 whatever the window";
             expect(lt(std::abs(amplitudeAtOdd(taps, 0.5)), 1e-12)) << "and H(fs/2) = 0";
         }
@@ -922,7 +922,7 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
         for (const Row& row : std::array<Row, 4>{{{11, 1.012577880, 0.967036063, 1.001004939}, {31, 0.996902114, 0.999996931, 1.000114019}, {63, 0.998472051, 0.999998654, 0.999974949}, {127, 0.999236854, 0.999999393, 0.999964121}}}) {
             const std::array<double, 3> want{row.hamming, row.blackmanHarris, row.kaiser7};
             for (std::size_t w = 0UZ; w < windows.size(); ++w) {
-                const double measured = std::abs(amplitudeAtOdd(hilbert(row.taps, windows[w]), 0.25));
+                const double measured = std::abs(amplitudeAtOdd(hilbert(row.taps, windows[w]).value(), 0.25));
                 expect(approx(measured, want[w], 5e-6)) << "abs(H(fs/4)) at " << row.taps << " taps, window " << w;
             }
         }
@@ -941,17 +941,17 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
                  {63, {0.997, 0.998, 0.9996}, {1.003, 1.000, 1.0003}},                                //
                  {127, {0.998, 0.99999, 0.9999}, {1.002, 1.00001, 1.0001}}}}) {
             for (std::size_t w = 0UZ; w < windows.size(); ++w) {
-                const BandLevels band = scanHilbert(hilbert(row.taps, windows[w]), 0.05).value();
+                const BandLevels band = scanHilbert(hilbert(row.taps, windows[w]).value(), 0.05).value();
                 expect(approx(band.minMag, row.lo[w], 1e-3)) << "band floor at " << row.taps << " taps, window " << w;
                 expect(approx(band.maxMag, row.hi[w], 1e-3)) << "band ceiling at " << row.taps << " taps, window " << w;
             }
         }
-        expect(lt(scanHilbert(hilbert(11, windows[0]), 0.05).value().minMag, 0.6)) << "eleven taps is not usable across 0.05 .. 0.45";
-        expect(gt(scanHilbert(hilbert(127, windows[0]), 0.05).value().minMag, 0.99)) << "127 taps is";
+        expect(lt(scanHilbert(hilbert(11, windows[0]).value(), 0.05).value().minMag, 0.6)) << "eleven taps is not usable across 0.05 .. 0.45";
+        expect(gt(scanHilbert(hilbert(127, windows[0]).value(), 0.05).value().minMag, 0.99)) << "127 taps is";
     };
 
     "halfResponseOdd is the sine sum halfResponse is not"_test = [&] {
-        const std::vector<float> taps = hilbert(63, windows[2]);
+        const std::vector<float> taps = hilbert(63, windows[2]).value();
         std::vector<double>      mag;
         halfResponseOdd(taps, mag).value();
 
@@ -976,18 +976,18 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
 
         // at M even the two outermost taps are among the zeros: two taps of arithmetic thrown away
         for (const std::size_t n : {61UZ, 65UZ}) {
-            const std::vector<float> wasteful = hilbert(n, windows[0]);
+            const std::vector<float> wasteful = hilbert(n, windows[0]).value();
             expect(eq(static_cast<double>(wasteful.front()), 0.0)) << n << " spends its outermost pair on zeros";
-            expect(that % (static_cast<double>(hilbert(hilbertLength(n), windows[0]).front()) != 0.0)) << hilbertLength(n) << " does not";
+            expect(that % (static_cast<double>(hilbert(hilbertLength(n), windows[0]).value().front()) != 0.0)) << hilbertLength(n) << " does not";
         }
     };
 
     "gain scales, and two calls agree"_test = [&] {
         for (const double gain : {1.0, 0.5, 1000.0}) {
-            const std::vector<float> taps = hilbert(63, windows[2], gain);
+            const std::vector<float> taps = hilbert(63, windows[2], gain).value();
             expect(approx(std::abs(amplitudeAtOdd(taps, 0.25)) / gain, 0.999974949, 1e-5));
         }
-        expect(that % identical(hilbert(63, windows[0]), hilbert(63, windows[0])));
+        expect(that % identical(hilbert(63, windows[0]).value(), hilbert(63, windows[0]).value()));
     };
 };
 
@@ -1094,6 +1094,31 @@ const boost::ut::suite<"FIR design errors"> designErrorTests = [] {
         const double zeroCenterAlpha = 1.0 / (1.0 - 4.0 / std::numbers::pi);
         expect(!rootRaisedCosine(31UZ, 1e-200, zeroCenterAlpha).has_value()) << "a pulse whose taps sum to zero";
         expect(!designRootRaisedCosine(31UZ, 1e-200, 1.0, zeroCenterAlpha).has_value()) << "the same pulse from rates";
+    };
+
+    "a window the spec cannot build is an error"_test = [] {
+        const WindowSpec negativeBeta{Type::Kaiser, -1.0};
+
+        const auto kernel = lowpassKernel(31UZ, 0.2, negativeBeta);
+        expect(fatal(!kernel.has_value())) << "lowpassKernel";
+        expect(kernel.error().message.contains("Kaiser beta must be non-negative")) << kernel.error().message;
+        expect(!highpassKernel(31UZ, 0.2, negativeBeta).has_value()) << "highpassKernel";
+        expect(!bandpassKernel(31UZ, 0.1, 0.2, negativeBeta).has_value()) << "bandpassKernel";
+        expect(!bandstopKernel(31UZ, 0.1, 0.2, negativeBeta).has_value()) << "bandstopKernel";
+
+        const auto design = lowpass(31UZ, 0.2, negativeBeta);
+        expect(fatal(!design.has_value())) << "lowpass";
+        expect(design.error().message.contains("Kaiser beta must be non-negative")) << design.error().message;
+        expect(!highpass(31UZ, 0.2, negativeBeta).has_value()) << "highpass";
+        expect(!bandpass(31UZ, 0.1, 0.2, negativeBeta).has_value()) << "bandpass";
+        expect(!bandstop(31UZ, 0.1, 0.2, negativeBeta).has_value()) << "bandstop";
+        expect(!complexBandpass(31UZ, 0.1, 0.2, negativeBeta).has_value()) << "complexBandpass";
+        expect(!complexBandstop(31UZ, 0.1, 0.2, negativeBeta).has_value()) << "complexBandstop";
+
+        const auto transformer = hilbert(31UZ, negativeBeta);
+        expect(fatal(!transformer.has_value())) << "hilbert";
+        expect(transformer.error().message.contains("Kaiser beta must be non-negative")) << transformer.error().message;
+        expect(hilbert(31UZ, WindowSpec{Type::Kaiser, 0.0}).has_value()) << "a zero beta builds";
     };
 
     "a design from a spec returns the length estimate's error"_test = [] {

@@ -229,8 +229,11 @@ struct WindowedSegmenter {
     /// @brief The hop an overlap implies, at least one sample.
     [[nodiscard]] static std::size_t hopFor(std::size_t length, double fraction) noexcept { return std::max(1UZ, static_cast<std::size_t>(std::llround(static_cast<double>(length) * (1. - fraction)))); }
 
-    /// @brief Adopt a geometry and a taper. `taperAcf` is left zeroed for the caller to fill. The estimator fills it
-    /// with the transform it already holds, which is the least costly way to correlate the taper.
+    /**
+     * @brief Adopt a geometry and a taper. `taperAcf` is left zeroed for the caller to fill. The estimator fills it
+     * with the transform it already holds, which is the least costly way to correlate the taper.
+     * @throws gr::exception with the window's message when the taper cannot be built at @p length.
+     */
     void prepare(std::size_t length, std::size_t lag, double fraction, gr::algorithm::window::Type type) {
         windowLength = length;
         maxLag       = lag;
@@ -239,7 +242,7 @@ struct WindowedSegmenter {
         hop          = hopFor(length, fraction);
         auto shape   = gr::algorithm::window::create<float>(type, length);
         if (!shape) {
-            throw std::invalid_argument(shape.error().message);
+            throw gr::exception(shape.error().message);
         }
         taper = std::move(*shape);
         taperAcf.assign(lag + 1UZ, 0.);
