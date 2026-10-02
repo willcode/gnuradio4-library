@@ -65,7 +65,7 @@ void benchFractionalDelay() {
             int         order;
         };
         for (const Arm arm : {Arm{32UZ, 0}, Arm{32UZ, 1}, Arm{32UZ, 3}, Arm{128UZ, 1}}) {
-            const gr::filter::ResamplerDesign        design = gr::filter::designFractionalDelay(arm.bank, kRolloff);
+            const gr::filter::ResamplerDesign        design = gr::filter::designFractionalDelay(arm.bank, kRolloff).value();
             gr::filter::FractionalDelayLine<Complex> line(arm.bank, arm.order, design.taps, 512ULL);
 
             std::vector<std::uint64_t> delays(kSamples);
