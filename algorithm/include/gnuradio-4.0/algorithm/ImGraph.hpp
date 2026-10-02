@@ -16,6 +16,7 @@
 #include <bitset>
 #include <cassert>
 #include <cmath>
+#include <expected>
 #include <format>
 #include <functional>
 #include <limits>
@@ -713,17 +714,21 @@ Point<T> minRequiredGapDistance(const std::shared_ptr<gr::BlockModel>& nodeFrom,
     return {minDistX, minDistY};
 }
 
+/// Moves every port of @p block to the opposite side; a port without a side is an error and leaves every port as it was.
 template<gr::arithmetic_or_complex_like T>
-void flipAllPortSides(std::shared_ptr<gr::BlockModel>& block, std::source_location loc = std::source_location::current()) {
+[[nodiscard]] std::expected<void, gr::Error> flipAllPortSides(std::shared_ptr<gr::BlockModel>& block, std::source_location loc = std::source_location::current()) {
     auto infos = std::array{std::views::all(getPortInfos<gr::PortDirection::INPUT>(block)), std::views::all(getPortInfos<gr::PortDirection::OUTPUT>(block))};
     for (auto& info : infos | std::views::join) {
         if (!info.preferredSide()) {
-            throw gr::exception(std::format("node: {}-{} undefined port side", block->name(), info.name()), loc);
+            return std::unexpected(gr::Error(std::format("node: {}-{} undefined port side", block->name(), info.name()), loc));
         }
+    }
+    for (auto& info : infos | std::views::join) {
         info.preferredSide(oppositeSide(*info.preferredSide()));
     }
 
     updateBlock(block, getPosition<T>(block));
+    return {};
 }
 
 template<gr::arithmetic_or_complex_like T>
@@ -757,7 +762,7 @@ T incidentCost(const std::span<const gr::Edge>& edges, std::shared_ptr<gr::Block
 }
 
 template<gr::arithmetic_or_complex_like T>
-[[maybe_unused]] std::size_t optimiseSideFlips(gr::Graph& graph, std::size_t maxIters = 0, double improveEps = 0.10, std::source_location loc = std::source_location::current()) {
+[[nodiscard]] std::expected<std::size_t, gr::Error> optimiseSideFlips(gr::Graph& graph, std::size_t maxIters = 0, double improveEps = 0.10, std::source_location loc = std::source_location::current()) {
     using enum Side;
 
     if (maxIters == 0) {
@@ -775,12 +780,14 @@ template<gr::arithmetic_or_complex_like T>
             auto out = getPortInfos<gr::PortDirection::OUTPUT>(n);
             if (getLayoutPref(n) == LayoutPref::HORIZONTAL || getLayoutPref(n) == LayoutPref::VERTICAL) {
                 const T before = incidentCost<T>(graph.edges(), n);
-                flipAllPortSides<T>(n, loc);
+                if (auto flipped = flipAllPortSides<T>(n, loc); !flipped) {
+                    return std::unexpected(flipped.error());
+                }
                 if (const T after = incidentCost<T>(graph.edges(), n); after < before) { // better
                     anyImprove = true;
                     flippedPorts++;
-                } else { // worse -> revert port flip
-                    flipAllPortSides<T>(n, loc);
+                } else { // worse -> revert port flip, which cannot fail: every port has a side
+                    std::ignore = flipAllPortSides<T>(n, loc);
                 }
                 continue;
             }
@@ -1375,7 +1382,7 @@ inline static void layoutSpringModel(gr::Graph& graph, const LayoutPreference& c
 
         // optionally optimise port sides to shorten springs
         if (vmaxSeen < 0.01 && iteration >= dontRepelFor) {
-            [[maybe_unused]] std::size_t nOptimised = optimiseSideFlips<T>(graph, /*maxIters=*/1, /*improveEps=*/0.00);
+            std::ignore = optimiseSideFlips<T>(graph, /*maxIters=*/1, /*improveEps=*/0.00); // a refused flip keeps the sides the layout has
         }
 
         if (iteration >= dontRepelFor && vmaxSeen < 0.001) {
@@ -1991,7 +1998,7 @@ static void layoutSugiyama(gr::Graph& graph, const LayoutPreference& config = {}
     // ─────────────────────────────────────────────────
 
     if (config.optimiserMaxIterations > 0) {
-        optimiseSideFlips<T>(graph, config.optimiserMaxIterations, config.optimiserMinImprovement, loc);
+        std::ignore = optimiseSideFlips<T>(graph, config.optimiserMaxIterations, config.optimiserMinImprovement, loc); // a refused flip keeps the sides the layout has
     }
 
     // ─────────────────────────────────────────────────

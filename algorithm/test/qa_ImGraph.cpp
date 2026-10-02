@@ -214,7 +214,31 @@ inline static gr::Graph example_large() {
     return graph;
 }
 
+/// Runs from main(): a graph built after main() returns, where the test runner would run a suite, outlives the settings it needs.
+inline static void checkPortSideFlips() {
+    using namespace boost::ut;
+    using namespace gr::graph;
+
+    gr::Graph  graph = example_large();
+    auto       block = graph.blocks().front();
+    const auto sides = [&block] {
+        std::vector<std::optional<Side>> result;
+        for (const auto& info : getPortInfos<gr::PortDirection::OUTPUT>(block)) {
+            result.push_back(info.preferredSide());
+        }
+        return result;
+    };
+    const auto before = sides();
+    expect(fatal(!before.empty()));
+    expect(fatal(flipAllPortSides<double>(block).has_value())) << "every port has a side";
+    expect(sides() != before) << "the first flip moves the ports";
+    expect(fatal(flipAllPortSides<double>(block).has_value()));
+    expect(sides() == before) << "the second flip restores them";
+    expect(optimiseSideFlips<double>(graph, 1UZ).has_value());
+}
+
 int main() {
+    checkPortSideFlips();
     std::println("=== Base example 1 ===\n{}", gr::graph::draw(example_base1()));
     std::println("=== Base example 2 ===\n{}", gr::graph::draw(example_base2()));
     std::println("=== Cyclic example A ===\n{}", gr::graph::draw(example_cyclic_A()));
