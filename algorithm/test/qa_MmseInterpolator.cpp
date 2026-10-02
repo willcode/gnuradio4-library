@@ -144,7 +144,7 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
     using namespace boost::ut;
 
     "the normal equations are the ones the objective implies"_test = [] {
-        const std::vector<double> matrix = mmseCorrelation(8, 0.25);
+        const std::vector<double> matrix = mmseCorrelation(8, 0.25).value();
         for (int m = 0; m < 8; ++m) {
             const double expected = m == 0 ? 1.0 : std::sin(kPi * 0.5 * static_cast<double>(m)) / (kPi * 0.5 * static_cast<double>(m));
             expect(approx(matrix[static_cast<std::size_t>(m)], expected, 1.0e-15)) << std::format("R[0][{}] = {:.8f} against sinc({}/2)", m, matrix[static_cast<std::size_t>(m)], m);
@@ -162,13 +162,13 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
 
     "the solution satisfies its own optimality condition"_test = [] {
         for (int nTaps : {6, 8, 12}) {
-            const std::vector<double> matrix = mmseCorrelation(nTaps, 0.25);
+            const std::vector<double> matrix = mmseCorrelation(nTaps, 0.25).value();
             const std::size_t         order  = static_cast<std::size_t>(nTaps);
 
             double worst = 0.0;
             for (int i = 0; i <= 20; ++i) {
                 const double              mu     = static_cast<double>(i) / 20.0;
-                const std::vector<double> taps   = mmseTaps(nTaps, 0.25, mu);
+                const std::vector<double> taps   = mmseTaps(nTaps, 0.25, mu).value();
                 const std::vector<double> target = mmseTarget(nTaps, 0.25, mu);
                 for (std::size_t k = 0UZ; k < order; ++k) {
                     double product = 0.0;
@@ -184,18 +184,18 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
 
     "the gradient by quadrature agrees, and it never touches R or p"_test = [] {
         for (int nTaps : {6, 8, 12}) {
-            const std::vector<double> taps     = mmseTaps(nTaps, 0.25, 0.5);
+            const std::vector<double> taps     = mmseTaps(nTaps, 0.25, 0.5).value();
             const double              gradient = maxAbsolute(quadratureGradient(taps, 0.25, 0.5, false));
             expect(lt(gradient, 1.0e-10)) << std::format("L={}, mu=0.5: max|grad J| by quadrature is {:.3g}", nTaps, gradient);
         }
-        const std::vector<double> quarter = mmseTaps(8, 0.25, 0.25);
+        const std::vector<double> quarter = mmseTaps(8, 0.25, 0.25).value();
         expect(lt(maxAbsolute(quadratureGradient(quarter, 0.25, 0.25, false)), 1.0e-10));
-        std::println("mmse: max|grad J| by quadrature at L=8, mu=0.5 is {:.3g}", maxAbsolute(quadratureGradient(mmseTaps(8, 0.25, 0.5), 0.25, 0.5, false)));
+        std::println("mmse: max|grad J| by quadrature at L=8, mu=0.5 is {:.3g}", maxAbsolute(quadratureGradient(mmseTaps(8, 0.25, 0.5).value(), 0.25, 0.5, false)));
     };
 
     "the stationary point is a minimum"_test = [] {
-        const std::vector<double> taps      = mmseTaps(8, 0.25, 0.5);
-        const double              objective = mmseObjective(taps, 0.25, 0.5);
+        const std::vector<double> taps      = mmseTaps(8, 0.25, 0.5).value();
+        const double              objective = mmseObjective(taps, 0.25, 0.5).value();
         expect(lt(std::abs(objective / 2.432577e-07 - 1.0), 1.0e-6)) << std::format("J(h) = {:.6e}", objective);
 
         std::mt19937                     rng(4U);
@@ -213,15 +213,15 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
             for (std::size_t k = 0UZ; k < perturbed.size(); ++k) {
                 perturbed[k] += 1.0e-3 * direction[k] / norm;
             }
-            smallest = std::min(smallest, mmseObjective(perturbed, 0.25, 0.5));
+            smallest = std::min(smallest, mmseObjective(perturbed, 0.25, 0.5).value());
         }
         expect(gt(smallest, objective)) << std::format("the smallest of 200 perturbed objectives is {:.6e} against {:.6e}", smallest, objective);
     };
 
     "the three tap rows are the ones the equations give"_test = [] {
-        const std::vector<double> half    = mmseTaps(8, 0.25, 0.5);
-        const std::vector<double> quarter = mmseTaps(8, 0.25, 0.25);
-        const std::vector<double> fine    = mmseTaps(8, 0.25, 1.0 / 128.0);
+        const std::vector<double> half    = mmseTaps(8, 0.25, 0.5).value();
+        const std::vector<double> quarter = mmseTaps(8, 0.25, 0.25).value();
+        const std::vector<double> fine    = mmseTaps(8, 0.25, 1.0 / 128.0).value();
         for (std::size_t k = 0UZ; k < 8UZ; ++k) {
             expect(approx(half[k], kTapsHalf[k], 1.0e-8)) << std::format("h(0.5)[{}] = {:.8f}", k, half[k]);
             expect(approx(quarter[k], kTapsQuarter[k], 1.0e-8)) << std::format("h(0.25)[{}] = {:.8f}", k, quarter[k]);
@@ -233,15 +233,15 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
         double worst = 0.0;
         for (int i = 0; i <= 20; ++i) {
             const double              mu       = static_cast<double>(i) / 20.0;
-            const std::vector<double> forward  = mmseTaps(8, 0.25, mu);
-            const std::vector<double> backward = mmseTaps(8, 0.25, 1.0 - mu);
+            const std::vector<double> forward  = mmseTaps(8, 0.25, mu).value();
+            const std::vector<double> backward = mmseTaps(8, 0.25, 1.0 - mu).value();
             for (std::size_t k = 0UZ; k < forward.size(); ++k) {
                 worst = std::max(worst, std::abs(forward[k] - backward[forward.size() - 1UZ - k]));
             }
         }
         expect(lt(worst, 1.0e-10)) << std::format("h(1-mu) against reverse(h(mu)) over 21 values: {:.3g}", worst);
 
-        const std::vector<double> zero = mmseTaps(8, 0.25, 0.0);
+        const std::vector<double> zero = mmseTaps(8, 0.25, 0.0).value();
         for (std::size_t k = 0UZ; k < zero.size(); ++k) {
             expect(lt(std::abs(zero[k] - (k == 4UZ ? 1.0 : 0.0)), 1.0e-10)) << std::format("h(0)[{}] = {:.3g}: a unit impulse at index L/2", k, zero[k]);
         }
@@ -287,7 +287,7 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
             double worstMu = 0.0;
             for (int i = 0; i <= 32; ++i) {
                 const double              mu   = static_cast<double>(i) / 32.0;
-                const std::vector<double> taps = mmseTaps(row.nTaps, row.band, mu);
+                const std::vector<double> taps = mmseTaps(row.nTaps, row.band, mu).value();
                 double                    here = 0.0;
                 for (int j = 0; j <= 200; ++j) {
                     const double frequency = row.band * static_cast<double>(j) / 200.0;
@@ -308,7 +308,7 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
         };
         constexpr DroopRow kDroop[] = {{0.25, 0.99880}, {0.30, 0.97537}, {0.35, 0.88920}, {0.40, 0.69761}, {0.45, 0.38821}};
 
-        const std::vector<double> half = mmseTaps(8, 0.25, 0.5);
+        const std::vector<double> half = mmseTaps(8, 0.25, 0.5).value();
         for (const DroopRow& row : kDroop) {
             expect(approx(std::abs(responseOf(half, row.frequency)), row.magnitude, 1.0e-4)) << std::format("|H({:.2f})| = {:.5f}", row.frequency, std::abs(responseOf(half, row.frequency)));
         }
@@ -320,13 +320,13 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
     };
 
     "the differentiator comes from the same factorization and a different right-hand side"_test = [] {
-        const std::vector<double> half = mmseDifferentiatorTaps(8, 0.25, 0.5);
+        const std::vector<double> half = mmseDifferentiatorTaps(8, 0.25, 0.5).value();
         for (std::size_t k = 0UZ; k < half.size(); ++k) {
             expect(approx(half[k], kDerivativeHalf[k], 1.0e-8)) << std::format("h_d(0.5)[{}] = {:.8f}", k, half[k]);
         }
         expect(lt(maxAbsolute(quadratureGradient(half, 0.25, 0.5, true)), 1.0e-10)) << "its own objective's gradient, by quadrature";
 
-        const std::vector<double> zero = mmseDifferentiatorTaps(8, 0.25, 0.0);
+        const std::vector<double> zero = mmseDifferentiatorTaps(8, 0.25, 0.0).value();
         for (std::size_t k = 0UZ; k < zero.size(); ++k) {
             expect(approx(zero[k], kDerivativeZero[k], 1.0e-8)) << std::format("h_d(0)[{}] = {:.8f}", k, zero[k]);
         }
@@ -342,8 +342,8 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
         double worst = 0.0;
         for (int i = 0; i <= 20; ++i) {
             const double              mu       = static_cast<double>(i) / 20.0;
-            const std::vector<double> forward  = mmseDifferentiatorTaps(8, 0.25, mu);
-            const std::vector<double> backward = mmseDifferentiatorTaps(8, 0.25, 1.0 - mu);
+            const std::vector<double> forward  = mmseDifferentiatorTaps(8, 0.25, mu).value();
+            const std::vector<double> backward = mmseDifferentiatorTaps(8, 0.25, 1.0 - mu).value();
             for (std::size_t k = 0UZ; k < forward.size(); ++k) {
                 worst = std::max(worst, std::abs(forward[k] + backward[forward.size() - 1UZ - k]));
             }
@@ -377,8 +377,8 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
 
         for (std::size_t row : {0UZ, 1UZ, 32UZ, 64UZ, 100UZ, 128UZ}) {
             const double                 mu          = static_cast<double>(row) / 128.0;
-            const std::vector<double>    reference   = mmseTaps(8, 0.25, mu);
-            const std::vector<double>    slope       = mmseDifferentiatorTaps(8, 0.25, mu);
+            const std::vector<double>    reference   = mmseTaps(8, 0.25, mu).value();
+            const std::vector<double>    slope       = mmseDifferentiatorTaps(8, 0.25, mu).value();
             const std::span<const float> stored      = bank.tapsFor(row);
             const std::span<const float> storedSlope = bank.derivativeTapsFor(row);
             for (std::size_t k = 0UZ; k < 8UZ; ++k) {
@@ -484,8 +484,8 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
     };
 
     "the conditioning is why the solve is in double"_test = [] {
-        const std::vector<double>                      matrix = mmseCorrelation(8, 0.25);
-        const gr::sync::detail::SymmetricFactorization factored(matrix, 8UZ);
+        const std::vector<double>                      matrix   = mmseCorrelation(8, 0.25).value();
+        const gr::sync::detail::SymmetricFactorization factored = gr::sync::detail::SymmetricFactorization::factor(matrix, 8UZ).value();
 
         const auto normalize = [](std::vector<double>& v) {
             double norm = 0.0;
@@ -526,12 +526,27 @@ const boost::ut::suite<"mmse interpolator"> mmseTests = [] {
         expect(lt(std::abs(condition / 6.19e4 - 1.0), 0.01)) << std::format("cond(R) = {:.4g} at L=8, B=0.25 — eleven digits kept in double, five in float", condition);
     };
 
-    "degenerate designs throw"_test = [] {
-        expect(throws<std::invalid_argument>([] { (void)mmseTaps(7, 0.25, 0.5); })) << "an odd tap count has no center pair to straddle";
-        expect(throws<std::invalid_argument>([] { (void)mmseTaps(0, 0.25, 0.5); }));
-        expect(throws<std::invalid_argument>([] { (void)mmseTaps(8, 0.0, 0.5); }));
-        expect(throws<std::invalid_argument>([] { (void)mmseTaps(8, 0.5, 0.5); })) << "the whole band is not a design band";
-        expect(throws<std::invalid_argument>([] { (void)MmseInterpolatorBank(8, 100, 0.25); })) << "nSteps must be a power of two";
+    "degenerate designs are errors"_test = [] {
+        const auto odd = mmseTaps(7, 0.25, 0.5);
+        expect(fatal(!odd.has_value())) << "an odd tap count has no center pair to straddle";
+        expect(odd.error().message.contains("nTaps must be even")) << odd.error().message;
+        expect(!mmseTaps(0, 0.25, 0.5).has_value());
+        expect(!mmseTaps(8, 0.0, 0.5).has_value());
+        const auto wholeBand = mmseTaps(8, 0.5, 0.5);
+        expect(fatal(!wholeBand.has_value())) << "the whole band is not a design band";
+        expect(wholeBand.error().message.contains("band must lie in (0, 0.5)")) << wholeBand.error().message;
+        expect(!mmseCorrelation(7, 0.25).has_value()) << "mmseCorrelation";
+        expect(!mmseDifferentiatorTaps(7, 0.25, 0.5).has_value()) << "mmseDifferentiatorTaps";
+        const std::vector<double> oddTaps(7UZ, 0.0);
+        expect(!mmseObjective(oddTaps, 0.25, 0.5).has_value()) << "mmseObjective";
+
+        const std::vector<double> indefinite{1.0, 2.0, 2.0, 1.0};
+        const auto                factored = gr::sync::detail::SymmetricFactorization::factor(indefinite, 2UZ);
+        expect(fatal(!factored.has_value())) << "eigenvalues 3 and -1";
+        expect(factored.error().message.contains("not positive definite")) << factored.error().message;
+
+        expect(throws<gr::exception>([] { (void)MmseInterpolatorBank(8, 100, 0.25); })) << "nSteps must be a power of two";
+        expect(throws<gr::exception>([] { (void)MmseInterpolatorBank(7, 128, 0.25); })) << "and the bank throws the design's error";
         expect(nothrow([] { (void)MmseInterpolatorBank(12, 256, 1.0 / 3.0); }));
     };
 

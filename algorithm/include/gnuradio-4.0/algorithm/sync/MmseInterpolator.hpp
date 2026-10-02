@@ -4,12 +4,14 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <expected>
 #include <numbers>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 #include <gnuradio-4.0/algorithm/math/SampleType.hpp>
 
@@ -111,29 +113,31 @@ using InterpolatorScalar = gr::math::RealScalarOf<T>;
  * @brief `LDL^T` of a small symmetric positive-definite matrix, factored once and solved many times.
  *
  * `R` does not depend on `mu`, so one factorization is amortized over the whole bank and over both
- * right-hand sides.
+ * right-hand sides. A matrix that is not positive definite is an error of `factor`.
  */
 class SymmetricFactorization {
 public:
-    SymmetricFactorization(std::span<const double> matrix, std::size_t order) : _order(order), _lower(order * order, 0.0), _diagonal(order, 0.0) {
+    [[nodiscard]] static std::expected<SymmetricFactorization, gr::Error> factor(std::span<const double> matrix, std::size_t order, std::source_location location = std::source_location::current()) {
+        SymmetricFactorization factored(order);
         for (std::size_t j = 0UZ; j < order; ++j) {
             double pivot = matrix[j * order + j];
             for (std::size_t k = 0UZ; k < j; ++k) {
-                pivot -= _lower[j * order + k] * _lower[j * order + k] * _diagonal[k];
+                pivot -= factored._lower[j * order + k] * factored._lower[j * order + k] * factored._diagonal[k];
             }
             if (!(pivot > 0.0)) {
-                throw std::invalid_argument("SymmetricFactorization: the matrix is not positive definite");
+                return std::unexpected(gr::Error("SymmetricFactorization: the matrix is not positive definite", location));
             }
-            _diagonal[j]          = pivot;
-            _lower[j * order + j] = 1.0;
+            factored._diagonal[j]          = pivot;
+            factored._lower[j * order + j] = 1.0;
             for (std::size_t i = j + 1UZ; i < order; ++i) {
                 double off = matrix[i * order + j];
                 for (std::size_t k = 0UZ; k < j; ++k) {
-                    off -= _lower[i * order + k] * _lower[j * order + k] * _diagonal[k];
+                    off -= factored._lower[i * order + k] * factored._lower[j * order + k] * factored._diagonal[k];
                 }
-                _lower[i * order + j] = off / pivot;
+                factored._lower[i * order + j] = off / pivot;
             }
         }
+        return factored;
     }
 
     void solve(std::span<const double> rhs, std::span<double> out) const {
@@ -159,6 +163,8 @@ public:
     [[nodiscard]] std::size_t order() const noexcept { return _order; }
 
 private:
+    explicit SymmetricFactorization(std::size_t order) : _order(order), _lower(order * order, 0.0), _diagonal(order, 0.0) {}
+
     std::size_t         _order;
     std::vector<double> _lower;
     std::vector<double> _diagonal;
@@ -182,13 +188,14 @@ private:
 
 } // namespace detail
 
-/// @brief `R[k][l] = sinc(2*B*(d_k - d_l))`, row-major and `nTaps` square. Independent of `mu`.
-[[nodiscard]] inline std::vector<double> mmseCorrelation(int nTaps, double band) {
+/// @brief `R[k][l] = sinc(2*B*(d_k - d_l))`, row-major and `nTaps` square. Independent of `mu`. An odd or short
+/// @p nTaps, or a @p band outside (0, 0.5), is an error.
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> mmseCorrelation(int nTaps, double band, std::source_location location = std::source_location::current()) {
     if (nTaps < 2 || (nTaps % 2) != 0) {
-        throw std::invalid_argument("mmseCorrelation: nTaps must be even and at least 2 — the window straddles the interpolation instant");
+        return std::unexpected(gr::Error("mmseCorrelation: nTaps must be even and at least 2; the window straddles the interpolation instant", location));
     }
     if (!(band > 0.0) || !(band < 0.5)) {
-        throw std::invalid_argument("mmseCorrelation: band must lie in (0, 0.5)");
+        return std::unexpected(gr::Error("mmseCorrelation: band must lie in (0, 0.5)", location));
     }
     const std::size_t   order = static_cast<std::size_t>(nTaps);
     std::vector<double> matrix(order * order);
@@ -224,29 +231,53 @@ private:
     return target;
 }
 
-/// @brief The least-squares fractional-advance taps, `h`, in the natural order `k = 0 .. L-1`.
-[[nodiscard]] inline std::vector<double> mmseTaps(int nTaps, double band, double mu) {
-    const std::vector<double>            matrix = mmseCorrelation(nTaps, band);
-    const detail::SymmetricFactorization factored(matrix, static_cast<std::size_t>(nTaps));
-    std::vector<double>                  taps(static_cast<std::size_t>(nTaps));
-    factored.solve(mmseTarget(nTaps, band, mu), taps);
+namespace detail {
+
+/// @brief The factored `R` for @p nTaps and @p band, or the error of `mmseCorrelation` or of the factorization.
+[[nodiscard]] inline std::expected<SymmetricFactorization, gr::Error> factoredCorrelation(int nTaps, double band, std::source_location location) {
+    const std::expected<std::vector<double>, gr::Error> matrix = mmseCorrelation(nTaps, band, location);
+    if (!matrix) {
+        return std::unexpected(matrix.error());
+    }
+    return SymmetricFactorization::factor(*matrix, static_cast<std::size_t>(nTaps), location);
+}
+
+} // namespace detail
+
+/// @brief The least-squares fractional-advance taps, `h`, in the natural order `k = 0 .. L-1`. The errors are those of
+/// `mmseCorrelation` and of the factorization.
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> mmseTaps(int nTaps, double band, double mu, std::source_location location = std::source_location::current()) {
+    const std::expected<detail::SymmetricFactorization, gr::Error> factored = detail::factoredCorrelation(nTaps, band, location);
+    if (!factored) {
+        return std::unexpected(factored.error());
+    }
+    std::vector<double> taps(static_cast<std::size_t>(nTaps));
+    factored->solve(mmseTarget(nTaps, band, mu), taps);
     return taps;
 }
 
-/// @brief The interpolating differentiator's taps, scaled as a derivative per input sample.
-[[nodiscard]] inline std::vector<double> mmseDifferentiatorTaps(int nTaps, double band, double mu) {
-    const std::vector<double>            matrix = mmseCorrelation(nTaps, band);
-    const detail::SymmetricFactorization factored(matrix, static_cast<std::size_t>(nTaps));
-    std::vector<double>                  taps(static_cast<std::size_t>(nTaps));
-    factored.solve(mmseDerivativeTarget(nTaps, band, mu), taps);
+/// @brief The interpolating differentiator's taps, scaled as a derivative per input sample. The errors are those of
+/// `mmseTaps`.
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> mmseDifferentiatorTaps(int nTaps, double band, double mu, std::source_location location = std::source_location::current()) {
+    const std::expected<detail::SymmetricFactorization, gr::Error> factored = detail::factoredCorrelation(nTaps, band, location);
+    if (!factored) {
+        return std::unexpected(factored.error());
+    }
+    std::vector<double> taps(static_cast<std::size_t>(nTaps));
+    factored->solve(mmseDerivativeTarget(nTaps, band, mu), taps);
     return taps;
 }
 
 /// @brief `J(h) = 2*W*(1 - 2*h^T p + h^T R h)`, the objective the taps minimize, at its own optimum or anywhere else.
-[[nodiscard]] inline double mmseObjective(std::span<const double> taps, double band, double mu) {
-    const int                 nTaps  = static_cast<int>(taps.size());
-    const std::vector<double> matrix = mmseCorrelation(nTaps, band);
-    const std::vector<double> target = mmseTarget(nTaps, band, mu);
+/// The errors are those of `mmseCorrelation` for `taps.size()` taps.
+[[nodiscard]] inline std::expected<double, gr::Error> mmseObjective(std::span<const double> taps, double band, double mu, std::source_location location = std::source_location::current()) {
+    const int                                           nTaps       = static_cast<int>(taps.size());
+    const std::expected<std::vector<double>, gr::Error> correlation = mmseCorrelation(nTaps, band, location);
+    if (!correlation) {
+        return std::unexpected(correlation.error());
+    }
+    const std::vector<double>& matrix = *correlation;
+    const std::vector<double>  target = mmseTarget(nTaps, band, mu);
 
     double quadratic = 0.0;
     double linear    = 0.0;
@@ -274,13 +305,18 @@ public:
      * @param band           `B`, the one-sided design band as a fraction of the sample rate
      * @param withDerivative also generate the interpolating differentiator, which the two
      *                       maximum-likelihood timing detectors need and nothing else does
+     *
+     * An @p nSteps that is not a positive power of two, or an error of `mmseTaps`, throws `gr::exception`.
      */
     explicit MmseInterpolatorBank(int nTaps = 8, int nSteps = 128, double band = 0.25, bool withDerivative = true) : _nTaps(static_cast<std::size_t>(nTaps)), _nSteps(static_cast<std::size_t>(nSteps)), _band(band) {
         if (nSteps < 1 || (nSteps & (nSteps - 1)) != 0) {
-            throw std::invalid_argument("MmseInterpolatorBank: nSteps must be a positive power of two");
+            throw gr::exception("MmseInterpolatorBank: nSteps must be a positive power of two");
         }
-        const std::vector<double>            matrix = mmseCorrelation(nTaps, band);
-        const detail::SymmetricFactorization factored(matrix, _nTaps);
+        const std::expected<detail::SymmetricFactorization, gr::Error> correlation = detail::factoredCorrelation(nTaps, band, std::source_location::current());
+        if (!correlation) {
+            throw gr::exception(correlation.error().message, correlation.error().sourceLocation);
+        }
+        const detail::SymmetricFactorization& factored = *correlation;
 
         const std::size_t rows = _nSteps + 1UZ;
         _taps.resize(rows * _nTaps);
