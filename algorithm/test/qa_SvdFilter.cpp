@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <numbers>
 #include <print>
 #include <random>
@@ -25,7 +26,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
                 }
             }
 
-            auto   A_approx = lowRankApproximation(A, Config<double>{.maxRank = 1UZ});
+            auto   A_approx = lowRankApproximation(A, Config<double>{.maxRank = 1UZ}).value();
             double maxError = 0.0;
             for (std::size_t i = 0UZ; i < 4UZ; ++i) {
                 for (std::size_t j = 0UZ; j < 4UZ; ++j) {
@@ -44,7 +45,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
                 }
             }
 
-            auto A_approx = lowRankApproximation(A, Config<double>{.relativeThreshold = 0.01});
+            auto A_approx = lowRankApproximation(A, Config<double>{.relativeThreshold = 0.01}).value();
             expect(A_approx.extent(0) == A.extent(0));
             expect(A_approx.extent(1) == A.extent(1));
         };
@@ -61,7 +62,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
                 clean[i] = std::sin(2.0 * std::numbers::pi_v<double> * 50.0 * static_cast<double>(i) / fs);
             }
 
-            auto   denoised = denoiseWindow<double>(clean, N / 2UZ, config);
+            auto   denoised = denoiseWindow<double>(clean, N / 2UZ, config).value();
             double maxError = 0.0;
             for (std::size_t i = 0UZ; i < N; ++i) {
                 maxError = std::max(maxError, std::abs(clean[i] - denoised[i]));
@@ -79,7 +80,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
                 noisy[i] = clean[i] + noise(gen);
             }
 
-            auto   denoised      = denoiseWindow<double>(noisy, N / 2UZ, config);
+            auto   denoised      = denoiseWindow<double>(noisy, N / 2UZ, config).value();
             double noisyError    = 0.0;
             double denoisedError = 0.0;
             for (std::size_t i = 0UZ; i < N; ++i) {
@@ -102,7 +103,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
             std::vector<double> outputs;
             for (std::size_t i = 0UZ; i < 50UZ; ++i) {
                 double input = std::sin(2.0 * std::numbers::pi_v<double> * 0.1 * static_cast<double>(i));
-                outputs.push_back(denoiser.processOne(input));
+                outputs.push_back(denoiser.processOne(input).value());
             }
             expect(eq(outputs.size(), 50UZ)) << "should produce output for all inputs";
             expect(std::isfinite(outputs.back())) << "output should be finite";
@@ -116,7 +117,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
             std::vector<double> outputs;
             for (std::size_t i = 0UZ; i < 50UZ; ++i) {
                 double input = std::sin(2.0 * std::numbers::pi_v<double> * 0.1 * static_cast<double>(i));
-                outputs.push_back(denoiser.processOne(input));
+                outputs.push_back(denoiser.processOne(input).value());
             }
             expect(eq(outputs.size(), 50UZ)) << "should produce output for all inputs";
             expect(std::isfinite(outputs.back())) << "output should be finite";
@@ -129,12 +130,12 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
             // Process some samples
             for (std::size_t i = 0UZ; i < 50UZ; ++i) {
                 double input = std::sin(2.0 * std::numbers::pi_v<double> * 0.1 * static_cast<double>(i));
-                std::ignore  = denoiser.processOne(input);
+                std::ignore  = denoiser.processOne(input).value();
             }
             denoiser.reset();
 
             // After reset, should still produce valid output
-            double output = denoiser.processOne(std::sin(0.0));
+            double output = denoiser.processOne(std::sin(0.0)).value();
             expect(std::isfinite(output)) << "output valid after reset";
         };
     };
@@ -163,7 +164,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
             std::vector<double> outputs;
             for (std::size_t i = 0UZ; i < 100UZ; ++i) {
                 double input = std::sin(2.0 * std::numbers::pi_v<double> * 0.1 * static_cast<double>(i));
-                outputs.push_back(denoiser.processOne(input));
+                outputs.push_back(denoiser.processOne(input).value());
             }
             expect(eq(outputs.size(), 100UZ));
         };
@@ -182,7 +183,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
                 signal[i]    = C{std::cos(phase), std::sin(phase)};
             }
 
-            auto denoised = denoiseWindow<C>(signal, N / 2UZ, config);
+            auto denoised = denoiseWindow<C>(signal, N / 2UZ, config).value();
             expect(eq(denoised.size(), N));
         };
     };
@@ -192,6 +193,23 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
     using namespace boost::ut;
     using namespace gr::algorithm::svd_filter;
 
+    "errors are returned"_test = [] {
+        const gr::Tensor<double> vector({4UZ});
+        const auto               flat = lowRankApproximation(vector);
+        expect(fatal(!flat.has_value())) << "a one-dimensional tensor";
+        expect(flat.error().message.contains("2D tensor")) << flat.error().message;
+
+        const std::vector<double> undefined(8UZ, std::numeric_limits<double>::quiet_NaN());
+        const auto                window = denoiseWindow<double>(std::span<const double>(undefined), 4UZ);
+        expect(fatal(!window.has_value())) << "a decomposition of NaN does not converge";
+        expect(window.error().message.contains("SVD computation failed")) << window.error().message;
+
+        SvdDenoiser<double> denoiser(8UZ, 4UZ);
+        const auto          sample = denoiser.processOne(std::numeric_limits<double>::quiet_NaN());
+        expect(fatal(!sample.has_value())) << "the streaming form returns the same error";
+        expect(sample.error().message.contains("SVD computation failed")) << sample.error().message;
+    };
+
     "minimum window size"_test = [] {
         "windowSize = 2"_test = [] {
             SvdDenoiser<double> denoiser(2UZ, 1UZ, Config<double>{.maxRank = 1UZ});
@@ -199,7 +217,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
 
             std::vector<double> outputs;
             for (std::size_t i = 0UZ; i < 10UZ; ++i) {
-                outputs.push_back(denoiser.processOne(static_cast<double>(i)));
+                outputs.push_back(denoiser.processOne(static_cast<double>(i)).value());
             }
             expect(eq(outputs.size(), 10UZ));
             expect(std::isfinite(outputs.back()));
@@ -207,13 +225,13 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
 
         "denoiseWindow with 2 samples"_test = [] {
             std::vector<double> signal = {1.0, 2.0};
-            auto                result = denoiseWindow<double>(signal, 1UZ, Config<double>{});
+            auto                result = denoiseWindow<double>(signal, 1UZ, Config<double>{}).value();
             expect(eq(result.size(), 2UZ));
         };
 
         "denoiseWindow with 1 sample returns copy"_test = [] {
             std::vector<double> signal = {42.0};
-            auto                result = denoiseWindow<double>(signal, 1UZ, Config<double>{});
+            auto                result = denoiseWindow<double>(signal, 1UZ, Config<double>{}).value();
             expect(eq(result.size(), 1UZ));
             expect(eq(result[0], 42.0));
         };
@@ -227,7 +245,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             }
 
             Config<double> config{.energyFraction = 1.0};
-            auto           denoised = denoiseWindow<double>(signal, 16UZ, config);
+            auto           denoised = denoiseWindow<double>(signal, 16UZ, config).value();
             expect(eq(denoised.size(), signal.size()));
 
             double maxError = 0.0;
@@ -244,7 +262,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             }
 
             Config<double> config{.energyFraction = 0.0};
-            auto           denoised = denoiseWindow<double>(signal, 8UZ, config);
+            auto           denoised = denoiseWindow<double>(signal, 8UZ, config).value();
             expect(eq(denoised.size(), signal.size()));
             expect(std::isfinite(denoised[0]));
         };
@@ -256,7 +274,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             }
 
             Config<double> config{.maxRank = 1UZ};
-            auto           denoised = denoiseWindow<double>(signal, 16UZ, config);
+            auto           denoised = denoiseWindow<double>(signal, 16UZ, config).value();
             expect(eq(denoised.size(), signal.size()));
         };
 
@@ -267,7 +285,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             }
 
             Config<double> config{.absoluteThreshold = 1.0};
-            auto           denoised = denoiseWindow<double>(signal, 16UZ, config);
+            auto           denoised = denoiseWindow<double>(signal, 16UZ, config).value();
             expect(eq(denoised.size(), signal.size()));
         };
 
@@ -278,7 +296,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             }
 
             Config<double> config{.relativeThreshold = 0.5};
-            auto           denoised = denoiseWindow<double>(signal, 16UZ, config);
+            auto           denoised = denoiseWindow<double>(signal, 16UZ, config).value();
             expect(eq(denoised.size(), signal.size()));
         };
 
@@ -294,7 +312,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
                 signal[i] = std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) / 8.0f);
             }
 
-            auto denoised = denoiseWindow<float>(signal, 16UZ, config);
+            auto denoised = denoiseWindow<float>(signal, 16UZ, config).value();
             expect(eq(denoised.size(), signal.size()));
             expect(std::isfinite(denoised.front()));
         };
@@ -329,7 +347,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             std::vector<C> outputs;
             for (std::size_t i = 0UZ; i < 50UZ; ++i) {
                 double phase = 2.0 * std::numbers::pi_v<double> * static_cast<double>(i) / 8.0;
-                outputs.push_back(denoiser.processOne(C{std::cos(phase), std::sin(phase)}));
+                outputs.push_back(denoiser.processOne(C{std::cos(phase), std::sin(phase)}).value());
             }
             expect(eq(outputs.size(), 50UZ));
             expect(std::isfinite(outputs.back().real()));
@@ -356,7 +374,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
 
             std::vector<double> outputs;
             for (std::size_t i = 0UZ; i < 200UZ; ++i) {
-                outputs.push_back(denoiser.processOne(std::sin(2.0 * std::numbers::pi_v<double> * static_cast<double>(i) / 8.0)));
+                outputs.push_back(denoiser.processOne(std::sin(2.0 * std::numbers::pi_v<double> * static_cast<double>(i) / 8.0)).value());
             }
             expect(eq(outputs.size(), 200UZ));
             expect(std::ranges::all_of(outputs, [](double v) { return std::isfinite(v); })) << "no out-of-window reads";
@@ -376,7 +394,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
 
             SvdDenoiser<double> denoiser(32UZ); // two periods of the test tone; the default Config is what is under test
             std::vector<double> denoised(nSamples);
-            std::ranges::transform(noisy, denoised.begin(), [&denoiser](double v) { return denoiser.processOne(v); });
+            std::ranges::transform(noisy, denoised.begin(), [&denoiser](double v) { return denoiser.processOne(v).value(); });
 
             const std::size_t settle      = 64UZ;
             const std::size_t delay       = denoiser.delay();
@@ -399,7 +417,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             }
 
             Config<double> config{.maxRank = 2UZ};
-            auto           result = denoiseWindow<double>(signal, 32UZ, config);
+            auto           result = denoiseWindow<double>(signal, 32UZ, config).value();
 
             expect(eq(result.size(), 64UZ));
             for (const auto& val : result) {
@@ -415,7 +433,7 @@ const boost::ut::suite<"SVD edge cases"> svdEdgeCaseTests = [] {
             for (std::size_t i = 0UZ; i < 50UZ; ++i) {
                 // Small variation to avoid degenerate matrix
                 double input = 3.0 + 0.01 * std::sin(2.0 * std::numbers::pi_v<double> * static_cast<double>(i) / 50.0);
-                outputs.push_back(denoiser.processOne(input));
+                outputs.push_back(denoiser.processOne(input).value());
             }
 
             for (std::size_t i = 30UZ; i < 50UZ; ++i) {
@@ -540,7 +558,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         std::vector<double> lpFiltered(N), svdFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]  = firFilter.processOne(noisy[i]);
-            svdFiltered[i] = svdFilter.processOne(noisy[i]);
+            svdFiltered[i] = svdFilter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay  = svdFilter.delay();
@@ -592,7 +610,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         std::vector<double> lpFiltered(N), svdFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]  = firFilter.processOne(noisy[i]);
-            svdFiltered[i] = svdFilter.processOne(noisy[i]);
+            svdFiltered[i] = svdFilter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay  = svdFilter.delay();
@@ -644,7 +662,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         std::vector<double> lpFiltered(N), svdFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]  = firFilter.processOne(noisy[i]);
-            svdFiltered[i] = svdFilter.processOne(noisy[i]);
+            svdFiltered[i] = svdFilter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay  = svdFilter.delay();
@@ -694,7 +712,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         std::vector<double> lpFiltered(N), svdFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]  = firFilter.processOne(noisy[i]);
-            svdFiltered[i] = svdFilter.processOne(noisy[i]);
+            svdFiltered[i] = svdFilter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay  = svdFilter.delay();
@@ -743,7 +761,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
 
         constexpr std::size_t    svdWindowSize = 71UZ;
         constexpr Config<double> svdConfig{.maxRank = 2UZ, .energyFraction = 0.99};
-        auto                     svdFiltered = denoiseWindow<double>(noisyDs.signal_values, svdWindowSize, svdConfig);
+        auto                     svdFiltered = denoiseWindow<double>(noisyDs.signal_values, svdWindowSize, svdConfig).value();
 
         auto maDs = gr::dataset::filter::applyMovingAverage(noisyDs, svdWindowSize);
 
@@ -803,7 +821,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         std::vector<double> lpFiltered(N), svdFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]  = firFilter.processOne(noisy[i]);
-            svdFiltered[i] = svdFilter.processOne(noisy[i]);
+            svdFiltered[i] = svdFilter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay  = svdFilter.delay();
@@ -860,7 +878,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         std::vector<double> lpFiltered(N), svdFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]  = firFilter.processOne(noisy[i]);
-            svdFiltered[i] = svdFilter.processOne(noisy[i]);
+            svdFiltered[i] = svdFilter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay  = svdFilter.delay();
@@ -907,7 +925,7 @@ const boost::ut::suite<"SVD streaming steady state"> svdSteadyStateTests = [] {
         SvdDenoiser<double> filter(windowSize, windowSize / 2UZ, config);
         std::vector<double> filtered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
-            filtered[i] = filter.processOne(noisy[i]);
+            filtered[i] = filter.processOne(noisy[i]).value();
         }
 
         const std::size_t svdDelay    = filter.delay();

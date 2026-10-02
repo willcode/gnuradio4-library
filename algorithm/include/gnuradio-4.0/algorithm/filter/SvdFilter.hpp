@@ -4,12 +4,15 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <expected>
 #include <limits>
 #include <numeric>
+#include <source_location>
 #include <span>
 #include <vector>
 
 #include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/algorithm/math/SVD.hpp>
 #include <gnuradio-4.0/algorithm/math/TensorMath.hpp>
@@ -68,13 +71,15 @@ template<typename T>
 
 /**
  * @brief Low-rank approximation via truncated SVD: A ≈ U_k × diag(S_k) × V_k^H
+ *
+ * A tensor that is not two-dimensional, or a decomposition that does not converge, is an error.
  */
 template<typename T>
-[[nodiscard]] Tensor<T> lowRankApproximation(const Tensor<T>& A, const Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}) {
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> lowRankApproximation(const Tensor<T>& A, const Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}, std::source_location location = std::source_location::current()) {
     using RealT = gr::meta::fundamental_base_value_type_t<T>;
 
     if (A.rank() != 2) {
-        throw std::invalid_argument("Input must be a 2D tensor");
+        return std::unexpected(gr::Error("Input must be a 2D tensor", location));
     }
 
     const std::size_t m = A.extent(0);
@@ -83,7 +88,7 @@ template<typename T>
     Tensor<T>     U, V;
     Tensor<RealT> S;
     if (auto status = gr::math::gesvd(U, S, V, A); status != gr::math::svd::Status::Success && status != gr::math::svd::Status::EarlyReturn) {
-        throw std::runtime_error("SVD computation failed");
+        return std::unexpected(gr::Error("SVD computation failed", location));
     }
 
     const std::size_t k = std::min(detail::computeEffectiveRank(std::span<const RealT>(S.data(), S.size()), config), std::min(m, n));
@@ -114,21 +119,38 @@ template<typename T>
     return result;
 }
 
+namespace detail {
+
+/// @brief The Hankel matrix of @p signal with @p hankelRows rows, reduced to low rank and averaged back to a signal.
+template<typename T, typename RealT>
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> hankelDenoise(std::span<const T> signal, std::size_t hankelRows, const Config<RealT>& config, std::source_location location) {
+    std::expected<Tensor<T>, gr::Error> H = gr::math::hankel(signal, hankelRows, location);
+    if (!H) {
+        return std::unexpected(H.error());
+    }
+    std::expected<Tensor<T>, gr::Error> approximation = lowRankApproximation(*H, config, location);
+    if (!approximation) {
+        return std::unexpected(approximation.error());
+    }
+    return gr::math::hankelAverage(*approximation, location);
+}
+
+} // namespace detail
+
 /**
  * @brief Denoise signal window using Hankel-SVD method.
+ *
+ * A decomposition that does not converge is an error.
  */
 template<typename T>
-[[nodiscard]] std::vector<T> denoiseWindow(std::span<const T> signal, std::size_t hankelRows = 0UZ, const Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}) {
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> denoiseWindow(std::span<const T> signal, std::size_t hankelRows = 0UZ, const Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}, std::source_location location = std::source_location::current()) {
     const std::size_t N = signal.size();
     if (N < 2UZ) {
         return std::vector<T>(signal.begin(), signal.end());
     }
 
     hankelRows = (hankelRows == 0UZ) ? N / 2UZ : std::clamp(hankelRows, 1UZ, N);
-
-    auto H        = gr::math::hankel(signal, hankelRows).value();
-    auto H_approx = lowRankApproximation(H, config);
-    return gr::math::hankelAverage(H_approx).value();
+    return detail::hankelDenoise(signal, hankelRows, config, location);
 }
 
 /**
@@ -175,11 +197,13 @@ private:
         }
     }
 
-    void computeSvdAndCache() {
-        auto historySpan = _history.get_span(0UZ, _windowSize);
-        auto H           = gr::math::hankel(historySpan, _hankelRows).value();
-        auto H_approx    = lowRankApproximation(H, _config);
-        auto denoised    = gr::math::hankelAverage(H_approx).value();
+    [[nodiscard]] std::expected<void, gr::Error> computeSvdAndCache(std::source_location location) {
+        auto                                     historySpan = _history.get_span(0UZ, _windowSize);
+        std::expected<std::vector<T>, gr::Error> result      = detail::hankelDenoise(historySpan, _hankelRows, _config, location);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+        const std::vector<T>& denoised = *result;
 
         const std::size_t delay    = (_windowSize - 1UZ) / 2UZ;
         const std::size_t startIdx = (_windowSize > delay) ? (_windowSize - 1UZ - delay) : 0UZ;
@@ -187,6 +211,7 @@ private:
 
         _outputCache.assign(denoised.begin() + static_cast<std::ptrdiff_t>(safeIdx), denoised.begin() + static_cast<std::ptrdiff_t>(safeIdx + _hopSize));
         _cacheIndex = 0UZ;
+        return {};
     }
 
 public:
@@ -197,7 +222,9 @@ public:
         }
     }
 
-    [[nodiscard]] T processOne(T input) {
+    /// @brief The denoised sample @p input brings out, `delay()` samples late. A decomposition that does not converge
+    /// is an error, and the sample stays in the window.
+    [[nodiscard]] std::expected<T, gr::Error> processOne(T input, std::source_location location = std::source_location::current()) {
         if (!_initialized) {
             fillHistory(input);
             _initialized = true;
@@ -206,7 +233,9 @@ public:
         _history.push_back(input);
 
         if (_cacheIndex >= _outputCache.size()) {
-            computeSvdAndCache();
+            if (std::expected<void, gr::Error> computed = computeSvdAndCache(location); !computed) {
+                return std::unexpected(computed.error());
+            }
         }
         return _outputCache[_cacheIndex++];
     }
