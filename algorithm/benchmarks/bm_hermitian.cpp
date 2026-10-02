@@ -45,13 +45,12 @@ void benchmarkSize(std::size_t n) {
     for (auto& v : b) {
         v = T{normal(rng), normal(rng)};
     }
-    gr::Tensor<T>     x;
     gr::Tensor<RealT> values;
     gr::Tensor<T>     vectors;
-    expect(gr::math::solveHermitian(x, A, b) == gr::math::solve::Status::Success) << fatal;
+    expect(gr::math::solveHermitian(A, b).has_value()) << fatal;
     expect(gr::math::eigh(values, vectors, A) == gr::math::eig::Status::Success) << fatal;
 
-    ::benchmark::benchmark<NRepetitions>(std::format("solveHermitian {:22} N={}", type_name<T>(), n)) = [&] { std::ignore = gr::math::solveHermitian(x, A, b); };
+    ::benchmark::benchmark<NRepetitions>(std::format("solveHermitian {:22} N={}", type_name<T>(), n)) = [&] { std::ignore = gr::math::solveHermitian(A, b); };
     ::benchmark::benchmark<NRepetitions>(std::format("eigh           {:22} N={}", type_name<T>(), n)) = [&] { std::ignore = gr::math::eigh(values, vectors, A); };
 }
 

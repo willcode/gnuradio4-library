@@ -1,14 +1,17 @@
 #ifndef GNURADIO_LINEAR_SOLVE_HPP
 #define GNURADIO_LINEAR_SOLVE_HPP
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/algorithm/math/SVD.hpp>
 #include <gnuradio-4.0/algorithm/math/TensorMath.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
+#include <expected>
+#include <format>
 #include <limits>
+#include <source_location>
 #include <tuple>
 #include <vector>
 
@@ -17,19 +20,19 @@
  *
  * A matrix is a rank-2 tensor. A right-hand side `b` is a rank-1 tensor of n elements or a rank-2
  * tensor of n rows, one system per column; the solution `x` takes the rank and the column count of
- * `b`. Every function reports a bad input through its solve::Status. An output is written only when
- * the status is Success.
+ * `b`. Every function returns its result in a std::expected and reports a bad input through its
+ * gr::Error, which names the function and the fault: wrong tensor rank, mismatched extents or a
+ * non-finite entry; a Cholesky pivot that is zero, negative or not finite; or a triangular factor with
+ * a diagonal entry that is zero or negligible.
  */
 namespace gr::math {
 
-namespace solve {
-enum class Status : std::uint8_t {
-    Success,
-    InvalidInput,        /// wrong tensor rank, mismatched extents or a non-finite entry
-    NotPositiveDefinite, /// a Cholesky pivot is zero, negative or not finite
-    Singular             /// a triangular factor has a diagonal entry that is zero or negligible
+/// The thin QR factors of an m x n matrix: Q is m x n with orthonormal columns, R is n x n upper triangular.
+template<typename T>
+struct QrFactors {
+    Tensor<T> Q;
+    Tensor<T> R;
 };
-} // namespace solve
 
 namespace detail {
 
@@ -162,10 +165,10 @@ void householderFactor(Tensor<T>& W, std::vector<RealT>& tau) {
  */
 template<TensorLike TensorA, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires detail::FloatingElement<T>
-[[nodiscard]] solve::Status cholesky(Tensor<T>& L, const TensorA& A, gr::meta::fundamental_base_value_type_t<T> loading = {}) {
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> cholesky(const TensorA& A, gr::meta::fundamental_base_value_type_t<T> loading = {}, std::source_location loc = std::source_location::current()) {
     using RealT = gr::meta::fundamental_base_value_type_t<T>;
     if (!detail::isSquareMatrix(A) || !isFinite(A) || !std::isfinite(loading)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error("cholesky: A is not a finite square matrix or the loading is not finite", loc));
     }
     const std::size_t n = A.extent(0);
     Tensor<T>         F({n, n});
@@ -177,7 +180,7 @@ requires detail::FloatingElement<T>
             pivot -= squaredMagnitude(F[j, k]);
         }
         if (!(pivot > RealT{0}) || !std::isfinite(pivot)) {
-            return solve::Status::NotPositiveDefinite;
+            return std::unexpected(gr::Error(std::format("cholesky: pivot {} of row {} is not positive; A is not positive definite", pivot, j), loc));
         }
         const RealT diagonal = std::sqrt(pivot);
         F[j, j]              = T{diagonal};
@@ -189,8 +192,7 @@ requires detail::FloatingElement<T>
             F[i, j] = sum / diagonal;
         }
     }
-    L = std::move(F);
-    return solve::Status::Success;
+    return F;
 }
 
 namespace detail {
@@ -225,34 +227,36 @@ void choleskySubstitute(Tensor<T>& x, const TensorL& L, const TensorB& b, std::s
  * @brief Solves L L^H x = b for a Cholesky factor L.
  *
  * Forward substitution with L, then back substitution with L^H. Reads the lower triangle of L.
- * Returns InvalidInput when an entry of that triangle is not finite.
+ * Returns an error when an entry of that triangle is not finite. The solution x takes the rank and
+ * the column count of b.
  */
 template<TensorLike TensorL, TensorLike TensorB, typename T = typename std::remove_cvref_t<TensorL>::value_type>
 requires detail::FloatingElement<T>
-[[nodiscard]] solve::Status choleskySolve(Tensor<T>& x, const TensorL& L, const TensorB& b) {
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> choleskySolve(const TensorL& L, const TensorB& b, std::source_location loc = std::source_location::current()) {
     if (!detail::isSquareMatrix(L)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error("choleskySolve: L is not a square matrix", loc));
     }
     const std::size_t n = L.extent(0);
     const std::size_t k = detail::rhsColumns(b, n);
     if (k == 0UZ || !isFinite(b)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error(std::format("choleskySolve: b does not have {} finite rows", n), loc));
     }
     for (std::size_t i = 0UZ; i < n; ++i) {
         for (std::size_t j = 0UZ; j <= i; ++j) {
             const T entry = L[i, j];
             if (!std::isfinite(std::real(entry)) || !std::isfinite(std::imag(entry))) {
-                return solve::Status::InvalidInput;
+                return std::unexpected(gr::Error(std::format("choleskySolve: L[{}, {}] is not finite", i, j), loc));
             }
         }
     }
     for (std::size_t i = 0UZ; i < n; ++i) {
         if (L[i, i] == T{0}) {
-            return solve::Status::Singular;
+            return std::unexpected(gr::Error(std::format("choleskySolve: L is singular, diagonal entry {} is zero", i), loc));
         }
     }
+    Tensor<T> x;
     detail::choleskySubstitute(x, L, b, k);
-    return solve::Status::Success;
+    return x;
 }
 
 /**
@@ -260,33 +264,31 @@ requires detail::FloatingElement<T>
  */
 template<TensorLike TensorA, TensorLike TensorB, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires detail::FloatingElement<T>
-[[nodiscard]] solve::Status solveHermitian(Tensor<T>& x, const TensorA& A, const TensorB& b, gr::meta::fundamental_base_value_type_t<T> loading = {}) {
-    Tensor<T>           L;
-    const solve::Status status = cholesky(L, A, loading);
-    if (status != solve::Status::Success) {
-        return status;
-    }
-    const std::size_t k = detail::rhsColumns(b, L.extent(0));
-    if (k == 0UZ || !isFinite(b)) {
-        return solve::Status::InvalidInput;
-    }
-    // a factor from cholesky has finite entries and a positive diagonal
-    detail::choleskySubstitute(x, L, b, k);
-    return solve::Status::Success;
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> solveHermitian(const TensorA& A, const TensorB& b, gr::meta::fundamental_base_value_type_t<T> loading = {}, std::source_location loc = std::source_location::current()) {
+    return cholesky(A, loading, loc).and_then([&b, loc](const Tensor<T>& L) -> std::expected<Tensor<T>, gr::Error> {
+        const std::size_t k = detail::rhsColumns(b, L.extent(0));
+        if (k == 0UZ || !isFinite(b)) {
+            return std::unexpected(gr::Error(std::format("solveHermitian: b does not have {} finite rows", L.extent(0)), loc));
+        }
+        // a factor from cholesky has finite entries and a positive diagonal
+        Tensor<T> x;
+        detail::choleskySubstitute(x, L, b, k);
+        return x;
+    });
 }
 
 /**
  * @brief Thin Householder QR factorization A = Q R of an m x n matrix with m >= n.
  *
  * Q is m x n with orthonormal columns and R is n x n upper triangular. A rank-deficient A still
- * factors; leastSquares reports it as Singular.
+ * factors; leastSquares reports it as singular.
  */
 template<TensorLike TensorA, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires detail::FloatingElement<T>
-[[nodiscard]] solve::Status householderQr(Tensor<T>& Q, Tensor<T>& R, const TensorA& A) {
+[[nodiscard]] std::expected<QrFactors<T>, gr::Error> householderQr(const TensorA& A, std::source_location loc = std::source_location::current()) {
     using RealT = gr::meta::fundamental_base_value_type_t<T>;
     if (A.rank() != 2UZ || A.extent(0) < A.extent(1) || !isFinite(A)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error("householderQr: A is not a finite matrix with at least as many rows as columns", loc));
     }
     const std::size_t m = A.extent(0);
     const std::size_t n = A.extent(1);
@@ -309,30 +311,30 @@ requires detail::FloatingElement<T>
         }
     }
     detail::scaleByPowerOfTwo(Rout, shift);
-    detail::accumulateU(W, tau, Q);
-    R = std::move(Rout);
-    return solve::Status::Success;
+    QrFactors<T> factors{.Q = {}, .R = std::move(Rout)};
+    detail::accumulateU(W, tau, factors.Q);
+    return factors;
 }
 
 /**
  * @brief Least-squares solution of A x = b for an m x n matrix A with m >= n.
  *
  * Minimizes ||A x - b|| through a Householder QR factorization: x solves R x = Q^H b. A square A
- * gives the exact solution. Returns Singular when a diagonal entry of R is at or below
- * eps * max(m, n) times the largest one, that is when A is rank-deficient to working precision.
+ * gives the exact solution. Returns a singular-matrix error when a diagonal entry of R is at or
+ * below eps * m times the largest one, that is when A is rank-deficient to working precision.
  */
 template<TensorLike TensorA, TensorLike TensorB, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires detail::FloatingElement<T>
-[[nodiscard]] solve::Status leastSquares(Tensor<T>& x, const TensorA& A, const TensorB& b) {
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> leastSquares(const TensorA& A, const TensorB& b, std::source_location loc = std::source_location::current()) {
     using RealT = gr::meta::fundamental_base_value_type_t<T>;
     if (A.rank() != 2UZ || A.extent(0) < A.extent(1) || !isFinite(A)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error("leastSquares: A is not a finite matrix with at least as many rows as columns", loc));
     }
     const std::size_t m = A.extent(0);
     const std::size_t n = A.extent(1);
     const std::size_t k = detail::rhsColumns(b, m);
     if (k == 0UZ || !isFinite(b)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error(std::format("leastSquares: b does not have {} finite rows", m), loc));
     }
 
     Tensor<T> W({m, n});
@@ -354,7 +356,7 @@ requires detail::FloatingElement<T>
     const RealT negligible = std::numeric_limits<RealT>::epsilon() * static_cast<RealT>(m) * largest;
     for (std::size_t i = 0UZ; i < n; ++i) {
         if (!(static_cast<RealT>(std::abs(W[i, i])) > negligible)) {
-            return solve::Status::Singular;
+            return std::unexpected(gr::Error("leastSquares: A is singular, rank-deficient to working precision", loc));
         }
     }
 
@@ -381,20 +383,21 @@ requires detail::FloatingElement<T>
 
     detail::backSubstitute(W, Y, n);
     detail::scaleByPowerOfTwo(Y, shiftB - shiftA);
+    Tensor<T> x;
     detail::storeSolution(x, Y, n, b.rank());
-    return solve::Status::Success;
+    return x;
 }
 
 /**
  * @brief Inverse of a square matrix, solved column by column against the identity through leastSquares.
  *
- * Returns Singular when A is singular to working precision.
+ * Returns a singular-matrix error when A is singular to working precision.
  */
 template<TensorLike TensorA, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires detail::FloatingElement<T>
-[[nodiscard]] solve::Status inverse(Tensor<T>& Ainv, const TensorA& A) {
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> inverse(const TensorA& A, std::source_location loc = std::source_location::current()) {
     if (!detail::isSquareMatrix(A)) {
-        return solve::Status::InvalidInput;
+        return std::unexpected(gr::Error("inverse: A is not a square matrix", loc));
     }
     const std::size_t n = A.extent(0);
     Tensor<T>         identity({n, n});
@@ -402,7 +405,7 @@ requires detail::FloatingElement<T>
     for (std::size_t i = 0UZ; i < n; ++i) {
         identity[i, i] = T{1};
     }
-    return leastSquares(Ainv, A, identity);
+    return leastSquares(A, identity, loc);
 }
 
 } // namespace gr::math

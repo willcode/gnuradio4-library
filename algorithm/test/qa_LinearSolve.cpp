@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <format>
 #include <limits>
 #include <string>
 #include <tuple>
@@ -144,10 +145,11 @@ const boost::ut::suite<"Cholesky"> _cholesky = [] {
     using namespace boost::ut;
 
     "the factor of L0 L0^H is L0"_test = []<typename T> {
-        const Tensor<T> L0 = chosenFactor<T>();
-        const Tensor<T> A  = multiply(L0, adjoint(L0));
-        Tensor<T>       L;
-        expect(cholesky(L, A) == solve::Status::Success) << typeName<T>();
+        const Tensor<T> L0     = chosenFactor<T>();
+        const Tensor<T> A      = multiply(L0, adjoint(L0));
+        const auto      factor = cholesky(A);
+        expect(fatal(factor.has_value())) << typeName<T>();
+        const Tensor<T>& L = *factor;
         expect(le(relativeError(L, L0), tolerance<T>(4))) << typeName<T>();
         expect(L[0, 1] == T{0} && L[0, 3] == T{0} && L[2, 3] == T{0}) << typeName<T>() << "zeros above the diagonal";
     } | ElementTypes{};
@@ -158,8 +160,9 @@ const boost::ut::suite<"Cholesky"> _cholesky = [] {
         const Tensor<T> x0 = matrix<T>(4, 2, {{1, 0}, {0, 1}, {-2, 1}, {3, 0}, {0, -1}, {1, 1}, {4, 2}, {-1, 0}});
         const Tensor<T> b  = multiply(A, x0);
 
-        Tensor<T> x;
-        expect(solveHermitian(x, A, b) == solve::Status::Success) << typeName<T>();
+        const auto solved = solveHermitian(A, b);
+        expect(fatal(solved.has_value())) << typeName<T>();
+        const Tensor<T>& x = *solved;
         expect(eq(x.rank(), 2UZ) && eq(x.extent(1), 2UZ)) << typeName<T>();
         expect(le(relativeError(x, x0), tolerance<T>(4))) << typeName<T>() << "two right-hand sides";
 
@@ -169,20 +172,24 @@ const boost::ut::suite<"Cholesky"> _cholesky = [] {
             b1[i]         = b[i, 0UZ];
             x1Expected[i] = x0[i, 0UZ];
         }
-        Tensor<T> x1;
-        expect(solveHermitian(x1, A, b1) == solve::Status::Success) << typeName<T>();
+        const auto solved1 = solveHermitian(A, b1);
+        expect(fatal(solved1.has_value())) << typeName<T>();
+        const Tensor<T>& x1 = *solved1;
         expect(eq(x1.rank(), 1UZ)) << typeName<T>() << "a vector right-hand side gives a vector";
         expect(le(relativeError(x1, x1Expected), tolerance<T>(4))) << typeName<T>() << "one right-hand side";
     } | ElementTypes{};
 
     "an indefinite matrix is refused; diagonal loading makes it definite"_test = []<typename T> {
         // eigenvalues -1 and 3
-        const Tensor<T> A = matrix<T>(2, 2, {{1, 0}, {2, 0}, {2, 0}, {1, 0}});
-        Tensor<T>       L;
-        expect(cholesky(L, A) == solve::Status::NotPositiveDefinite) << typeName<T>();
+        const Tensor<T> A       = matrix<T>(2, 2, {{1, 0}, {2, 0}, {2, 0}, {1, 0}});
+        const auto      refused = cholesky(A);
+        expect(fatal(!refused.has_value())) << typeName<T>();
+        expect(refused.error().message.contains("not positive definite")) << typeName<T>() << refused.error().message;
 
-        expect(cholesky(L, A, Real<T>{2}) == solve::Status::Success) << typeName<T>();
-        Tensor<T> loaded = A;
+        const auto factor = cholesky(A, Real<T>{2});
+        expect(fatal(factor.has_value())) << typeName<T>();
+        const Tensor<T>& L      = *factor;
+        Tensor<T>        loaded = A;
         loaded[0, 0] += T{2};
         loaded[1, 1] += T{2};
         expect(le(relativeError(multiply(L, adjoint(L)), loaded), tolerance<T>(2))) << typeName<T>() << "L L^H = A + 2 I";
@@ -196,54 +203,61 @@ const boost::ut::suite<"Cholesky"> _cholesky = [] {
         for (std::size_t i = 0UZ; i < 4UZ; ++i) {
             loaded[i, i] += T{3};
         }
-        Tensor<T> x;
-        Tensor<T> xLoaded;
-        expect(solveHermitian(x, A, b, Real<T>{3}) == solve::Status::Success) << typeName<T>();
-        expect(solveHermitian(xLoaded, loaded, b) == solve::Status::Success) << typeName<T>();
-        expect(le(relativeError(x, xLoaded), tolerance<T>(4))) << typeName<T>();
+        const auto x       = solveHermitian(A, b, Real<T>{3});
+        const auto xLoaded = solveHermitian(loaded, b);
+        expect(fatal(x.has_value() && xLoaded.has_value())) << typeName<T>();
+        expect(le(relativeError(*x, *xLoaded), tolerance<T>(4))) << typeName<T>();
     } | ElementTypes{};
 
     "invalid extents and non-finite entries are refused"_test = []<typename T> {
-        Tensor<T>       L;
-        Tensor<T>       x;
         const Tensor<T> rectangular({3UZ, 2UZ});
-        expect(cholesky(L, rectangular) == solve::Status::InvalidInput) << typeName<T>();
+        const auto      notSquare = cholesky(rectangular);
+        expect(fatal(!notSquare.has_value())) << typeName<T>();
+        expect(notSquare.error().message.contains("not a finite square matrix")) << typeName<T>() << notSquare.error().message;
 
         const Tensor<T> A = identity<T>(3);
         Tensor<T>       wrongLength({4UZ});
         wrongLength.fill(T{1});
-        expect(solveHermitian(x, A, wrongLength) == solve::Status::InvalidInput) << typeName<T>();
+        const auto shortRhs = solveHermitian(A, wrongLength);
+        expect(fatal(!shortRhs.has_value())) << typeName<T>();
+        expect(shortRhs.error().message.contains("solveHermitian: b does not have 3 finite rows")) << typeName<T>() << shortRhs.error().message;
 
         Tensor<T> withNaN = A;
         withNaN[2, 1]     = element<T>(std::numeric_limits<double>::quiet_NaN());
-        expect(cholesky(L, withNaN) == solve::Status::InvalidInput) << typeName<T>();
-        expect(x.size() == 0UZ) << typeName<T>() << "a refused solve leaves x untouched";
+        expect(!cholesky(withNaN).has_value()) << typeName<T>();
+
+        Tensor<T> zeroDiagonal = identity<T>(3);
+        zeroDiagonal[1, 1]     = T{0};
+        const auto singular    = choleskySolve(zeroDiagonal, A);
+        expect(fatal(!singular.has_value())) << typeName<T>();
+        expect(singular.error().message.contains("singular")) << typeName<T>() << singular.error().message;
     } | ElementTypes{};
 
-    "a factor with a non-finite entry is refused and leaves x as it was"_test = []<typename T> {
+    "a factor with a non-finite entry is refused"_test = []<typename T> {
         const Tensor<T> L0 = chosenFactor<T>();
         const Tensor<T> x0 = matrix<T>(4, 1, {{1, 0}, {-2, 1}, {0, -1}, {3, 0}});
         const Tensor<T> b  = multiply(multiply(L0, adjoint(L0)), x0);
 
-        Tensor<T> x;
-        expect(choleskySolve(x, L0, b) == solve::Status::Success) << typeName<T>() << "a finite factor";
-        expect(le(relativeError(x, x0), tolerance<T>(4))) << typeName<T>() << "a finite factor";
+        const auto x = choleskySolve(L0, b);
+        expect(fatal(x.has_value())) << typeName<T>() << "a finite factor";
+        expect(le(relativeError(*x, x0), tolerance<T>(4))) << typeName<T>() << "a finite factor";
 
-        const Tensor<T> solved = x;
         for (const double bad : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
             for (const auto& [i, j] : {std::pair{2UZ, 1UZ}, std::pair{3UZ, 3UZ}}) { // below the diagonal and on it
-                Tensor<T> L = L0;
-                L[i, j]     = element<T>(bad);
-                expect(choleskySolve(x, L, b) == solve::Status::InvalidInput) << typeName<T>() << bad << "at" << i << j;
-                expect(std::ranges::equal(x, solved)) << typeName<T>() << bad << "at" << i << j << "x is left as it was";
+                Tensor<T> L        = L0;
+                L[i, j]            = element<T>(bad);
+                const auto refused = choleskySolve(L, b);
+                expect(fatal(!refused.has_value())) << typeName<T>() << bad << "at" << i << j;
+                expect(refused.error().message.contains(std::format("L[{}, {}] is not finite", i, j))) << typeName<T>() << refused.error().message;
             }
         }
 
         // the solve reads the lower triangle only
-        Tensor<T> upper = L0;
-        upper[0, 3]     = element<T>(std::numeric_limits<double>::quiet_NaN());
-        expect(choleskySolve(x, upper, b) == solve::Status::Success) << typeName<T>() << "a non-finite entry above the diagonal";
-        expect(le(relativeError(x, x0), tolerance<T>(4))) << typeName<T>() << "a non-finite entry above the diagonal";
+        Tensor<T> upper   = L0;
+        upper[0, 3]       = element<T>(std::numeric_limits<double>::quiet_NaN());
+        const auto xUpper = choleskySolve(upper, b);
+        expect(fatal(xUpper.has_value())) << typeName<T>() << "a non-finite entry above the diagonal";
+        expect(le(relativeError(*xUpper, x0), tolerance<T>(4))) << typeName<T>() << "a non-finite entry above the diagonal";
     } | ElementTypes{};
 };
 
@@ -251,10 +265,10 @@ const boost::ut::suite<"Householder QR and least squares"> _qr = [] {
     using namespace boost::ut;
 
     "Q R reconstructs A, Q has orthonormal columns, R is upper triangular"_test = []<typename T> {
-        const Tensor<T> A = tallMatrix<T>();
-        Tensor<T>       Q;
-        Tensor<T>       R;
-        expect(householderQr(Q, R, A) == solve::Status::Success) << typeName<T>();
+        const Tensor<T> A       = tallMatrix<T>();
+        const auto      factors = householderQr(A);
+        expect(fatal(factors.has_value())) << typeName<T>();
+        const auto& [Q, R] = *factors;
         expect(eq(Q.extent(0), 6UZ) && eq(Q.extent(1), 3UZ) && eq(R.extent(0), 3UZ) && eq(R.extent(1), 3UZ)) << typeName<T>();
         expect(le(relativeError(multiply(Q, R), A), tolerance<T>(6))) << typeName<T>() << "A = Q R";
         expect(le(relativeError(multiply(adjoint(Q), Q), identity<T>(3)), tolerance<T>(6))) << typeName<T>() << "Q^H Q = I";
@@ -270,15 +284,15 @@ const boost::ut::suite<"Householder QR and least squares"> _qr = [] {
             for (auto& a : A) {
                 a *= scale;
             }
-            Tensor<T> Q;
-            Tensor<T> R;
-            expect(householderQr(Q, R, A) == solve::Status::Success) << typeName<T>() << scale;
+            const auto factors = householderQr(A);
+            expect(fatal(factors.has_value())) << typeName<T>() << scale;
+            const auto& [Q, R] = *factors;
             expect(le(relativeError(multiply(Q, R), A), tolerance<T>(6))) << typeName<T>() << scale << "A = Q R";
             expect(le(relativeError(multiply(adjoint(Q), Q), identity<T>(3)), tolerance<T>(6))) << typeName<T>() << scale << "Q^H Q = I";
 
-            Tensor<T> x;
-            expect(leastSquares(x, A, multiply(A, x0)) == solve::Status::Success) << typeName<T>() << scale;
-            expect(le(relativeError(x, x0), tolerance<T>(6))) << typeName<T>() << scale << "the chosen solution";
+            const auto x = leastSquares(A, multiply(A, x0));
+            expect(fatal(x.has_value())) << typeName<T>() << scale;
+            expect(le(relativeError(*x, x0), tolerance<T>(6))) << typeName<T>() << scale << "the chosen solution";
         }
     } | ElementTypes{};
 
@@ -291,18 +305,18 @@ const boost::ut::suite<"Householder QR and least squares"> _qr = [] {
         constexpr Real<T> smallest = std::numeric_limits<Real<T>>::min();
         for (const Real<T> scale : {Real<T>{1}, smallest / Real<T>{16}, largest / Real<T>{8} * Real<T>{5}}) {
             Tensor<T> A({2UZ, 1UZ});
-            A[0UZ, 0UZ] = x0 * scale;
-            A[1UZ, 0UZ] = T{scale / Real<T>{2}};
-            Tensor<T> Q;
-            Tensor<T> R;
-            expect(householderQr(Q, R, A) == solve::Status::Success) << typeName<T>() << scale << fatal;
+            A[0UZ, 0UZ]        = x0 * scale;
+            A[1UZ, 0UZ]        = T{scale / Real<T>{2}};
+            const auto factors = householderQr(A);
+            expect(fatal(factors.has_value())) << typeName<T>() << scale;
+            const auto& [Q, R] = *factors;
             expect(isFinite(Q) && isFinite(R)) << typeName<T>() << scale << "finite Q and R";
             expect(le(relativeError(multiply(Q, R), A), tolerance<T>(2))) << typeName<T>() << scale << "A = Q R";
             expect(le(relativeError(multiply(adjoint(Q), Q), identity<T>(1)), tolerance<T>(2))) << typeName<T>() << scale << "Q^H Q = I";
 
-            Tensor<T> x;
-            expect(leastSquares(x, A, A) == solve::Status::Success) << typeName<T>() << scale << fatal;
-            expect(le(relativeError(x, identity<T>(1)), tolerance<T>(2))) << typeName<T>() << scale << "A x = A gives x = 1";
+            const auto x = leastSquares(A, A);
+            expect(fatal(x.has_value())) << typeName<T>() << scale;
+            expect(le(relativeError(*x, identity<T>(1)), tolerance<T>(2))) << typeName<T>() << scale << "A x = A gives x = 1";
         }
     } | ElementTypes{};
 
@@ -310,17 +324,17 @@ const boost::ut::suite<"Householder QR and least squares"> _qr = [] {
         const Tensor<T> A  = tallMatrix<T>();
         const Tensor<T> x0 = matrix<T>(3, 1, {{1, -1}, {-2, 0}, {0, 3}});
         const Tensor<T> b  = multiply(A, x0);
-        Tensor<T>       x;
-        expect(leastSquares(x, A, b) == solve::Status::Success) << typeName<T>();
-        expect(le(relativeError(x, x0), tolerance<T>(6))) << typeName<T>();
+        const auto      x  = leastSquares(A, b);
+        expect(fatal(x.has_value())) << typeName<T>();
+        expect(le(relativeError(*x, x0), tolerance<T>(6))) << typeName<T>();
     } | ElementTypes{};
 
     "an inconsistent tall system satisfies the normal equations"_test = []<typename T> {
         const Tensor<T> A = tallMatrix<T>();
         const Tensor<T> b = matrix<T>(6, 1, {{1, 0}, {0, 1}, {2, 0}, {-1, 1}, {0, 0}, {3, -2}});
-        Tensor<T>       x;
-        expect(leastSquares(x, A, b) == solve::Status::Success) << typeName<T>();
-        Tensor<T> residual = multiply(A, x);
+        const auto      x = leastSquares(A, b);
+        expect(fatal(x.has_value())) << typeName<T>();
+        Tensor<T> residual = multiply(A, *x);
         for (std::size_t i = 0UZ; i < 6UZ; ++i) {
             residual[i, 0UZ] -= b[i, 0UZ];
         }
@@ -342,26 +356,33 @@ const boost::ut::suite<"Householder QR and least squares"> _qr = [] {
         }
         Tensor<T> b({6UZ});
         b.fill(T{1});
-        Tensor<T> x;
-        expect(leastSquares(x, A, b) == solve::Status::Singular) << typeName<T>();
+        const auto refused = leastSquares(A, b);
+        expect(fatal(!refused.has_value())) << typeName<T>();
+        expect(refused.error().message.contains("singular")) << typeName<T>() << refused.error().message;
 
         const Tensor<T> wide({2UZ, 3UZ});
-        Tensor<T>       Q;
-        Tensor<T>       R;
-        expect(householderQr(Q, R, wide) == solve::Status::InvalidInput) << typeName<T>() << "a wide matrix";
+        const auto      wideFactors = householderQr(wide);
+        expect(fatal(!wideFactors.has_value())) << typeName<T>() << "a wide matrix";
+        expect(wideFactors.error().message.contains("at least as many rows as columns")) << typeName<T>() << wideFactors.error().message;
     } | ElementTypes{};
 
     "inverse times A is the identity"_test = []<typename T> {
         const Tensor<T> L0 = chosenFactor<T>();
         Tensor<T>       A  = multiply(L0, adjoint(L0));
         A[0, 3] += element<T>(2, 1); // A is not Hermitian
-        Tensor<T> Ainv;
-        expect(inverse(Ainv, A) == solve::Status::Success) << typeName<T>();
+        const auto inverted = inverse(A);
+        expect(fatal(inverted.has_value())) << typeName<T>();
+        const Tensor<T>& Ainv = *inverted;
         expect(le(relativeError(multiply(A, Ainv), identity<T>(4)), tolerance<T>(4))) << typeName<T>() << "A A^-1 = I";
         expect(le(relativeError(multiply(Ainv, A), identity<T>(4)), tolerance<T>(4))) << typeName<T>() << "A^-1 A = I";
 
         const Tensor<T> singular = matrix<T>(2, 2, {{1, 1}, {2, 0}, {2, 2}, {4, 0}});
-        expect(inverse(Ainv, singular) == solve::Status::Singular) << typeName<T>();
+        const auto      refused  = inverse(singular);
+        expect(fatal(!refused.has_value())) << typeName<T>();
+        expect(refused.error().message.contains("singular")) << typeName<T>() << refused.error().message;
+
+        const Tensor<T> rectangular({3UZ, 2UZ});
+        expect(!inverse(rectangular).has_value()) << typeName<T>() << "a rectangular matrix";
     } | ElementTypes{};
 };
 
