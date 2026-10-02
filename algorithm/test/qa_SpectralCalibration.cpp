@@ -65,7 +65,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
     using namespace boost::ut;
 
     "a rectangle has one bin of noise bandwidth, and every other window has more"_test = [] {
-        const auto rect = gr::algorithm::window::create(gr::algorithm::window::Type::Rectangular, 1024UZ);
+        const auto rect = gr::algorithm::window::create(gr::algorithm::window::Type::Rectangular, 1024UZ).value();
         expect(approx(enbwBins(std::span<const float>(rect)), 1.f, 1e-5f)) << "the rectangle is the unit the others are measured in";
 
         // the published figures: Hann 1.50, Hamming 1.36, Blackman 1.73, Blackman-Harris 2.00 bins
@@ -76,7 +76,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
             {gr::algorithm::window::Type::BlackmanHarris, 2.00f},
         };
         for (const auto& [type, figure] : expected) {
-            const auto  window = gr::algorithm::window::create(type, 1024UZ);
+            const auto  window = gr::algorithm::window::create(type, 1024UZ).value();
             const float value  = enbwBins(std::span<const float>(window));
             expect(approx(value, figure, 0.01f)) << "the measured noise bandwidth must be the published one";
         }
@@ -85,7 +85,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
     "criterion 1: a full-scale tone's density integrates to 0 dBFS, whatever the window"_test = [] {
         constexpr std::size_t n = 1024UZ;
         for (const auto& [name, type] : kWindows) {
-            const auto  window   = gr::algorithm::window::create(type, n);
+            const auto  window   = gr::algorithm::window::create(type, n).value();
             const auto  density  = densityOf(std::span<const CF>(toneAtBin(n, 128.)), std::span<const float>(window));
             const auto  scale    = spectralScale(std::span<const float>(window), kSampleRate);
             const float integral = integratePowerDensity(std::span<const float>(density), scale.binWidthHz);
@@ -97,7 +97,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
     "the tone correction recovers a tone's power from its own peak bin"_test = [] {
         constexpr std::size_t n = 1024UZ;
         for (const auto& [name, type] : kWindows) {
-            const auto window  = gr::algorithm::window::create(type, n);
+            const auto window  = gr::algorithm::window::create(type, n).value();
             const auto density = densityOf(std::span<const CF>(toneAtBin(n, 128.)), std::span<const float>(window));
             const auto scale   = spectralScale(std::span<const float>(window), kSampleRate);
 
@@ -117,7 +117,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
         // checks it below, and a generator change cannot quietly move the reference the test measures against.
         constexpr float kPower = 1.f / 6.f;
 
-        const auto         window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n);
+        const auto         window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n).value();
         const auto         scale  = spectralScale(std::span<const float>(window), kSampleRate);
         std::vector<float> density(n, 0.f);
 
@@ -152,7 +152,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
 
     "a one-sided density integrates to the same total as the two-sided one"_test = [] {
         constexpr std::size_t n      = 1024UZ;
-        const auto            window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n);
+        const auto            window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n).value();
         const auto            scale  = spectralScale(std::span<const float>(window), kSampleRate);
 
         // A real input, presented as complex with a zero quadrature. Its spectrum is conjugate-symmetric, the case the
@@ -177,7 +177,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
         expect(std::isnan(scale.density));
         expect(std::isnan(scale.enbwBins));
 
-        const auto rect   = gr::algorithm::window::create(gr::algorithm::window::Type::Rectangular, 16UZ);
+        const auto rect   = gr::algorithm::window::create(gr::algorithm::window::Type::Rectangular, 16UZ).value();
         const auto noRate = spectralScale(std::span<const float>(rect), 0.f);
         expect(std::isnan(noRate.density)) << "a zero sample rate has no density to state";
     };

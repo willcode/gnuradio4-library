@@ -1187,7 +1187,9 @@ template<std::floating_point T>
     const auto sinc = [](T x, T a = std::numbers::pi_v<T>) noexcept -> T { return x == static_cast<T>(0) ? static_cast<T>(1) : std::sin(a * x) / (a * x); };
 
     std::vector<T> coefficients(N);
-    gr::algorithm::window::create(coefficients, window, param);
+    if (auto shaped = gr::algorithm::window::create(coefficients, window, param); !shaped) {
+        throw std::invalid_argument(shaped.error().message);
+    }
 
     std::size_t index = 0; // Index variable to keep track of the current index
     std::ranges::transform(coefficients, coefficients.begin(), [&index, M, fc, &sinc](T coeff) { return coeff * static_cast<T>(2) * fc * sinc(static_cast<T>(2) * fc * (static_cast<T>(index++) - M)); });

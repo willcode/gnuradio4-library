@@ -237,7 +237,11 @@ struct WindowedSegmenter {
         overlap      = fraction;
         windowType   = type;
         hop          = hopFor(length, fraction);
-        taper        = gr::algorithm::window::create<float>(type, length);
+        auto shape   = gr::algorithm::window::create<float>(type, length);
+        if (!shape) {
+            throw std::invalid_argument(shape.error().message);
+        }
+        taper = std::move(*shape);
         taperAcf.assign(lag + 1UZ, 0.);
         reset();
     }

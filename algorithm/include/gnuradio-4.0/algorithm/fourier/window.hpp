@@ -5,10 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <expected>
 #include <limits>
 #include <numbers>
 #include <ranges>
-#include <stdexcept>
+#include <source_location>
 #include <string_view>
 #include <vector>
 
@@ -26,6 +27,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr::algorithm::window {
@@ -84,29 +86,29 @@ requires std::is_floating_point_v<T>
 
 template<typename T>
 requires std::is_floating_point_v<T>
-void validateParameter(Type windowFunction, T param) {
+[[nodiscard]] std::expected<void, gr::Error> validateParameter(Type windowFunction, T param, std::source_location loc = std::source_location::current()) {
     switch (windowFunction) {
     case Type::Kaiser:
         if (param < static_cast<T>(0)) {
-            throw std::invalid_argument(std::format("Kaiser beta must be non-negative, is {}", param));
+            return std::unexpected(gr::Error(std::format("Kaiser beta must be non-negative, is {}", param), loc));
         }
-        return;
+        return {};
     case Type::Tukey:
         if (param < static_cast<T>(0) || param > static_cast<T>(1)) {
-            throw std::invalid_argument(std::format("Tukey alpha must be within [0, 1], is {}", param));
+            return std::unexpected(gr::Error(std::format("Tukey alpha must be within [0, 1], is {}", param), loc));
         }
-        return;
+        return {};
     case Type::Gaussian:
         if (param <= static_cast<T>(0) || param > static_cast<T>(0.5)) {
-            throw std::invalid_argument(std::format("Gaussian sigma must be within (0, 0.5], is {}", param));
+            return std::unexpected(gr::Error(std::format("Gaussian sigma must be within (0, 0.5], is {}", param), loc));
         }
-        return;
+        return {};
     case Type::Exponential:
         if (param < static_cast<T>(0)) {
-            throw std::invalid_argument(std::format("Exponential decay [dB] must be non-negative, is {}", param));
+            return std::unexpected(gr::Error(std::format("Exponential decay [dB] must be non-negative, is {}", param), loc));
         }
-        return;
-    default: return;
+        return {};
+    default: return {};
     }
 }
 
@@ -125,7 +127,7 @@ void fillSymmetric(ContainerType& container, std::size_t n, TShape&& shape) {
 
 /// @brief The shape parameter `create` uses for a window type when it is given NaN; zero for a window without one.
 using detail::defaultParameter;
-/// @brief Throws `std::invalid_argument` where @p param is outside the window type's range; `create` applies the same check.
+/// @brief Returns a gr::Error where @p param is outside the window type's range; `create` applies the same check.
 using detail::validateParameter;
 
 /**
@@ -142,23 +144,26 @@ using detail::validateParameter;
  * @param windowFunction The type of window function to create.
  * @param param The window's shape parameter: Kaiser beta [0, inf) default 1.6, Tukey alpha [0, 1] default 0.5,
  *              Gaussian sigma (0, 0.5] default 0.4 as a fraction of the half-length, Exponential decay from
- *              center to edge in dB [0, inf) default 60. NaN selects the default; out of range throws.
+ *              center to edge in dB [0, inf) default 60. NaN selects the default.
+ * @return a gr::Error for a parameter out of range or a Kaiser window of one sample
  */
 template<gr::meta::array_or_vector_type ContainerType, typename T = ContainerType::value_type>
 requires std::is_floating_point_v<T>
-void create(ContainerType& container, Type windowFunction, const T param = std::numeric_limits<T>::quiet_NaN()) {
+[[nodiscard]] std::expected<void, gr::Error> create(ContainerType& container, Type windowFunction, const T param = std::numeric_limits<T>::quiet_NaN(), std::source_location loc = std::source_location::current()) {
     constexpr T       pi2 = 2 * std::numbers::pi_v<T>;
     const std::size_t n   = container.size();
     if (n == 0) {
-        return;
+        return {};
     }
     const T p = std::isnan(param) ? detail::defaultParameter<T>(windowFunction) : param;
-    detail::validateParameter<T>(windowFunction, p);
+    if (auto valid = detail::validateParameter<T>(windowFunction, p, loc); !valid) {
+        return valid;
+    }
 
     // every cosine-sum window scales by 1/(n - 1); Kaiser rejects n <= 1 below
     if (n == 1 && windowFunction != Type::Kaiser) {
         container[0] = static_cast<T>(1);
-        return;
+        return {};
     }
 
     using enum Type;
@@ -166,14 +171,14 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
     case None:
     case Rectangular: {
         std::ranges::fill(container, 1);
-        return;
+        return {};
     }
     case Hamming: {
         // formula: w(n) = 0.53836 - 0.46164 * cos((2 * pi * n) / (N - 1))
         // equiripple-optimal coefficients; the textbook 0.54/0.46 rounding raises the peak sidelobe by ~0.5 dB
         const T a = pi2 / static_cast<T>(n - 1);
         detail::fillSymmetric<T>(container, n, [a](const std::size_t i) { return static_cast<T>(0.53836) - static_cast<T>(0.46164) * std::cos(a * static_cast<T>(i)); });
-        return;
+        return {};
     }
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -188,7 +193,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         // reference: von Hann, J. (1901). Über den Durchgang einer elektrischen Welle längs der Erdoberfläche. Elektrische Nachrichtentechnik, 17, 421-424.
         const T a = pi2 / static_cast<T>(n - 1);
         detail::fillSymmetric<T>(container, n, [a](const std::size_t i) { return static_cast<T>(.5) - static_cast<T>(.5) * std::cos(a * static_cast<T>(i)); });
-        return;
+        return {};
     }
     case Blackman: {
         // formula: w(n) = 0.42 - 0.5 * cos((2 * pi * n) / (N - 1)) + 0.08 * cos((4 * pi * n) / (N - 1))
@@ -198,7 +203,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T ai = a * static_cast<T>(i);
             return static_cast<T>(0.42) - static_cast<T>(0.5) * std::cos(ai) + static_cast<T>(0.08) * std::cos(static_cast<T>(2.) * ai);
         });
-        return;
+        return {};
     }
     case Nuttall: {
         // Formula: w(n) = a0 - a1 * cos((2 * pi * n) / (N - 1)) + a2 * cos((4 * pi * n) / (N - 1)) - a3 * cos((6 * pi * n) / (N - 1))
@@ -209,7 +214,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T                    ai    = a * static_cast<T>(i);
             return coeff[0] - coeff[1] * std::cos(ai) + coeff[2] * std::cos(2 * ai) - coeff[3] * std::cos(3 * ai);
         });
-        return;
+        return {};
     }
     case BlackmanHarris: {
         // formula: w(n) = a0 - a1 * cos((2 * pi * n) / (N - 1)) + a2 * cos((4 * pi * n) / (N - 1)) - a3 * cos((6 * pi * n) / (N - 1))
@@ -220,7 +225,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T                    ai    = a * static_cast<T>(i);
             return coeff[0] - coeff[1] * std::cos(ai) + coeff[2] * std::cos(2 * ai) - coeff[3] * std::cos(3 * ai);
         });
-        return;
+        return {};
     }
     case BlackmanNuttall: {
         // formula: w(n) = 0.3635819 - 0.4891775 * cos(2*pi*n/(N-1)) + 0.1365995 * cos(4*pi*n/(N-1)) - 0.0106411 * cos(6*pi*n/(N-1))
@@ -230,7 +235,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T ai = a * static_cast<T>(i);
             return static_cast<T>(0.3635819) - static_cast<T>(0.4891775) * std::cos(ai) + static_cast<T>(0.1365995) * std::cos(static_cast<T>(2.) * ai) - static_cast<T>(0.0106411) * std::cos(static_cast<T>(3.) * ai);
         });
-        return;
+        return {};
     }
     case FlatTop: {
         // formula: w(n) = (a0 - a1 * cos((2 * pi * n) / (N - 1)) + a2 * cos((4 * pi * n) / (N - 1)) - a3 * cos((6 * pi * n) / (N - 1)) + a4 * cos((8 * pi * n) / (N - 1))) / sum(a)
@@ -243,7 +248,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T                    ai    = a * static_cast<T>(i);
             return norm * (coeff[0] - coeff[1] * std::cos(ai) + coeff[2] * std::cos(2 * ai) - coeff[3] * std::cos(3 * ai) + coeff[4] * std::cos(4 * ai));
         });
-        return;
+        return {};
     }
     case Exponential: {
         // formula: w(n) = exp(-|n - (N-1)/2| / tau), tau = (N-1)/2 * (8.69/param) -- symmetric Poisson window decaying by `param` dB at the edges
@@ -252,13 +257,13 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         const T center = static_cast<T>(n - 1) / static_cast<T>(2);
         const T tau    = center * (static_cast<T>(8.69) / p);
         detail::fillSymmetric<T>(container, n, [center, tau](const std::size_t i) { return std::exp(-std::abs(static_cast<T>(i) - center) / tau); });
-        return;
+        return {};
     }
     case Kaiser: {
         // formula: w(n) = I0(beta * sqrt(1 - ((2*n/(N-1)) - 1)^2)) / I0(beta)
         // reference: J. F. Kaiser and R. W. Schafer. On the use of the i0-sinh window for spectrum analysis. IEEE Transactions on Acoustics, Speech, and Signal Processing, 28(1):105–107, 1980.
         if (n <= 1) {
-            throw std::invalid_argument("n must be larger than one");
+            return std::unexpected(gr::Error("Kaiser window: n must be larger than one", loc));
         }
 
         const T factor = static_cast<T>(1) / static_cast<T>(n - 1);
@@ -267,13 +272,13 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T term = (static_cast<T>(2 * i) * factor) - static_cast<T>(1);
             return besselI0(p * std::sqrt(std::abs(static_cast<T>(1) - term * term))) / i0Beta;
         });
-        return;
+        return {};
     }
     case Bartlett: {
         // formula: w(n) = 1 - |n - M| / M, M = (N - 1)/2 -- triangular with both ends exactly zero
         const T m = static_cast<T>(n - 1) / static_cast<T>(2);
         detail::fillSymmetric<T>(container, n, [m](const std::size_t i) { return static_cast<T>(1) - std::abs(static_cast<T>(i) - m) / m; });
-        return;
+        return {};
     }
     case Welch: {
         // formula: w(n) = 1 - ((n - M) / M)^2, M = (N - 1)/2 -- parabolic
@@ -282,7 +287,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T x = (static_cast<T>(i) - m) / m;
             return static_cast<T>(1) - x * x;
         });
-        return;
+        return {};
     }
     case Parzen: {
         // formula: r = |n - M| / (N/2), M = (N - 1)/2; w = 1 - 6 r^2 (1 - r) for r <= 1/2, else 2 (1 - r)^3
@@ -294,19 +299,19 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T s = static_cast<T>(1) - r;
             return r <= static_cast<T>(0.5) ? static_cast<T>(1) - static_cast<T>(6) * r * r * s : static_cast<T>(2) * s * s * s;
         });
-        return;
+        return {};
     }
     case Tukey: {
         // formula: x = n/(N - 1); w = 0.5 (1 - cos(2 pi x / alpha)) for x < alpha/2, 1 in between, mirrored at the far end
         // alpha == 0 is Rectangular and alpha == 1 is Hann, both exactly
         if (p <= static_cast<T>(0)) {
             std::ranges::fill(container, 1);
-            return;
+            return {};
         }
         const T taper = static_cast<T>(n - 1) * p / static_cast<T>(2); // taper length in samples
         const T a     = pi2 / (p * static_cast<T>(n - 1));
         detail::fillSymmetric<T>(container, n, [taper, a](const std::size_t i) { return static_cast<T>(i) < taper ? static_cast<T>(0.5) * (static_cast<T>(1) - std::cos(a * static_cast<T>(i))) : static_cast<T>(1); });
-        return;
+        return {};
     }
     case Gaussian: {
         // formula: w(n) = exp(-0.5 ((n - M) / (sigma M))^2), M = (N - 1)/2
@@ -318,9 +323,10 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
             const T x = (static_cast<T>(i) - m) / sigma;
             return std::exp(static_cast<T>(-0.5) * x * x);
         });
-        return;
+        return {};
     }
     }
+    return {};
 }
 
 /**
@@ -333,14 +339,13 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
  * @param windowFunction The type of window function to create.
  * @param n The size of the window function.
  * @param param The window's shape parameter, see the in-place overload; NaN selects the window's own default.
- * @return A std::vector<T> containing the values of the window function.
+ * @return A std::vector<T> containing the values of the window function, or the in-place overload's error.
  */
 template<typename T = float>
 requires std::is_floating_point_v<T>
-[[nodiscard]] auto create(Type windowFunction, const std::size_t n, const T param = std::numeric_limits<T>::quiet_NaN()) {
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> create(Type windowFunction, const std::size_t n, const T param = std::numeric_limits<T>::quiet_NaN(), std::source_location loc = std::source_location::current()) {
     std::vector<T> container(n);
-    create(container, windowFunction, param);
-    return container;
+    return create(container, windowFunction, param, loc).transform([&container] { return std::move(container); });
 }
 
 } // namespace gr::algorithm::window

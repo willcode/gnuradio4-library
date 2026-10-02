@@ -688,8 +688,12 @@ namespace detail {
 /// @brief Window @p term over an odd length, second half copied so the taps are symmetric to the bit.
 template<typename Term>
 [[nodiscard]] inline std::vector<double> symmetricKernel(std::size_t n, WindowSpec window, Term&& term) {
-    const std::vector<double> w   = gr::algorithm::window::create<double>(window.type, n, window.param);
-    const std::size_t         mid = (n - 1UZ) / 2UZ;
+    const auto shape = gr::algorithm::window::create<double>(window.type, n, window.param);
+    if (!shape) {
+        throw std::invalid_argument(shape.error().message);
+    }
+    const std::vector<double>& w   = *shape;
+    const std::size_t          mid = (n - 1UZ) / 2UZ;
 
     std::vector<double> h(n);
     for (std::size_t i = 0UZ; i <= mid; ++i) {
@@ -1064,9 +1068,13 @@ template<typename Term>
  * @param n length; `hilbertLength` rounds to the parity that spends every tap
  */
 [[nodiscard]] inline std::vector<float> hilbert(std::size_t n, WindowSpec window, double gain = 1.0) {
-    const std::size_t         len = oddLength(n);
-    const std::size_t         mid = (len - 1UZ) / 2UZ;
-    const std::vector<double> w   = gr::algorithm::window::create<double>(window.type, len, window.param);
+    const std::size_t len   = oddLength(n);
+    const std::size_t mid   = (len - 1UZ) / 2UZ;
+    const auto        shape = gr::algorithm::window::create<double>(window.type, len, window.param);
+    if (!shape) {
+        throw std::invalid_argument(shape.error().message);
+    }
+    const std::vector<double>& w = *shape;
 
     std::vector<double> h(len, 0.0);
     for (std::size_t i = 0UZ; i < mid; ++i) {

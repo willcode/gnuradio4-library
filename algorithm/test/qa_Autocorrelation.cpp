@@ -93,7 +93,7 @@ template<typename T>
 [[nodiscard]] std::vector<double> directRatios(const AcfConfig& config, std::span<const T> window) {
     const std::size_t        n     = config.windowLength;
     const std::size_t        lags  = config.maxLag;
-    const std::vector<float> taper = gr::algorithm::window::create<float>(config.window, n);
+    const std::vector<float> taper = gr::algorithm::window::create<float>(config.window, n).value();
 
     std::vector<std::complex<double>> u(n);
     std::complex<double>              mean{};
