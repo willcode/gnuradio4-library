@@ -6,14 +6,15 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/BitPacking.hpp>
 
 /**
@@ -43,7 +44,7 @@
  * The ring is empty for every one-item delimiter, so SLIP, KISS and PPP pay nothing for it.
  *
  * `configureDelimiter()` validates and is the only function here that can throw a settings error. It throws
- * `std::invalid_argument` and leaves the configuration as it was, so a rejected setting cannot half-apply.
+ * `gr::exception` and leaves the configuration as it was, so a rejected setting cannot half-apply.
  * `DelimiterScanner::push()` allocates nothing: every buffer is sized once by `prepare()`, from the stated bound
  * and never from anything the stream said.
  */
@@ -77,8 +78,8 @@ enum class ScanEvent : std::uint8_t {
     return std::string_view{"none"};
 }
 
-/// @brief The mode @p name selects; throws `std::invalid_argument`, quoting @p name, for anything but the three names.
-[[nodiscard]] inline Transparency transparencyFromName(std::string_view name) {
+/// @brief The mode @p name selects; a `gr::Error` quoting @p name for anything but the three names.
+[[nodiscard]] inline std::expected<Transparency, gr::Error> transparencyFromName(std::string_view name) {
     if (name == transparencyName(Transparency::None)) {
         return Transparency::None;
     }
@@ -88,7 +89,7 @@ enum class ScanEvent : std::uint8_t {
     if (name == transparencyName(Transparency::ByteEscape)) {
         return Transparency::ByteEscape;
     }
-    throw std::invalid_argument(std::format("gr::digital::transparencyFromName: transparency must be 'none', 'bit_stuffing' or 'byte_escape', got '{}'", name));
+    return std::unexpected(gr::Error(std::format("gr::digital::transparencyFromName: transparency must be 'none', 'bit_stuffing' or 'byte_escape', got '{}'", name)));
 }
 
 /// @brief The name a block exposes for @p opening.
@@ -101,8 +102,8 @@ enum class ScanEvent : std::uint8_t {
     return std::string_view{"delimiter"};
 }
 
-/// @brief The opening rule @p name selects; throws `std::invalid_argument`, quoting @p name, for anything but the three names.
-[[nodiscard]] inline FrameOpen frameOpenFromName(std::string_view name) {
+/// @brief The opening rule @p name selects; a `gr::Error` quoting @p name for anything but the three names.
+[[nodiscard]] inline std::expected<FrameOpen, gr::Error> frameOpenFromName(std::string_view name) {
     if (name == frameOpenName(FrameOpen::Delimiter)) {
         return FrameOpen::Delimiter;
     }
@@ -112,7 +113,7 @@ enum class ScanEvent : std::uint8_t {
     if (name == frameOpenName(FrameOpen::Immediate)) {
         return FrameOpen::Immediate;
     }
-    throw std::invalid_argument(std::format("gr::digital::frameOpenFromName: frame_open must be 'delimiter', 'start' or 'immediate', got '{}'", name));
+    return std::unexpected(gr::Error(std::format("gr::digital::frameOpenFromName: frame_open must be 'delimiter', 'start' or 'immediate', got '{}'", name)));
 }
 
 /// @brief The refusal @p outcome names, as a record's `discard_reason`; empty for a frame that is not refused.
@@ -240,7 +241,7 @@ struct DelimiterConfig {
  * arithmetic and are therefore refusals; under byte escaping the unforgeability equivalent depends on a peer this
  * code cannot inspect, so it is a warning from `unforgeabilityWarning()` instead.
  *
- * @throws std::invalid_argument leaving @p cfg as it was, so a rejected setting cannot half-apply.
+ * @throws gr::exception leaving @p cfg as it was, so a rejected setting cannot half-apply.
  */
 inline void configureDelimiter(DelimiterConfig& cfg) {
     const std::string_view endText(cfg.endDelimiter);
@@ -248,40 +249,40 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
     const unsigned         width = cfg.bitsPerItem;
 
     if (width < 1U || width > 8U) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: bitsPerItem must be in [1, 8], got {}", width));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: bitsPerItem must be in [1, 8], got {}", width));
     }
     if (cfg.packBits > 8U) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: packBits must be 0, for no packing, or in [1, 8], got {}", cfg.packBits));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: packBits must be 0, for no packing, or in [1, 8], got {}", cfg.packBits));
     }
     if (cfg.packBits != 0U && width != 1U) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the pack stage assembles bits into items and needs bitsPerItem 1, got {}", width));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: the pack stage assembles bits into items and needs bitsPerItem 1, got {}", width));
     }
     if (cfg.minPayloadItems == 0UZ) {
-        throw std::invalid_argument("gr::digital::configureDelimiter: minPayloadItems must be at least 1, a region with no items being the absence of a frame rather than a short one");
+        throw gr::exception("gr::digital::configureDelimiter: minPayloadItems must be at least 1, a region with no items being the absence of a frame rather than a short one");
     }
     if (cfg.maxPayloadItems > 2147483647UZ) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: maxPayloadItems is {}; a record states its extent as a signed 32-bit count, so a longer frame could not describe itself", cfg.maxPayloadItems));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: maxPayloadItems is {}; a record states its extent as a signed 32-bit count, so a longer frame could not describe itself", cfg.maxPayloadItems));
     }
     if (cfg.maxPayloadItems != 0UZ && cfg.minPayloadItems > cfg.maxPayloadItems) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: minPayloadItems {} exceeds maxPayloadItems {}", cfg.minPayloadItems, cfg.maxPayloadItems));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: minPayloadItems {} exceeds maxPayloadItems {}", cfg.minPayloadItems, cfg.maxPayloadItems));
     }
     if (cfg.stuffAfterOnes < 2U || cfg.stuffAfterOnes > 62U) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: stuffAfterOnes must be in [2, 62], got {}", cfg.stuffAfterOnes));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: stuffAfterOnes must be in [2, 62], got {}", cfg.stuffAfterOnes));
     }
     if (cfg.abortOnes != 0U && cfg.abortOnes <= cfg.stuffAfterOnes) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: abortOnes {} must exceed stuffAfterOnes {}, or an abort would fire before a stuff and make the code unusable", cfg.abortOnes, cfg.stuffAfterOnes));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: abortOnes {} must exceed stuffAfterOnes {}, or an abort would fire before a stuff and make the code unusable", cfg.abortOnes, cfg.stuffAfterOnes));
     }
     if (cfg.frameOpen == FrameOpen::Start && startText.empty()) {
-        throw std::invalid_argument("gr::digital::configureDelimiter: frameOpen 'start' needs a startDelimiter");
+        throw gr::exception("gr::digital::configureDelimiter: frameOpen 'start' needs a startDelimiter");
     }
     if (cfg.frameOpen != FrameOpen::Start && !startText.empty()) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: frameOpen '{}' consults no startDelimiter, so setting one is a settings error rather than a harmless extra", frameOpenName(cfg.frameOpen)));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: frameOpen '{}' consults no startDelimiter, so setting one is a settings error rather than a harmless extra", frameOpenName(cfg.frameOpen)));
     }
     if (cfg.transparency == Transparency::BitStuffing && width != 1U) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: bit stuffing is a bit-level code and needs bitsPerItem 1, got {}", width));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: bit stuffing is a bit-level code and needs bitsPerItem 1, got {}", width));
     }
     if (cfg.transparency == Transparency::ByteEscape && width != 8U) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: byte escaping needs a byte, so bitsPerItem must be 8, got {}", width));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: byte escaping needs a byte, so bitsPerItem must be 8, got {}", width));
     }
 
     std::array<std::uint8_t, 256> escapeTable{};
@@ -291,11 +292,11 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
         escapeTable[value] = static_cast<std::uint8_t>(value);
     }
     if (cfg.escapeMap.size() > 256UZ) {
-        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the escape map holds {} pairs; one per byte value is the most that can be distinguished", cfg.escapeMap.size()));
+        throw gr::exception(std::format("gr::digital::configureDelimiter: the escape map holds {} pairs; one per byte value is the most that can be distinguished", cfg.escapeMap.size()));
     }
     for (const auto& [escaped, original] : cfg.escapeMap) {
         if (escapeMapped[escaped]) {
-            throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the escape map lists the escaped value {} twice, so the decode of that pair is ambiguous", escaped));
+            throw gr::exception(std::format("gr::digital::configureDelimiter: the escape map lists the escaped value {} twice, so the decode of that pair is ambiguous", escaped));
         }
         escapeMapped[escaped]    = true;
         escapeTable[escaped]     = original;
@@ -304,15 +305,15 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
 
     const auto parse = [width](std::string_view text, std::string_view which) -> std::pair<std::uint64_t, std::uint64_t> {
         if (text.size() > 64UZ) {
-            throw std::invalid_argument(std::format("gr::digital::configureDelimiter: {} is {} bits; the match register is one 64-bit word", which, text.size()));
+            throw gr::exception(std::format("gr::digital::configureDelimiter: {} is {} bits; the match register is one 64-bit word", which, text.size()));
         }
         if (text.size() % width != 0UZ) {
-            throw std::invalid_argument(std::format("gr::digital::configureDelimiter: {} is {} bits, which is not a whole number of {}-bit items", which, text.size(), width));
+            throw gr::exception(std::format("gr::digital::configureDelimiter: {} is {} bits, which is not a whole number of {}-bit items", which, text.size(), width));
         }
         std::uint64_t word = 0ULL;
         for (const char character : text) {
             if (character != '0' && character != '1') {
-                throw std::invalid_argument(std::format("gr::digital::configureDelimiter: {} must be '0' and '1' characters only, got '{}' in \"{}\"", which, character, text));
+                throw gr::exception(std::format("gr::digital::configureDelimiter: {} must be '0' and '1' characters only, got '{}' in \"{}\"", which, character, text));
             }
             word = (word << 1U) | (character == '1' ? 1ULL : 0ULL);
         }
@@ -340,14 +341,14 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
     if (cfg.transparency == Transparency::BitStuffing && cfg.abortOnes != 0U) {
         const unsigned delimiterOnes = std::max(longestOneRun(startText), longestOneRun(endText));
         if (cfg.abortOnes <= delimiterOnes) {
-            throw std::invalid_argument(std::format("gr::digital::configureDelimiter: abortOnes {} does not exceed the run of {} consecutive ones the delimiters carry, so the abort would fire inside the delimiter that closes a frame and abandon every frame", cfg.abortOnes, delimiterOnes));
+            throw gr::exception(std::format("gr::digital::configureDelimiter: abortOnes {} does not exceed the run of {} consecutive ones the delimiters carry, so the abort would fire inside the delimiter that closes a frame and abandon every frame", cfg.abortOnes, delimiterOnes));
         }
     }
 
     if (!endText.empty() && cfg.transparency == Transparency::BitStuffing) {
         const unsigned longest = longestOneRun(endText);
         if (longest <= cfg.stuffAfterOnes) {
-            throw std::invalid_argument(std::format("gr::digital::configureDelimiter: coded data may carry runs of up to {} consecutive ones and \"{}\" carries at most {}, so a conforming encoder can produce this delimiter inside a payload", cfg.stuffAfterOnes, endText, longest));
+            throw gr::exception(std::format("gr::digital::configureDelimiter: coded data may carry runs of up to {} consecutive ones and \"{}\" carries at most {}, so a conforming encoder can produce this delimiter inside a payload", cfg.stuffAfterOnes, endText, longest));
         }
         // A closing delimiter is entered carrying the payload's trailing run of ones — anywhere from zero to
         // stuffAfterOnes - 1 on a conforming coded stream — and the decoder's counter cannot know the delimiter has
@@ -361,7 +362,7 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
                     ++ones;
                 } else {
                     if (ones == cfg.stuffAfterOnes) {
-                        throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the destuffing rule removes a zero arriving at {} consecutive ones and \"{}\" contains one when entered behind a payload ending in {} ones, so the delimiter is not invariant under the decoder", cfg.stuffAfterOnes, endText, entering));
+                        throw gr::exception(std::format("gr::digital::configureDelimiter: the destuffing rule removes a zero arriving at {} consecutive ones and \"{}\" contains one when entered behind a payload ending in {} ones, so the delimiter is not invariant under the decoder", cfg.stuffAfterOnes, endText, entering));
                     }
                     ones = 0U;
                 }
@@ -371,10 +372,10 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
     if (!endText.empty() && cfg.transparency == Transparency::ByteEscape) {
         for (const std::uint8_t value : detail::delimiterItemValues(endText, width)) {
             if (value == cfg.escapeItem) {
-                throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the delimiter carries the escape introducer {}, which the decoder removes, so the delimiter is not invariant under the decoder", value));
+                throw gr::exception(std::format("gr::digital::configureDelimiter: the delimiter carries the escape introducer {}, which the decoder removes, so the delimiter is not invariant under the decoder", value));
             }
             if (escapeMapped[value]) {
-                throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the delimiter carries {}, which the escape map lists as an escaped value", value));
+                throw gr::exception(std::format("gr::digital::configureDelimiter: the delimiter carries {}, which the escape map lists as an escaped value", value));
             }
         }
     }
@@ -434,7 +435,7 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
  * of one original decode to the same value, so either round-trips and the encoder takes the last one the map names,
  * while two originals under one escaped value have no unambiguous decode at all.
  *
- * @throws std::invalid_argument leaving @p cfg as it was, which is `configureDelimiter()`'s own guarantee over both stages.
+ * @throws gr::exception leaving @p cfg as it was, which is `configureDelimiter()`'s own guarantee over both stages.
  */
 inline void framerConfigure(DelimiterConfig& cfg) {
     DelimiterConfig staged = cfg;
@@ -443,7 +444,7 @@ inline void framerConfigure(DelimiterConfig& cfg) {
     if (staged.transparency == Transparency::ByteEscape) {
         const auto require = [&staged](std::uint8_t value, std::string_view which) {
             if (!staged.escapeOriginal[value]) {
-                throw std::invalid_argument(std::format("gr::digital::framerConfigure: {} is {}, which the escape map does not list as an original value, so an encoder would emit it unescaped and a payload could forge the delimiter", which, value));
+                throw gr::exception(std::format("gr::digital::framerConfigure: {} is {}, which the escape map does not list as an original value, so an encoder would emit it unescaped and a payload could forge the delimiter", which, value));
             }
         };
         for (const std::uint8_t value : detail::delimiterEmitValues(staged.endDelimiter, staged.bitsPerItem, staged.bitOrder)) {
@@ -701,7 +702,7 @@ struct DelimiterScanner {
     void prepare(DelimiterConfig configured) {
         if constexpr (!std::same_as<T, std::uint8_t>) {
             if (configured.bitsPerItem != 1U) {
-                throw std::invalid_argument(std::format("gr::digital::DelimiterScanner: a soft item carries one sliced bit, so bitsPerItem must be 1, got {}", configured.bitsPerItem));
+                throw gr::exception(std::format("gr::digital::DelimiterScanner: a soft item carries one sliced bit, so bitsPerItem must be 1, got {}", configured.bitsPerItem));
             }
         }
         config          = std::move(configured);

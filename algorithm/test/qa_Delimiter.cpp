@@ -6,11 +6,11 @@
 #include <format>
 #include <numeric>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/Delimiter.hpp>
 
 namespace {
@@ -156,7 +156,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             gr::digital::configureDelimiter(cfg);
             return cfg;
         };
-        expect(throws<std::invalid_argument>([&atAbort] { atAbort(6U); })) << "six is the flag's own run of ones";
+        expect(throws<gr::exception>([&atAbort] { atAbort(6U); })) << "six is the flag's own run of ones";
         expect(nothrow([&atAbort] { atAbort(7U); })) << "seven, HDLC's abort, exceeds it";
 
         // anchor A again, under the abort the configuration does accept
@@ -230,9 +230,9 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             gr::digital::configureDelimiter(cfg);
         };
         expect(nothrow([&stuffed] { stuffed("01111110", 5U); })) << "the HDLC flag is invariant under the decoder and carries six ones";
-        expect(throws([&stuffed] { stuffed("0111110", 5U); })) << "a zero arriving at exactly five ones is removed, so the delimiter is not invariant";
-        expect(throws([&stuffed] { stuffed("0111010", 5U); })) << "no run longer than five, so a conforming encoder can produce it";
-        expect(throws([&stuffed] { stuffed("101111110", 5U); })) << "invariant from a zero entering count but not behind four payload ones, whose fifth one makes the second bit a stuffed zero";
+        expect(throws<gr::exception>([&stuffed] { stuffed("0111110", 5U); })) << "a zero arriving at exactly five ones is removed, so the delimiter is not invariant";
+        expect(throws<gr::exception>([&stuffed] { stuffed("0111010", 5U); })) << "no run longer than five, so a conforming encoder can produce it";
+        expect(throws<gr::exception>([&stuffed] { stuffed("101111110", 5U); })) << "invariant from a zero entering count but not behind four payload ones, whose fifth one makes the second bit a stuffed zero";
         expect(nothrow([&stuffed] { stuffed("0111111", 5U); })) << "a leading zero absorbs any entering count before the run begins, so trailing ones alone do not break invariance";
 
         const auto escaped = [](std::uint8_t delimiterValue) {
@@ -249,8 +249,8 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             gr::digital::configureDelimiter(cfg);
             return cfg;
         };
-        expect(throws([&escaped] { std::ignore = escaped(0xDBU); })) << "the introducer would be removed from inside the delimiter";
-        expect(throws([&escaped] { std::ignore = escaped(0xDCU); })) << "an escaped value belongs to a pair rather than standing alone";
+        expect(throws<gr::exception>([&escaped] { std::ignore = escaped(0xDBU); })) << "the introducer would be removed from inside the delimiter";
+        expect(throws<gr::exception>([&escaped] { std::ignore = escaped(0xDCU); })) << "an escaped value belongs to a pair rather than standing alone";
         expect(nothrow([&escaped] { std::ignore = escaped(0xC0U); }));
         expect(gr::digital::unforgeabilityWarning(escaped(0xC0U)).empty()) << "0xC0 is an original in the map, so a conforming encoder escapes it";
         expect(!gr::digital::unforgeabilityWarning(escaped(0x41U)).empty()) << "0x41 is not an original, so the local half of the guarantee is absent";
@@ -395,10 +395,10 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             return cfg;
         };
         expect(nothrow([&lengthOf] { std::ignore = lengthOf(64UZ, 1U); })) << "64 items at one bit each";
-        expect(throws([&lengthOf] { std::ignore = lengthOf(65UZ, 1U); })) << "65 does not fit one 64-bit register";
+        expect(throws<gr::exception>([&lengthOf] { std::ignore = lengthOf(65UZ, 1U); })) << "65 does not fit one 64-bit register";
         expect(nothrow([&lengthOf] { std::ignore = lengthOf(64UZ, 8U); })) << "8 items at eight bits each";
-        expect(throws([&lengthOf] { std::ignore = lengthOf(72UZ, 8U); })) << "9 byte items do not fit either";
-        expect(throws([&lengthOf] { std::ignore = lengthOf(12UZ, 8U); })) << "a delimiter must land on item boundaries";
+        expect(throws<gr::exception>([&lengthOf] { std::ignore = lengthOf(72UZ, 8U); })) << "9 byte items do not fit either";
+        expect(throws<gr::exception>([&lengthOf] { std::ignore = lengthOf(12UZ, 8U); })) << "a delimiter must land on item boundaries";
 
         const DelimiterConfig full = lengthOf(64UZ, 1U);
         expect(eq(full.mask, ~0ULL)) << "at the register's full width the mask is all ones, computed without a 64-bit shift";
@@ -508,8 +508,8 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
         };
 
         expect(nothrow([&framed] { std::ignore = framed(0xDBU, {{0xDCU, 0xC0U}, {0xDDU, 0xDBU}}); })) << "SLIP's map covers both the delimiter and the introducer";
-        expect(throws([&framed] { std::ignore = framed(0xDBU, {{0xDCU, 0xC0U}}); })) << "the introducer has no pair, so the encoder cannot escape one in a payload";
-        expect(throws([&framed] { std::ignore = framed(0xDBU, {{0xDDU, 0xDBU}}); })) << "the delimiter has no pair, which the receiver could only warn about";
+        expect(throws<gr::exception>([&framed] { std::ignore = framed(0xDBU, {{0xDCU, 0xC0U}}); })) << "the introducer has no pair, so the encoder cannot escape one in a payload";
+        expect(throws<gr::exception>([&framed] { std::ignore = framed(0xDBU, {{0xDDU, 0xDBU}}); })) << "the delimiter has no pair, which the receiver could only warn about";
 
         // the same check over a start delimiter, which is an item value the encoder emits and the receiver matches
         const auto opened = [](std::vector<std::pair<std::uint8_t, std::uint8_t>> pairs) {
@@ -524,7 +524,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             cfg.maxPayloadItems = 256UZ;
             gr::digital::framerConfigure(cfg);
         };
-        expect(throws([&opened] { opened({{0xDCU, 0xC0U}, {0xDDU, 0xDBU}}); })) << "'$' is not an original, so a payload carrying it would open a frame in the middle of this one";
+        expect(throws<gr::exception>([&opened] { opened({{0xDCU, 0xC0U}, {0xDDU, 0xDBU}}); })) << "'$' is not an original, so a payload carrying it would open a frame in the middle of this one";
         expect(nothrow([&opened] { opened({{0xDCU, 0xC0U}, {0xDDU, 0xDBU}, {0x5EU, 0x24U}}); }));
 
         // the four published framings pass the transmit-side table as they pass the receive-side one
@@ -562,8 +562,22 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             gr::digital::configureDelimiter(cfg);
         };
         expect(nothrow([&spelled] { spelled("11000000"); }));
-        expect(throws([&spelled] { spelled("1100000O"); })) << "a typo is a different delimiter rather than a low-bit reading";
-        expect(throws([&spelled] { spelled("0xC0"); }));
+        expect(throws<gr::exception>([&spelled] { spelled("1100000O"); })) << "a typo is a different delimiter rather than a low-bit reading";
+        expect(throws<gr::exception>([&spelled] { spelled("0xC0"); }));
+    };
+
+    "the setting names, and the error a name outside them returns"_test = [] {
+        for (const Transparency mode : {Transparency::None, Transparency::BitStuffing, Transparency::ByteEscape}) {
+            expect(that % (gr::digital::transparencyFromName(gr::digital::transparencyName(mode)) == mode));
+        }
+        const auto transparency = gr::digital::transparencyFromName("stuffing");
+        expect(!transparency.has_value() && transparency.error().message.contains("'stuffing'")) << "an unknown transparency is quoted";
+
+        for (const FrameOpen opening : {FrameOpen::Delimiter, FrameOpen::Start, FrameOpen::Immediate}) {
+            expect(that % (gr::digital::frameOpenFromName(gr::digital::frameOpenName(opening)) == opening));
+        }
+        const auto frameOpen = gr::digital::frameOpenFromName("");
+        expect(!frameOpen.has_value() && frameOpen.error().message.contains("frame_open must be")) << "the empty name is refused";
     };
 };
 
