@@ -6,10 +6,11 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <numbers>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 #include <initializer_list>
@@ -17,6 +18,7 @@
 #include <string>
 #include <utility>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 
@@ -93,19 +95,21 @@ struct ChannelizerDesignKey {
  *
  * The prototype search is setup path and costs a response scan per candidate, so the result is memoized
  * by the whole parameter tuple; the memo holds the last eight prototypes and drops the oldest.
+ *
+ * A parameter outside its range or an unknown family is an error.
  */
-[[nodiscard]] inline ChannelizerDesign designChannelizerPrototype(std::size_t channels, std::string_view family, double attenuationDb, double transition, std::size_t span = 16UZ, std::size_t oversample = 1UZ, double maxRippleDb = 0.1, std::size_t maxSpan = 64UZ) {
+[[nodiscard]] inline std::expected<ChannelizerDesign, gr::Error> designChannelizerPrototype(std::size_t channels, std::string_view family, double attenuationDb, double transition, std::size_t span = 16UZ, std::size_t oversample = 1UZ, double maxRippleDb = 0.1, std::size_t maxSpan = 64UZ, std::source_location location = std::source_location::current()) {
     if (channels < 2UZ) {
-        throw std::invalid_argument(std::format("gr::filter::designChannelizerPrototype: {} channels; at least two", channels));
+        return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: {} channels; at least two", channels), location));
     }
     if (!(transition > 0.) || !(transition < 1.)) {
-        throw std::invalid_argument(std::format("gr::filter::designChannelizerPrototype: transition is a fraction of the channel spacing and must lie in (0, 1), got {}", transition));
+        return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: transition is a fraction of the channel spacing and must lie in (0, 1), got {}", transition), location));
     }
     if (!(attenuationDb > 0.)) {
-        throw std::invalid_argument(std::format("gr::filter::designChannelizerPrototype: attenuation_db must be positive, got {}", attenuationDb));
+        return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: attenuation_db must be positive, got {}", attenuationDb), location));
     }
     if (span < 2UZ || span > maxSpan) {
-        throw std::invalid_argument(std::format("gr::filter::designChannelizerPrototype: span is {}; the range is 2 to {}", span, maxSpan));
+        return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: span is {}; the range is 2 to {}", span, maxSpan), location));
     }
 
     const detail::ChannelizerDesignKey key{channels, std::string(family), attenuationDb, transition, maxRippleDb, span, oversample};
@@ -172,7 +176,7 @@ struct ChannelizerDesignKey {
         out.taps = build(use);
         out.span = (out.taps.size() + channels - 1UZ) / channels;
     } else {
-        throw std::invalid_argument(std::format("gr::filter::designChannelizerPrototype: prototype must be 'root_nyquist', 'lowpass' or 'boxcar', got '{}'", family));
+        return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: prototype must be 'root_nyquist', 'lowpass' or 'boxcar', got '{}'", family), location));
     }
 
     out.designLength                       = static_cast<int>(out.taps.size());
@@ -197,13 +201,15 @@ struct ChannelizerDesignKey {
  * -60.1 dB at its designed 121 taps and -20.0 dB padded to 128, while the bank built from either measures the same
  * -107 dB of channel isolation end to end. The padded reading is an artifact of the scan, not a property of the
  * filter, and the bank pads internally in any case.
+ *
+ * Fewer than two channels or an empty prototype is an error.
  */
-[[nodiscard]] inline ChannelizerDesign measureChannelizerPrototype(std::span<const float> taps, std::size_t channels, double transition, std::size_t oversample = 1UZ) {
+[[nodiscard]] inline std::expected<ChannelizerDesign, gr::Error> measureChannelizerPrototype(std::span<const float> taps, std::size_t channels, double transition, std::size_t oversample = 1UZ, std::source_location location = std::source_location::current()) {
     if (channels < 2UZ) {
-        throw std::invalid_argument(std::format("gr::filter::measureChannelizerPrototype: {} channels; at least two", channels));
+        return std::unexpected(gr::Error(std::format("gr::filter::measureChannelizerPrototype: {} channels; at least two", channels), location));
     }
     if (taps.empty()) {
-        throw std::invalid_argument("gr::filter::measureChannelizerPrototype: the prototype is empty");
+        return std::unexpected(gr::Error("gr::filter::measureChannelizerPrototype: the prototype is empty", location));
     }
 
     const double spacing  = 1. / static_cast<double>(channels);
@@ -264,19 +270,21 @@ struct PolyphaseChannelizer {
      * @param nChannels  M, 2 to kMaxChannels
      * @param prototype  the lowpass every branch is cut from; zero-padded to a multiple of M
      * @param oversample 1 for critical sampling, 2 for a commutator stride of M/2
+     *
+     * A parameter outside its range throws `gr::exception`.
      */
     void configure(std::size_t nChannels, std::span<const float> prototype, std::size_t oversample = 1UZ) {
         if (nChannels < 2UZ || nChannels > kMaxChannels) {
-            throw std::invalid_argument(std::format("gr::filter::PolyphaseChannelizer: {} channels; the range is 2 to {}", nChannels, kMaxChannels));
+            throw gr::exception(std::format("gr::filter::PolyphaseChannelizer: {} channels; the range is 2 to {}", nChannels, kMaxChannels));
         }
         if (oversample != 1UZ && oversample != 2UZ) {
-            throw std::invalid_argument(std::format("gr::filter::PolyphaseChannelizer: oversample is 1 or 2, got {}", oversample));
+            throw gr::exception(std::format("gr::filter::PolyphaseChannelizer: oversample is 1 or 2, got {}", oversample));
         }
         if (oversample == 2UZ && (nChannels % 2UZ) != 0UZ) {
-            throw std::invalid_argument("gr::filter::PolyphaseChannelizer: an oversampled bank needs an even channel count, so the commutator stride is whole");
+            throw gr::exception("gr::filter::PolyphaseChannelizer: an oversampled bank needs an even channel count, so the commutator stride is whole");
         }
         if (prototype.empty()) {
-            throw std::invalid_argument("gr::filter::PolyphaseChannelizer: the prototype is empty");
+            throw gr::exception("gr::filter::PolyphaseChannelizer: the prototype is empty");
         }
 
         _channels   = nChannels;
@@ -375,18 +383,19 @@ struct PolyphaseSynthesizer {
 
     gr::algorithm::FFT<Complex, Complex> _forward{};
 
+    /// @brief Sizes the bank and installs its prototype. A parameter outside its range throws `gr::exception`.
     void configure(std::size_t nChannels, std::span<const float> prototype, std::size_t oversample = 1UZ) {
         if (nChannels < 2UZ || nChannels > kMaxChannels) {
-            throw std::invalid_argument(std::format("gr::filter::PolyphaseSynthesizer: {} channels; the range is 2 to {}", nChannels, kMaxChannels));
+            throw gr::exception(std::format("gr::filter::PolyphaseSynthesizer: {} channels; the range is 2 to {}", nChannels, kMaxChannels));
         }
         if (oversample != 1UZ && oversample != 2UZ) {
-            throw std::invalid_argument(std::format("gr::filter::PolyphaseSynthesizer: oversample is 1 or 2, got {}", oversample));
+            throw gr::exception(std::format("gr::filter::PolyphaseSynthesizer: oversample is 1 or 2, got {}", oversample));
         }
         if (oversample == 2UZ && (nChannels % 2UZ) != 0UZ) {
-            throw std::invalid_argument("gr::filter::PolyphaseSynthesizer: an oversampled bank needs an even channel count, so the commutator stride is whole");
+            throw gr::exception("gr::filter::PolyphaseSynthesizer: an oversampled bank needs an even channel count, so the commutator stride is whole");
         }
         if (prototype.empty()) {
-            throw std::invalid_argument("gr::filter::PolyphaseSynthesizer: the prototype is empty");
+            throw gr::exception("gr::filter::PolyphaseSynthesizer: the prototype is empty");
         }
 
         _channels   = nChannels;
