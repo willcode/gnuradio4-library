@@ -9,11 +9,11 @@
 #include <format>
 #include <random>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/BitPacking.hpp>
 #include <gnuradio-4.0/algorithm/digital/Manchester.hpp>
 
@@ -771,10 +771,10 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         ManchesterConfig cfg = configured(ManchesterConvention::GeThomas, 5U, BitOrder::LsbFirst, 1U);
 
         for (const unsigned bad : {0U, 9U, 255U}) {
-            expect(throws<std::invalid_argument>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::Ieee8023, bad, BitOrder::MsbFirst); })) << std::format("bitsPerItem = {}", bad);
+            expect(throws<gr::exception>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::Ieee8023, bad, BitOrder::MsbFirst); })) << std::format("bitsPerItem = {}", bad);
         }
         for (const unsigned bad : {2U, 100U}) {
-            expect(throws<std::invalid_argument>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::Ieee8023, 8U, BitOrder::MsbFirst, bad); })) << std::format("chipPhase = {}", bad);
+            expect(throws<gr::exception>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::Ieee8023, 8U, BitOrder::MsbFirst, bad); })) << std::format("chipPhase = {}", bad);
         }
 
         expect(that % (cfg.convention == ManchesterConvention::GeThomas)) << "a rejected setting leaves the previous configuration standing";
@@ -787,15 +787,10 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
 
         // the names the blocks expose, and the empty string that stands for "not set"
         for (const std::string_view bad : {"", "ieee802.3", "IEEE802_3", "thomas", "manchester"}) {
-            expect(throws<std::invalid_argument>([bad] { [[maybe_unused]] const ManchesterConvention ignored = conventionFromName(bad); })) << std::format("convention '{}'", bad);
+            expect(!conventionFromName(bad).has_value()) << std::format("convention '{}'", bad);
         }
-        bool quoted = false;
-        try {
-            [[maybe_unused]] const ManchesterConvention ignored = conventionFromName("differential");
-        } catch (const std::invalid_argument& error) {
-            quoted = std::string_view{error.what()}.find("differential") != std::string_view::npos;
-        }
-        expect(quoted) << "the offending value is quoted back in the message";
+        const auto differential = conventionFromName("differential");
+        expect(!differential.has_value() && differential.error().message.contains("differential")) << "the offending value is quoted back in the message";
 
         expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::Ieee8023, 1U, BitOrder::MsbFirst, 1U); })) << "the edges of both ranges are accepted";
         expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::GeThomas, 8U, BitOrder::LsbFirst, 0U); }));

@@ -5,11 +5,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <span>
-#include <stdexcept>
-#include <string>
 #include <string_view>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/BitPacking.hpp>
 
 /**
@@ -68,8 +69,7 @@
  * stream and not a special case.
  *
  * `configureManchester()` validates, derives `k`, builds the encoder's chip table and calls `resetManchester()`. It is
- * the only function here that can throw. It throws `std::invalid_argument`, not a graph exception,
- * because this header depends on the standard library alone. `encodeManchester()` is `const` on the
+ * the only function here that can throw. It throws `gr::exception`. `encodeManchester()` is `const` on the
  * configuration and carries no state whatever; `decodeManchester()` is the only stateful entry and its state is
  * one chip; both are `noexcept` and allocate nothing.
  *
@@ -91,15 +91,15 @@ enum class ManchesterConvention : std::uint8_t { Ieee8023, GeThomas };
 /// @brief The name a block exposes for @p convention.
 [[nodiscard]] constexpr std::string_view conventionName(ManchesterConvention convention) noexcept { return convention == ManchesterConvention::GeThomas ? std::string_view{"ge_thomas"} : std::string_view{"ieee802_3"}; }
 
-/// @brief The convention @p name selects; throws `std::invalid_argument`, quoting @p name, for anything but the two names.
-[[nodiscard]] constexpr ManchesterConvention conventionFromName(std::string_view name) {
+/// @brief The convention @p name selects; a `gr::Error` quoting @p name for anything but the two names.
+[[nodiscard]] inline std::expected<ManchesterConvention, gr::Error> conventionFromName(std::string_view name) {
     if (name == conventionName(ManchesterConvention::Ieee8023)) {
         return ManchesterConvention::Ieee8023;
     }
     if (name == conventionName(ManchesterConvention::GeThomas)) {
         return ManchesterConvention::GeThomas;
     }
-    throw std::invalid_argument("gr::digital::conventionFromName: convention must be 'ieee802_3' or 'ge_thomas', got '" + std::string(name) + "'");
+    return std::unexpected(gr::Error(std::format("gr::digital::conventionFromName: convention must be 'ieee802_3' or 'ge_thomas', got '{}'", name)));
 }
 
 /// @brief The `k` of `chipPair(b) = (b XOR k, b XOR k XOR 1)`, and the only thing the two conventions disagree about.
@@ -200,7 +200,7 @@ namespace detail {
 /**
  * @brief Sets @p cfg to the stated code, deriving the XOR constant and the encoder's chip table.
  *
- * A @p bitsPerItem outside `[1, 8]` and a @p chipPhase above `1` throw `std::invalid_argument` and
+ * A @p bitsPerItem outside `[1, 8]` and a @p chipPhase above `1` throw `gr::exception` and
  * leave @p cfg as it was, so a rejected setting cannot half-apply. Both conventions are always
  * acceptable here; refusing an unstated one belongs to whatever declares the setting, since this
  * function takes an enumerator and not a name.
@@ -211,10 +211,10 @@ namespace detail {
  */
 inline void configureManchester(ManchesterConfig& cfg, ManchesterConvention convention, unsigned bitsPerItem, BitOrder order, unsigned chipPhase = 0U) {
     if (bitsPerItem < 1U || bitsPerItem > 8U) {
-        throw std::invalid_argument("gr::digital::configureManchester: bitsPerItem must be in [1, 8], got " + std::to_string(bitsPerItem));
+        throw gr::exception(std::format("gr::digital::configureManchester: bitsPerItem must be in [1, 8], got {}", bitsPerItem));
     }
     if (chipPhase > 1U) {
-        throw std::invalid_argument("gr::digital::configureManchester: chipPhase must be 0 or 1, got " + std::to_string(chipPhase));
+        throw gr::exception(std::format("gr::digital::configureManchester: chipPhase must be 0 or 1, got {}", chipPhase));
     }
 
     const unsigned k = conventionXor(convention);
