@@ -7,11 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
-#include <limits>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
+
+#include <gnuradio-4.0/algorithm/math/Decibel.hpp>
 
 /**
  * @brief Combines two orthogonal antenna branches at the maximal-ratio optimum, from the 2x2 covariance in closed form.
@@ -145,7 +146,7 @@ struct PolarizationEstimate {
     /// @brief The gain of the combination over the better of the two branches, in dB.
     [[nodiscard]] double combiningGainDb() const noexcept { return combinedSnrDb() - std::max(branchSnrDb(0UZ), branchSnrDb(1UZ)); }
 
-    [[nodiscard]] static double toDb(double linear) noexcept { return linear > 0. ? 10. * std::log10(linear) : -std::numeric_limits<double>::infinity(); }
+    [[nodiscard]] static double toDb(double linear) noexcept { return gr::math::toDb(linear); }
 };
 
 /// @brief The estimate for use before any measurement. Branch @p branch passes through unchanged.

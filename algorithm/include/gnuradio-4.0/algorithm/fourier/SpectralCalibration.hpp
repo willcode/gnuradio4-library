@@ -8,6 +8,8 @@
 #include <limits>
 #include <span>
 
+#include <gnuradio-4.0/algorithm/math/Decibel.hpp>
+
 namespace gr::algorithm::fft {
 
 /**
@@ -107,7 +109,7 @@ constexpr void accumulatePowerSpectrum(std::span<const std::complex<F>> spectrum
 
 /// @brief Power ratio to decibels, with a floor. An empty bin reports a number and not negative infinity.
 template<std::floating_point F>
-[[nodiscard]] constexpr F powerToDb(F power, F floorDb = F{-300}) noexcept {
+[[nodiscard]] constexpr F powerToDb(F power, F floorDb = static_cast<F>(gr::math::kDbFloor)) noexcept {
     if (!(power > F{0})) {
         return floorDb;
     }

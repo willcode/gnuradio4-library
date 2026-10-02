@@ -310,6 +310,12 @@ const boost::ut::suite<"PolarizationCombiner"> _polarization = [] {
         std::vector<Complex> out(kWindow);
         polarizationCombine(only0, empty, degenerate, out);
         expect(that % std::ranges::equal(out, only0)) << "and the output is branch 0, bit for bit";
+
+        // A ratio of zero reads in dB at the stated floor, and the gain over the branches stays finite.
+        const PolarizationEstimate silent{};
+        expect(eq(silent.combinedSnrDb(), gr::math::kDbFloor));
+        expect(eq(silent.branchSnrDb(0UZ), gr::math::kDbFloor));
+        expect(eq(silent.combiningGainDb(), 0.));
     };
 
     "unequal branch noise reduces to the equal case by whitening"_test = [] {
