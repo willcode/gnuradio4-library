@@ -8,7 +8,6 @@
 #include <format>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
@@ -48,28 +47,28 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
     // middle of it. `-fft_len/2` is the Nyquist bin and a real carrier. `+fft_len/2` is not a carrier, and the
     // conversion refuses it. Folding it would move a carrier to the other side of the band without an error.
     "a signed carrier and its bin are the same thing said twice"_test = [] {
-        expect(eq(CarrierMap::binOf(64UZ, 0), 0UZ)) << "DC is bin zero";
-        expect(eq(CarrierMap::binOf(64UZ, 1), 1UZ));
-        expect(eq(CarrierMap::binOf(64UZ, 31), 31UZ)) << "the highest positive carrier";
-        expect(eq(CarrierMap::binOf(64UZ, -1), 63UZ)) << "the negative carriers are the upper half";
-        expect(eq(CarrierMap::binOf(64UZ, -31), 33UZ));
-        expect(eq(CarrierMap::binOf(64UZ, -32), 32UZ)) << "-fft_len/2 is the Nyquist bin";
+        expect(eq(CarrierMap::binOf(64UZ, 0).value(), 0UZ)) << "DC is bin zero";
+        expect(eq(CarrierMap::binOf(64UZ, 1).value(), 1UZ));
+        expect(eq(CarrierMap::binOf(64UZ, 31).value(), 31UZ)) << "the highest positive carrier";
+        expect(eq(CarrierMap::binOf(64UZ, -1).value(), 63UZ)) << "the negative carriers are the upper half";
+        expect(eq(CarrierMap::binOf(64UZ, -31).value(), 33UZ));
+        expect(eq(CarrierMap::binOf(64UZ, -32).value(), 32UZ)) << "-fft_len/2 is the Nyquist bin";
 
-        expect(eq(CarrierMap::carrierOf(64UZ, 0UZ), 0));
-        expect(eq(CarrierMap::carrierOf(64UZ, 31UZ), 31));
-        expect(eq(CarrierMap::carrierOf(64UZ, 32UZ), -32));
-        expect(eq(CarrierMap::carrierOf(64UZ, 63UZ), -1));
+        expect(eq(CarrierMap::carrierOf(64UZ, 0UZ).value(), 0));
+        expect(eq(CarrierMap::carrierOf(64UZ, 31UZ).value(), 31));
+        expect(eq(CarrierMap::carrierOf(64UZ, 32UZ).value(), -32));
+        expect(eq(CarrierMap::carrierOf(64UZ, 63UZ).value(), -1));
 
         for (const std::size_t fftLength : {4UZ, 8UZ, 64UZ, 128UZ, 1'024UZ}) {
             const int half = static_cast<int>(fftLength / 2UZ);
             for (int carrier = -half; carrier < half; ++carrier) {
-                const std::size_t bin = CarrierMap::binOf(fftLength, carrier);
+                const std::size_t bin = CarrierMap::binOf(fftLength, carrier).value();
                 expect(lt(bin, fftLength));
-                expect(eq(CarrierMap::carrierOf(fftLength, bin), carrier)) << std::format("fft_len {} carrier {} did not come back", fftLength, carrier);
+                expect(eq(CarrierMap::carrierOf(fftLength, bin).value(), carrier)) << std::format("fft_len {} carrier {} did not come back", fftLength, carrier);
             }
-            expect(throws<std::invalid_argument>([fftLength, half] { (void)CarrierMap::binOf(fftLength, half); })) << "+fft_len/2 is not a carrier";
-            expect(throws<std::invalid_argument>([fftLength, half] { (void)CarrierMap::binOf(fftLength, -half - 1); })) << "one below the lowest carrier";
-            expect(throws<std::invalid_argument>([fftLength] { (void)CarrierMap::carrierOf(fftLength, fftLength); })) << "a bin past the transform";
+            expect(!CarrierMap::binOf(fftLength, half).has_value()) << "+fft_len/2 is not a carrier";
+            expect(!CarrierMap::binOf(fftLength, -half - 1).has_value()) << "one below the lowest carrier";
+            expect(!CarrierMap::carrierOf(fftLength, fftLength).has_value()) << "a bin past the transform";
         }
     };
 
@@ -100,7 +99,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         // The bins are in the order in which the carriers are listed. A symbol assembler walks that order. The n-th
         // data symbol goes to the n-th data carrier.
         for (std::size_t i = 0UZ; i < map.nData(); ++i) {
-            expect(eq(map.dataBins()[i], CarrierMap::binOf(64UZ, numerology.data[i])));
+            expect(eq(map.dataBins()[i], CarrierMap::binOf(64UZ, numerology.data[i]).value()));
         }
         expect(that % std::ranges::equal(map.pilotBins(), std::vector<std::size_t>{43UZ, 57UZ, 7UZ, 21UZ})) << "pilots at -21, -7, +7, +21";
 
@@ -150,39 +149,39 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         const Numerology numerology = qaNumerology();
         const CarrierMap map(64UZ, numerology.data, numerology.pilot);
         expect(eq(map.pilotSymbolIndex(3UZ, 1UZ, 8UZ), (3UZ * 4UZ + 1UZ) % 8UZ)) << "the member form reads n_pilots off the numerology";
-        expect(nothrow([&] { map.validatePilotCycle(4UZ); }));
-        expect(throws<std::invalid_argument>([&] { map.validatePilotCycle(0UZ); })) << "pilot carriers with no symbols to put on them";
+        expect(map.validatePilotCycle(4UZ).has_value());
+        expect(!map.validatePilotCycle(0UZ).has_value()) << "pilot carriers with no symbols to put on them";
 
         const CarrierMap noPilots(64UZ, numerology.data, std::span<const int>{});
-        expect(nothrow([&] { noPilots.validatePilotCycle(0UZ); })) << "no pilots, nothing to cycle";
+        expect(noPilots.validatePilotCycle(0UZ).has_value()) << "no pilots, nothing to cycle";
     };
 
     "a numerology that does not describe a transform is refused"_test = [] {
         const std::vector<int> data{1, 2, 3};
 
-        expect(throws<std::invalid_argument>([&] { (void)CarrierMap(2UZ, data, std::span<const int>{}); })) << "an fft_len below four";
-        expect(throws<std::invalid_argument>([&] { (void)CarrierMap(65UZ, data, std::span<const int>{}); })) << "an odd fft_len";
-        expect(throws<std::invalid_argument>([&] { (void)CarrierMap(CarrierMap::kMaxFftLength + 2UZ, data, std::span<const int>{}); })) << "an fft_len past the ceiling";
-        expect(throws<std::invalid_argument>([] { (void)CarrierMap(64UZ, std::span<const int>{}, std::span<const int>{}); })) << "no data carriers";
+        expect(throws<gr::exception>([&] { (void)CarrierMap(2UZ, data, std::span<const int>{}); })) << "an fft_len below four";
+        expect(throws<gr::exception>([&] { (void)CarrierMap(65UZ, data, std::span<const int>{}); })) << "an odd fft_len";
+        expect(throws<gr::exception>([&] { (void)CarrierMap(CarrierMap::kMaxFftLength + 2UZ, data, std::span<const int>{}); })) << "an fft_len past the ceiling";
+        expect(throws<gr::exception>([] { (void)CarrierMap(64UZ, std::span<const int>{}, std::span<const int>{}); })) << "no data carriers";
 
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<int> outside{1, 32};
             (void)CarrierMap(64UZ, outside, std::span<const int>{});
         })) << "a carrier at +fft_len/2";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<int> outside{-33, 1};
             (void)CarrierMap(64UZ, outside, std::span<const int>{});
         })) << "a carrier below -fft_len/2";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<int> repeated{1, 2, 1};
             (void)CarrierMap(64UZ, repeated, std::span<const int>{});
         })) << "a data carrier named twice";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<int> data2{1, 2};
             const std::vector<int> pilots{3, 3};
             (void)CarrierMap(64UZ, data2, pilots);
         })) << "a pilot carrier named twice";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<int> data2{1, 2};
             const std::vector<int> pilots{2};
             (void)CarrierMap(64UZ, data2, pilots);
@@ -190,10 +189,15 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
 
         const Numerology numerology = qaNumerology();
         const CarrierMap map(64UZ, numerology.data, numerology.pilot);
-        expect(nothrow([&] { map.validateSyncWord(std::vector<Cplx>(64UZ)); }));
-        expect(throws<std::invalid_argument>([&] { map.validateSyncWord(std::vector<Cplx>(63UZ)); })) << "a sync word is a whole symbol";
-        expect(throws<std::invalid_argument>([&] { (void)map.occupancyOfBin(64UZ); }));
-        expect(throws<std::invalid_argument>([&] { (void)map.occupancyOf(32); }));
+        expect(map.validateSyncWord(std::vector<Cplx>(64UZ)).has_value());
+        expect(!map.validateSyncWord(std::vector<Cplx>(63UZ)).has_value()) << "a sync word is a whole symbol";
+        expect(!map.occupancyOfBin(64UZ).has_value());
+        expect(!map.occupancyOf(32).has_value());
+        expect(map.occupancyOf(32).error().message.contains("carrier 32 is outside the range -32 to 31")) << map.occupancyOf(32).error().message;
+        expect(map.occupancyOfBin(64UZ).error().message.contains("bin 64 is outside a transform of 64 bins"));
+        expect(map.validateSyncWord(std::vector<Cplx>(63UZ), 2UZ).error().message.contains("sync word 2 holds 63 carriers"));
+        expect(CarrierMap::binOf(65UZ, 0).error().message.contains("odd transform")) << "the length is checked before the carrier";
+        expect(schmidlCoxPreamble(64UZ, 51UZ, 0ULL).error().message.contains("occupied is 51"));
     };
 
     // The construction's claim is exact and independent of the values. `exp(j*pi*k)` is +1 on every even bin. A symbol
@@ -203,14 +207,14 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         constexpr std::size_t kFftLength = 64UZ;
         constexpr std::size_t kOccupied  = 52UZ;
 
-        const std::vector<Cplx> preamble = schmidlCoxPreamble(kFftLength, kOccupied, 0xc0ffeeULL);
+        const std::vector<Cplx> preamble = schmidlCoxPreamble(kFftLength, kOccupied, 0xc0ffeeULL).value();
         expect(eq(preamble.size(), kFftLength));
         expect(eq(preamble[0UZ], Cplx{0.f, 0.f})) << "DC carries nothing";
 
         std::size_t occupiedBins = 0UZ;
         double      energy       = 0.;
         for (std::size_t bin = 0UZ; bin < kFftLength; ++bin) {
-            const int carrier = CarrierMap::carrierOf(kFftLength, bin);
+            const int carrier = CarrierMap::carrierOf(kFftLength, bin).value();
             energy += static_cast<double>(std::norm(preamble[bin]));
             if (bin % 2UZ != 0UZ) {
                 expect(eq(preamble[bin], Cplx{0.f, 0.f})) << std::format("odd bin {} must be empty", bin);
@@ -253,7 +257,7 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
         // A different seed gives a different preamble, and the repeat still holds. The addressing guarantees the
         // repeat, not the values.
         for (const std::size_t fftLength : {32UZ, 64UZ, 256UZ}) {
-            const std::vector<Cplx> other      = schmidlCoxPreamble(fftLength, fftLength - 12UZ, 7ULL);
+            const std::vector<Cplx> other      = schmidlCoxPreamble(fftLength, fftLength - 12UZ, 7ULL).value();
             const std::vector<Cplx> otherTime  = inverse.compute(other);
             double                  otherWorst = 0.;
             double                  otherScale = 0.;
@@ -264,17 +268,17 @@ const boost::ut::suite<"CarrierMap"> carrierMapTests = [] {
             expect(lt(otherWorst, 1e-5 * otherScale)) << std::format("fft_len {} did not repeat", fftLength);
         }
 
-        expect(that % !std::ranges::equal(preamble, schmidlCoxPreamble(kFftLength, kOccupied, 1ULL))) << "the seed is the sequence";
-        expect(that % std::ranges::equal(preamble, schmidlCoxPreamble(kFftLength, kOccupied, 0xc0ffeeULL))) << "and the same seed is the same sequence";
+        expect(that % !std::ranges::equal(preamble, schmidlCoxPreamble(kFftLength, kOccupied, 1ULL).value())) << "the seed is the sequence";
+        expect(that % std::ranges::equal(preamble, schmidlCoxPreamble(kFftLength, kOccupied, 0xc0ffeeULL).value())) << "and the same seed is the same sequence";
     };
 
     "a preamble that cannot be built is refused"_test = [] {
-        expect(throws<std::invalid_argument>([] { (void)schmidlCoxPreamble(63UZ, 52UZ, 0ULL); })) << "an odd fft_len";
-        expect(throws<std::invalid_argument>([] { (void)schmidlCoxPreamble(2UZ, 2UZ, 0ULL); })) << "an fft_len below four";
-        expect(throws<std::invalid_argument>([] { (void)schmidlCoxPreamble(64UZ, 51UZ, 0ULL); })) << "an odd occupancy";
-        expect(throws<std::invalid_argument>([] { (void)schmidlCoxPreamble(64UZ, 2UZ, 0ULL); })) << "too few to hold an even carrier each side";
-        expect(throws<std::invalid_argument>([] { (void)schmidlCoxPreamble(64UZ, 64UZ, 0ULL); })) << "an occupancy that leaves no room for DC";
-        expect(nothrow([] { (void)schmidlCoxPreamble(64UZ, 62UZ, 0ULL); })) << "the widest occupancy that does";
+        expect(!schmidlCoxPreamble(63UZ, 52UZ, 0ULL).has_value()) << "an odd fft_len";
+        expect(!schmidlCoxPreamble(2UZ, 2UZ, 0ULL).has_value()) << "an fft_len below four";
+        expect(!schmidlCoxPreamble(64UZ, 51UZ, 0ULL).has_value()) << "an odd occupancy";
+        expect(!schmidlCoxPreamble(64UZ, 2UZ, 0ULL).has_value()) << "too few to hold an even carrier each side";
+        expect(!schmidlCoxPreamble(64UZ, 64UZ, 0ULL).has_value()) << "an occupancy that leaves no room for DC";
+        expect(schmidlCoxPreamble(64UZ, 62UZ, 0ULL).has_value()) << "the widest occupancy that does";
     };
 };
 

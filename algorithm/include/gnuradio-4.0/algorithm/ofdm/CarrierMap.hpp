@@ -5,14 +5,28 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
 
 namespace gr::ofdm {
+
+namespace detail {
+/// The bin of a carrier already checked against the transform length.
+[[nodiscard]] constexpr std::size_t binOfCarrier(std::size_t fftLength, int carrier) noexcept { return (carrier < 0) ? static_cast<std::size_t>(carrier + static_cast<int>(fftLength)) : static_cast<std::size_t>(carrier); }
+
+/// The carrier of a bin already checked against the transform length.
+[[nodiscard]] constexpr int carrierOfBin(std::size_t fftLength, std::size_t bin) noexcept {
+    const int half  = static_cast<int>(fftLength / 2UZ);
+    const int index = static_cast<int>(bin);
+    return (index >= half) ? index - static_cast<int>(fftLength) : index;
+}
+} // namespace detail
 
 /// The role of a carrier. A guard is every carrier the numerology does not name. The three roles are therefore
 /// disjoint and cover the transform by construction, with no separate check.
@@ -37,7 +51,8 @@ enum class Occupancy : std::uint8_t { Guard, Data, Pilot };
  * cannot get the guards wrong, and the class has nothing to reject for them. The constructor checks that no
  * carrier falls outside the range. It checks that neither set repeats a carrier and that the two sets share
  * none. DC is an ordinary carrier here. A numerology may use it or leave it as a guard. `dcOccupied()` reports
- * which, and a caller need not infer it from the sets.
+ * which, and a caller need not infer it from the sets. The constructor throws `gr::exception` for a numerology it
+ * refuses. Every other function that checks an argument returns its result in a `std::expected` with a `gr::Error`.
  *
  * The class holds no symbol and no transform. It holds the addressing and is const once constructed.
  */
@@ -49,27 +64,27 @@ public:
 
     /// The signed logical index of a carrier, as an FFT bin. The function is static. The mapping depends on the
     /// transform length alone, and a caller often has the length before it has a numerology.
-    [[nodiscard]] static std::size_t binOf(std::size_t fftLength, int carrier) {
-        requireLength(fftLength);
-        requireCarrier(fftLength, carrier);
-        return (carrier < 0) ? static_cast<std::size_t>(carrier + static_cast<int>(fftLength)) : static_cast<std::size_t>(carrier);
+    [[nodiscard]] static std::expected<std::size_t, gr::Error> binOf(std::size_t fftLength, int carrier, std::source_location loc = std::source_location::current()) {
+        return requireLength(fftLength, loc).and_then([&] { return requireCarrier(fftLength, carrier, loc); }).transform([&] { return detail::binOfCarrier(fftLength, carrier); });
     }
 
     /// The inverse, the signed logical carrier a bin holds.
-    [[nodiscard]] static int carrierOf(std::size_t fftLength, std::size_t bin) {
-        requireLength(fftLength);
-        if (bin >= fftLength) {
-            throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: bin {} is outside a transform of {} bins", bin, fftLength));
+    [[nodiscard]] static std::expected<int, gr::Error> carrierOf(std::size_t fftLength, std::size_t bin, std::source_location loc = std::source_location::current()) {
+        if (auto length = requireLength(fftLength, loc); !length) {
+            return std::unexpected(length.error());
         }
-        const int half  = static_cast<int>(fftLength / 2UZ);
-        const int index = static_cast<int>(bin);
-        return (index >= half) ? index - static_cast<int>(fftLength) : index;
+        if (bin >= fftLength) {
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: bin {} is outside a transform of {} bins", bin, fftLength), loc));
+        }
+        return detail::carrierOfBin(fftLength, bin);
     }
 
     CarrierMap(std::size_t fftLength, std::span<const int> dataCarriers, std::span<const int> pilotCarriers) : _fftLength(fftLength), _data(dataCarriers.begin(), dataCarriers.end()), _pilot(pilotCarriers.begin(), pilotCarriers.end()) {
-        requireLength(fftLength);
+        if (auto length = requireLength(fftLength); !length) {
+            throw gr::exception(length.error().message);
+        }
         if (_data.empty()) {
-            throw std::invalid_argument("gr::ofdm::CarrierMap: data_carriers is empty — a numerology that carries no data is not one");
+            throw gr::exception("gr::ofdm::CarrierMap: data_carriers is empty — a numerology that carries no data is not one");
         }
 
         _occupancy.assign(fftLength, Occupancy::Guard);
@@ -81,7 +96,7 @@ public:
 
         for (std::size_t bin = 0UZ; bin < fftLength; ++bin) {
             if (_occupancy[bin] == Occupancy::Guard) {
-                _guard.push_back(carrierOf(fftLength, bin));
+                _guard.push_back(detail::carrierOfBin(fftLength, bin));
                 _guardBins.push_back(bin);
             }
         }
@@ -108,32 +123,33 @@ public:
 
     /// The role of a bin. The index is bounds-checked. A caller that computes its own bin index makes the
     /// mistake this class exists to catch.
-    [[nodiscard]] Occupancy occupancyOfBin(std::size_t bin) const {
+    [[nodiscard]] std::expected<Occupancy, gr::Error> occupancyOfBin(std::size_t bin, std::source_location loc = std::source_location::current()) const {
         if (bin >= _fftLength) {
-            throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: bin {} is outside a transform of {} bins", bin, _fftLength));
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: bin {} is outside a transform of {} bins", bin, _fftLength), loc));
         }
         return _occupancy[bin];
     }
 
-    [[nodiscard]] Occupancy occupancyOf(int carrier) const { return _occupancy[binOf(_fftLength, carrier)]; }
+    [[nodiscard]] std::expected<Occupancy, gr::Error> occupancyOf(int carrier, std::source_location loc = std::source_location::current()) const {
+        return requireCarrier(_fftLength, carrier, loc).transform([&] { return _occupancy[detail::binOfCarrier(_fftLength, carrier)]; });
+    }
 
-    /// A sync word is a whole symbol, emitted verbatim. Its length is therefore the one property to check. The
-    /// check throws, because a short word would read as a symbol with silent carriers.
-    void validateSyncWord(std::span<const std::complex<float>> word, std::size_t index = 0UZ) const {
+    /// A sync word is a whole symbol, emitted verbatim. Its length is therefore the one property to check. A short
+    /// word is an error, because it would read as a symbol with silent carriers.
+    [[nodiscard]] std::expected<void, gr::Error> validateSyncWord(std::span<const std::complex<float>> word, std::size_t index = 0UZ, std::source_location loc = std::source_location::current()) const {
         if (word.size() != _fftLength) {
-            throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: sync word {} holds {} carriers, not the {} a symbol has", index, word.size(), _fftLength));
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: sync word {} holds {} carriers, not the {} a symbol has", index, word.size(), _fftLength), loc));
         }
+        return {};
     }
 
     /// Refuses a pilot-symbol cycle that cannot be indexed. It runs once at configuration.
     /// `pilotSymbolIndex` is then plain arithmetic with no check.
-    void validatePilotCycle(std::size_t cycleLength) const {
-        if (_pilot.empty()) {
-            return;
+    [[nodiscard]] std::expected<void, gr::Error> validatePilotCycle(std::size_t cycleLength, std::source_location loc = std::source_location::current()) const {
+        if (!_pilot.empty() && cycleLength == 0UZ) {
+            return std::unexpected(gr::Error("gr::ofdm::CarrierMap: pilot_symbols is empty while the numerology has pilot carriers", loc));
         }
-        if (cycleLength == 0UZ) {
-            throw std::invalid_argument("gr::ofdm::CarrierMap: pilot_symbols is empty while the numerology has pilot carriers");
-        }
+        return {};
     }
 
     /**
@@ -163,30 +179,34 @@ private:
     std::vector<Occupancy>   _occupancy{};
     bool                     _dcOccupied{false};
 
-    static void requireLength(std::size_t fftLength) {
+    static std::expected<void, gr::Error> requireLength(std::size_t fftLength, std::source_location loc = std::source_location::current()) {
         if (fftLength < 4UZ || fftLength > kMaxFftLength) {
-            throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: fft_len is {} — a transform holds between 4 and {} bins", fftLength, kMaxFftLength));
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: fft_len is {} — a transform holds between 4 and {} bins", fftLength, kMaxFftLength), loc));
         }
         if (fftLength % 2UZ != 0UZ) {
-            throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: fft_len is {} — an odd transform has no symmetric carrier range about DC", fftLength));
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: fft_len is {} — an odd transform has no symmetric carrier range about DC", fftLength), loc));
         }
+        return {};
     }
 
     /// The range is asymmetric, as bin order is. `-fft_len/2` is the Nyquist bin, and `+fft_len/2` is not a
     /// carrier.
-    static void requireCarrier(std::size_t fftLength, int carrier) {
+    static std::expected<void, gr::Error> requireCarrier(std::size_t fftLength, int carrier, std::source_location loc = std::source_location::current()) {
         const int half = static_cast<int>(fftLength / 2UZ);
         if (carrier < -half || carrier >= half) {
-            throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: carrier {} is outside the range {} to {} an fft_len of {} spans", carrier, -half, half - 1, fftLength));
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: carrier {} is outside the range {} to {} an fft_len of {} spans", carrier, -half, half - 1, fftLength), loc));
         }
+        return {};
     }
 
     void claim(std::span<const int> carriers, std::vector<std::size_t>& bins, Occupancy what, const char* parameter) {
         for (const int carrier : carriers) {
-            requireCarrier(_fftLength, carrier);
-            const std::size_t bin = binOf(_fftLength, carrier);
+            if (auto inRange = requireCarrier(_fftLength, carrier); !inRange) {
+                throw gr::exception(inRange.error().message);
+            }
+            const std::size_t bin = detail::binOfCarrier(_fftLength, carrier);
             if (_occupancy[bin] != Occupancy::Guard) {
-                throw std::invalid_argument(std::format("gr::ofdm::CarrierMap: {} names carrier {} twice, or after the other set already claimed it", parameter, carrier));
+                throw gr::exception(std::format("gr::ofdm::CarrierMap: {} names carrier {} twice, or after the other set already claimed it", parameter, carrier));
             }
             _occupancy[bin] = what;
             bins.push_back(bin);
@@ -218,15 +238,15 @@ private:
  * look like noise to a timing metric. It does not need a match to any standard's table. A standard's preamble is
  * a sync word the caller supplies verbatim. This helper serves when there is no standard.
  */
-[[nodiscard]] inline std::vector<std::complex<float>> schmidlCoxPreamble(std::size_t fftLength, std::size_t occupied, std::uint64_t seed) {
+[[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> schmidlCoxPreamble(std::size_t fftLength, std::size_t occupied, std::uint64_t seed, std::source_location loc = std::source_location::current()) {
     if (fftLength < 4UZ || fftLength > CarrierMap::kMaxFftLength || fftLength % 2UZ != 0UZ) {
-        throw std::invalid_argument(std::format("gr::ofdm::schmidlCoxPreamble: fft_len is {} — an even transform of between 4 and {} bins", fftLength, CarrierMap::kMaxFftLength));
+        return std::unexpected(gr::Error(std::format("gr::ofdm::schmidlCoxPreamble: fft_len is {} — an even transform of between 4 and {} bins", fftLength, CarrierMap::kMaxFftLength), loc));
     }
     if (occupied < 4UZ || occupied % 2UZ != 0UZ) {
-        throw std::invalid_argument(std::format("gr::ofdm::schmidlCoxPreamble: occupied is {} — an even count of at least 4, so that each side of DC holds an even carrier", occupied));
+        return std::unexpected(gr::Error(std::format("gr::ofdm::schmidlCoxPreamble: occupied is {} — an even count of at least 4, so that each side of DC holds an even carrier", occupied), loc));
     }
     if (occupied > fftLength - 2UZ) {
-        throw std::invalid_argument(std::format("gr::ofdm::schmidlCoxPreamble: occupied is {}, which with DC excluded does not fit in an fft_len of {}", occupied, fftLength));
+        return std::unexpected(gr::Error(std::format("gr::ofdm::schmidlCoxPreamble: occupied is {}, which with DC excluded does not fit in an fft_len of {}", occupied, fftLength), loc));
     }
 
     gr::rng::Xoshiro256pp            rng(seed);
@@ -236,10 +256,10 @@ private:
         if (carrier == 0 || (carrier % 2) != 0) {
             continue;
         }
-        const std::uint64_t bits                      = rng();
-        const float         real                      = ((bits & 1ULL) != 0ULL) ? 1.f : -1.f;
-        const float         imag                      = ((bits & 2ULL) != 0ULL) ? 1.f : -1.f;
-        symbol[CarrierMap::binOf(fftLength, carrier)] = std::complex<float>{real, imag};
+        const std::uint64_t bits                         = rng();
+        const float         real                         = ((bits & 1ULL) != 0ULL) ? 1.f : -1.f;
+        const float         imag                         = ((bits & 2ULL) != 0ULL) ? 1.f : -1.f;
+        symbol[detail::binOfCarrier(fftLength, carrier)] = std::complex<float>{real, imag};
     }
     return symbol;
 }
