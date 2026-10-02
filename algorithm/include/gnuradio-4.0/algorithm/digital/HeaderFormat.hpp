@@ -1,6 +1,7 @@
 #ifndef GNURADIO_ALGORITHM_HEADER_FORMAT_HPP
 #define GNURADIO_ALGORITHM_HEADER_FORMAT_HPP
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/algorithm/digital/Crc.hpp>
@@ -10,11 +11,11 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
-#include <string>
 #include <variant>
 
 /**
@@ -256,16 +257,17 @@ struct LengthCount {
 };
 
 /// @brief Refuse a count whose parameters do not describe the convention they are given with, naming the setting.
-inline void validateLengthCount(const LengthCount& count) {
+[[nodiscard]] inline std::expected<void, gr::Error> validateLengthCount(const LengthCount& count) {
     if (count.unitItems < 1UZ || count.unitItems > 64UZ) {
-        throw std::invalid_argument("gr::digital::LengthCount: count_unit_items must be in [1, 64], got " + std::to_string(count.unitItems));
+        return std::unexpected(gr::Error(std::format("gr::digital::LengthCount: count_unit_items must be in [1, 64], got {}", count.unitItems)));
     }
     if (count.checkItems != 0UZ && count.covers != CountCovers::Payload) {
-        throw std::invalid_argument("gr::digital::LengthCount: check_items is only meaningful when the field counts the payload alone, got " + std::to_string(count.checkItems));
+        return std::unexpected(gr::Error(std::format("gr::digital::LengthCount: check_items is only meaningful when the field counts the payload alone, got {}", count.checkItems)));
     }
     if (count.framePrefixItems != 0UZ && count.covers != CountCovers::WholeFrame) {
-        throw std::invalid_argument("gr::digital::LengthCount: frame_prefix_items is only meaningful when the field counts the whole frame, got " + std::to_string(count.framePrefixItems));
+        return std::unexpected(gr::Error(std::format("gr::digital::LengthCount: frame_prefix_items is only meaningful when the field counts the whole frame, got {}", count.framePrefixItems)));
     }
+    return {};
 }
 
 /// @brief The payload item count a field value @p length names, or `std::nullopt` when the arithmetic has no answer.
@@ -358,12 +360,14 @@ public:
 
     LengthPlainHeader(std::size_t lengthBits, HeaderByteOrder order, LengthCount count) : lengthBits_(lengthBits), order_(order), count_(count) {
         if (lengthBits < 1UZ || lengthBits > kMaxLengthBits) {
-            throw std::invalid_argument("gr::digital::LengthPlainHeader: length_bits must be in [1, 32], got " + std::to_string(lengthBits));
+            throw gr::exception(std::format("gr::digital::LengthPlainHeader: length_bits must be in [1, 32], got {}", lengthBits));
         }
         if (order == HeaderByteOrder::Little && lengthBits % 8UZ != 0UZ) {
-            throw std::invalid_argument("gr::digital::LengthPlainHeader: a little-endian byte order needs a whole number of bytes, got length_bits " + std::to_string(lengthBits));
+            throw gr::exception(std::format("gr::digital::LengthPlainHeader: a little-endian byte order needs a whole number of bytes, got length_bits {}", lengthBits));
         }
-        validateLengthCount(count);
+        if (const auto valid = validateLengthCount(count); !valid) {
+            throw gr::exception(valid.error().message);
+        }
         maxValue_ = lengthBits == 32UZ ? ~std::uint32_t{0} : ((std::uint32_t{1} << lengthBits) - 1U);
     }
 
@@ -453,9 +457,11 @@ public:
 
     LengthGolay24Header(std::size_t lengthBits, FlagsPosition flags, LengthCount count) : lengthBits_(lengthBits), flags_(flags), count_(count) {
         if (lengthBits < 1UZ || lengthBits > kInfoBits) {
-            throw std::invalid_argument("gr::digital::LengthGolay24Header: length_bits must be in [1, 12], got " + std::to_string(lengthBits));
+            throw gr::exception(std::format("gr::digital::LengthGolay24Header: length_bits must be in [1, 12], got {}", lengthBits));
         }
-        validateLengthCount(count);
+        if (const auto valid = validateLengthCount(count); !valid) {
+            throw gr::exception(valid.error().message);
+        }
         flagBits_ = kInfoBits - lengthBits;
         maxValue_ = (std::uint32_t{1} << lengthBits) - 1U;
         maxFlags_ = flagBits_ == 0UZ ? 0U : ((std::uint32_t{1} << flagBits_) - 1U);

@@ -13,11 +13,11 @@
 #include <print>
 #include <random>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <variant>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/HeaderFormat.hpp>
 #include <gnuradio-4.0/algorithm/fec/Golay.hpp>
 
@@ -360,7 +360,7 @@ const boost::ut::suite<"header formats"> headerFormatTests = [] {
 
         // a byte order over a field that is not whole bytes has no meaning, so it is refused where it is stated
         for (const std::size_t bits : {1UZ, 7UZ, 12UZ, 31UZ}) {
-            expect(throws<std::invalid_argument>([bits, plain] { [[maybe_unused]] const LengthPlainHeader bad{bits, HeaderByteOrder::Little, plain}; })) << std::format("little at {} bits", bits);
+            expect(throws<gr::exception>([bits, plain] { [[maybe_unused]] const LengthPlainHeader bad{bits, HeaderByteOrder::Little, plain}; })) << std::format("little at {} bits", bits);
         }
         expect(nothrow([plain] { [[maybe_unused]] const LengthPlainHeader ok{24UZ, HeaderByteOrder::Little, plain}; })) << "and accepted at a whole number of bytes";
     };
@@ -429,12 +429,21 @@ const boost::ut::suite<"header formats"> headerFormatTests = [] {
 
         // the construction-time refusals, which are the only throws here
         const LengthCount ok{CountCovers::PayloadAndCheck, 8UZ, 0UZ, 0UZ};
-        expect(throws<std::invalid_argument>([ok] { [[maybe_unused]] const LengthPlainHeader bad{0UZ, HeaderByteOrder::Big, ok}; })) << "a zero-width field";
-        expect(throws<std::invalid_argument>([ok] { [[maybe_unused]] const LengthPlainHeader bad{33UZ, HeaderByteOrder::Big, ok}; })) << "and one past the header buffer";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::PayloadAndCheck, 0UZ, 0UZ, 0UZ}}; })) << "a zero counting unit";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::PayloadAndCheck, 65UZ, 0UZ, 0UZ}}; })) << "and one past 64";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::PayloadAndCheck, 8UZ, 16UZ, 0UZ}}; })) << "check_items where the field already counts the check";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::Payload, 8UZ, 0UZ, 16UZ}}; })) << "frame_prefix_items where the field does not count the frame";
+        expect(throws<gr::exception>([ok] { [[maybe_unused]] const LengthPlainHeader bad{0UZ, HeaderByteOrder::Big, ok}; })) << "a zero-width field";
+        expect(throws<gr::exception>([ok] { [[maybe_unused]] const LengthPlainHeader bad{33UZ, HeaderByteOrder::Big, ok}; })) << "and one past the header buffer";
+        expect(throws<gr::exception>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::PayloadAndCheck, 0UZ, 0UZ, 0UZ}}; })) << "a zero counting unit";
+        expect(throws<gr::exception>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::PayloadAndCheck, 65UZ, 0UZ, 0UZ}}; })) << "and one past 64";
+        expect(throws<gr::exception>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::PayloadAndCheck, 8UZ, 16UZ, 0UZ}}; })) << "check_items where the field already counts the check";
+        expect(throws<gr::exception>([] { [[maybe_unused]] const LengthPlainHeader bad{8UZ, HeaderByteOrder::Big, LengthCount{CountCovers::Payload, 8UZ, 0UZ, 16UZ}}; })) << "frame_prefix_items where the field does not count the frame";
+
+        // the same refusals as a value, naming the setting
+        expect(gr::digital::validateLengthCount(ok).has_value()) << "a count that states its convention";
+        const auto unit = gr::digital::validateLengthCount(LengthCount{CountCovers::PayloadAndCheck, 0UZ, 0UZ, 0UZ});
+        expect(!unit.has_value() && unit.error().message.contains("count_unit_items")) << "a zero counting unit";
+        const auto check = gr::digital::validateLengthCount(LengthCount{CountCovers::WholeFrame, 8UZ, 16UZ, 0UZ});
+        expect(!check.has_value() && check.error().message.contains("check_items")) << "check_items outside payload";
+        const auto prefix = gr::digital::validateLengthCount(LengthCount{CountCovers::PayloadAndCheck, 8UZ, 0UZ, 16UZ});
+        expect(!prefix.has_value() && prefix.error().message.contains("frame_prefix_items")) << "frame_prefix_items outside whole_frame";
     };
 
     // The overflow test is made before the multiplication, at the exact value where the product would wrap.
@@ -586,8 +595,8 @@ const boost::ut::suite<"header formats"> headerFormatTests = [] {
         expect(that % !high.format(8UZ * 0x10UZ + 16UZ, property_map{{"header_flags", std::uint64_t{16}}}, std::span<std::uint8_t>(a))) << "flags too wide for the field are refused";
         expect(that % !high.format(8UZ * 0x10UZ + 16UZ, property_map{{"header_flags", std::uint64_t{0}}}, std::span<std::uint8_t>(a).first(23UZ))) << "and so is a span one item short of the codeword";
 
-        expect(throws<std::invalid_argument>([count] { [[maybe_unused]] const LengthGolay24Header bad{0UZ, FlagsPosition::High, count}; })) << "a zero-width length field";
-        expect(throws<std::invalid_argument>([count] { [[maybe_unused]] const LengthGolay24Header bad{13UZ, FlagsPosition::High, count}; })) << "and one past the twelve information bits";
+        expect(throws<gr::exception>([count] { [[maybe_unused]] const LengthGolay24Header bad{0UZ, FlagsPosition::High, count}; })) << "a zero-width length field";
+        expect(throws<gr::exception>([count] { [[maybe_unused]] const LengthGolay24Header bad{13UZ, FlagsPosition::High, count}; })) << "and one past the twelve information bits";
     };
 
     // The variant grew and its buffer did not.
