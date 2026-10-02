@@ -10,7 +10,6 @@
 #include <numbers>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -303,7 +302,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
             }
 
             std::vector<double> sk(kBins);
-            (void)accumulator.evaluate(1., sk);
+            expect(accumulator.evaluate(1., sk).has_value());
             for (const double value : sk) {
                 // Identical bin powers give `M*S2/S1^2 = 1` algebraically. The comparison is therefore exact and not a
                 // tolerance. A tolerance here would hide the identity the test checks.
@@ -332,7 +331,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
             }
 
             std::vector<double> sk(kBins);
-            (void)accumulator.evaluate(1., sk);
+            expect(accumulator.evaluate(1., sk).has_value());
             const Spread measured = spreadOf(sk);
             const double closed   = spectralKurtosisCw(rho);
             std::println("SK on CW at rho = {:5.1f}: mean {:.5f} against (2*rho+1)/(rho+1)^2 = {:.5f}", rho, measured.mean, closed);
@@ -370,7 +369,7 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
                 }
 
                 std::vector<double> sk(kBins);
-                (void)accumulator.evaluate(1., sk);
+                expect(accumulator.evaluate(1., sk).has_value());
                 const Spread measured  = spreadOf(sk);
                 const double deviation = measured.mean - closed;
                 std::println("SK on a pulsed interferer at p = {:.2f}, M = {:5}: mean {:.4f} against the closed form {:.4f}, deviation {:+.4f}", p, spectra, measured.mean, closed, deviation);
@@ -408,10 +407,10 @@ const boost::ut::suite<"Kurtosis"> _kurtosis = [] {
         expect(accumulator.evaluate(1., sk) == 1UZ) << "the dead bin is counted";
         expect(sk[1] == 0.) << "and written as zero, because one dead bin is a property of the signal";
 
-        expect(throws<std::invalid_argument>([&] {
-            std::vector<double> tooFew(3UZ);
-            (void)accumulator.evaluate(1., tooFew);
-        })) << "the output span takes one entry per bin";
+        std::vector<double> tooFew(3UZ);
+        const auto          refused = accumulator.evaluate(1., tooFew);
+        expect(fatal(!refused.has_value())) << "the output span takes one entry per bin";
+        expect(refused.error().message.contains("one entry per bin")) << refused.error().message;
 
         expect(spectralKurtosis(0., 0., 64UZ, 1.) == 0.) << "a bin with no power has no defined statistic";
         expect(spectralKurtosisVariance(1UZ, 1.) == 0.) << "and one spectrum is not a run of them";

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <format>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -72,7 +73,7 @@ void benchKurtosis() {
 
         std::vector<double> sk(kBins);
         const auto          evaluate                                        = std::format("SpectralKurtosisAccumulator::evaluate,   {} bins", kBins);
-        ::benchmark::benchmark<kRepeats>(std::string_view(evaluate), kBins) = [&] { (void)accumulator.evaluate(1., sk); };
+        ::benchmark::benchmark<kRepeats>(std::string_view(evaluate), kBins) = [&] { std::ignore = accumulator.evaluate(1., sk); };
         ::benchmark::results::add_separator();
     };
 }

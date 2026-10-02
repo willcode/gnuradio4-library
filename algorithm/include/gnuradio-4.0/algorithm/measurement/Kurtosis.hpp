@@ -7,10 +7,12 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/math/SampleType.hpp>
 
 /**
@@ -295,11 +297,11 @@ public:
      *
      * A bin whose `S1` is exactly zero has no defined `SK`. It is written as zero and counted. One dead bin is a
      * property of the signal and not of the record. The function therefore returns a count and sets no flag on
-     * the whole spectrum.
+     * the whole spectrum. An output span without one entry per bin is an error.
      */
-    [[nodiscard]] std::size_t evaluate(double shape, std::span<double> out) const {
+    [[nodiscard]] std::expected<std::size_t, gr::Error> evaluate(double shape, std::span<double> out, std::source_location loc = std::source_location::current()) const {
         if (out.size() != _s1.size()) {
-            throw std::invalid_argument("gr::measurement::SpectralKurtosisAccumulator::evaluate: the output span must have one entry per bin");
+            return std::unexpected(gr::Error("gr::measurement::SpectralKurtosisAccumulator::evaluate: the output span must have one entry per bin", loc));
         }
         std::size_t degenerate = 0UZ;
         for (std::size_t bin = 0UZ; bin < out.size(); ++bin) {
