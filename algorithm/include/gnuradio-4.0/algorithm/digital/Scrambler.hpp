@@ -6,12 +6,14 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/BitPacking.hpp>
 
 /**
@@ -61,9 +63,9 @@
  * `bitsPerItem` are masked away on input and left zero on output, so no stream value can fail.
  * `BitOrder` is that header's enumeration rather than a second one with the same two members.
  *
- * `configureScrambler()` validates, derives everything the sample path indexes, and is the only function here
- * that can throw. It throws `std::invalid_argument`, not a graph exception, because this header
- * depends on the standard library alone. `scramble()` and `resetScrambler()` are `noexcept`, allocate
+ * The `configure` functions and `applyProfile()` validate, derive everything the sample path indexes, and throw
+ * `gr::exception` for a setting they refuse. The parsers return `std::expected` with a `gr::Error` that quotes their
+ * input. `scramble()` and `resetScrambler()` are `noexcept`, allocate
  * nothing, and hold no state beyond the configuration they are handed.
  *
  * Three shapes carry the sample path, one per mode, and they differ because the data dependence
@@ -125,17 +127,16 @@ namespace detail {
     return text;
 }
 
-} // namespace detail
+/// @brief A parsed value, or the reason the text was refused; `reason` is empty when `value` stands.
+template<typename Value>
+struct Parsed {
+    Value            value{};
+    std::string_view reason{};
+};
 
-/**
- * @brief The delays named in @p list, given as decimal integers separated by commas and optional spaces.
- *
- * Every delay is in `[1, 64]` and distinct, and at least one is required. Anything else throws
- * `std::invalid_argument` quoting @p list, which is the whole of the validation a tap set needs: a
- * delay list has no exponent to misread.
- */
-[[nodiscard]] constexpr TapMask tapsFromDelayList(std::string_view list) {
-    const auto reject = [list](std::string_view reason) { return std::invalid_argument("gr::digital::tapsFromDelayList: " + std::string(reason) + ", got '" + std::string(list) + "'"); };
+/// @brief The delay list parse behind `tapsFromDelayList`, usable in a constant expression.
+[[nodiscard]] constexpr Parsed<TapMask> parseDelayList(std::string_view list) noexcept {
+    const auto reject = [](std::string_view reason) { return Parsed<TapMask>{0ULL, reason}; };
 
     TapMask     taps  = 0ULL;
     std::size_t index = 0UZ;
@@ -148,20 +149,20 @@ namespace detail {
         while (index < list.size() && list[index] >= '0' && list[index] <= '9') {
             delay = delay * 10U + static_cast<unsigned>(list[index] - '0');
             if (delay > 64U) {
-                throw reject("a delay above 64");
+                return reject("a delay above 64");
             }
             ++index;
         }
         if (index == start) {
-            throw reject("the list must name at least one decimal delay");
+            return reject("the list must name at least one decimal delay");
         }
         if (delay == 0U) {
-            throw reject("a delay of zero");
+            return reject("a delay of zero");
         }
 
         const TapMask bit = 1ULL << (delay - 1U);
         if ((taps & bit) != 0ULL) {
-            throw reject("a repeated delay");
+            return reject("a repeated delay");
         }
         taps |= bit;
 
@@ -169,13 +170,62 @@ namespace detail {
             ++index;
         }
         if (index == list.size()) {
-            return taps;
+            return Parsed<TapMask>{taps, {}};
         }
         if (list[index] != ',') {
-            throw reject("a character that is neither a digit, a comma nor a space");
+            return reject("a character that is neither a digit, a comma nor a space");
         }
         ++index;
     }
+}
+
+/// @brief The seed bit parse behind `seedFromBitString`, after its length check, usable in a constant expression.
+[[nodiscard]] constexpr Parsed<std::uint64_t> parseSeedBits(std::string_view bits) noexcept {
+    std::uint64_t seed = 0ULL;
+    for (const char bit : bits) {
+        if (bit != '0' && bit != '1') {
+            return Parsed<std::uint64_t>{0ULL, "the seed must be '0' and '1' characters"};
+        }
+        seed = (seed << 1U) | static_cast<std::uint64_t>(bit == '1' ? 1U : 0U);
+    }
+    return Parsed<std::uint64_t>{seed, {}};
+}
+
+/// @brief Not usable in a constant expression, so a named constant whose text a parse refuses does not compile.
+inline void refusedConstant() noexcept {}
+
+/// @brief The tap set of a delay list written as a named constant, checked during compilation.
+[[nodiscard]] consteval TapMask delayListConstant(std::string_view list) {
+    const Parsed<TapMask> parsed = parseDelayList(list);
+    if (!parsed.reason.empty()) {
+        refusedConstant();
+    }
+    return parsed.value;
+}
+
+/// @brief The seed of a bit string written as a named constant, checked during compilation.
+[[nodiscard]] consteval std::uint64_t seedConstant(std::string_view bits, std::uint8_t degree) {
+    const Parsed<std::uint64_t> parsed = parseSeedBits(bits);
+    if (!parsed.reason.empty() || bits.size() != static_cast<std::size_t>(degree)) {
+        refusedConstant();
+    }
+    return parsed.value;
+}
+
+} // namespace detail
+
+/**
+ * @brief The delays named in @p list, given as decimal integers separated by commas and optional spaces.
+ *
+ * Every delay is in `[1, 64]` and distinct, and at least one is required. Anything else is a `gr::Error`
+ * quoting @p list, which is the whole of the validation a tap set needs: a delay list has no exponent to misread.
+ */
+[[nodiscard]] inline std::expected<TapMask, gr::Error> tapsFromDelayList(std::string_view list) {
+    const detail::Parsed<TapMask> parsed = detail::parseDelayList(list);
+    if (!parsed.reason.empty()) {
+        return std::unexpected(gr::Error(std::format("gr::digital::tapsFromDelayList: {}, got '{}'", parsed.reason, list)));
+    }
+    return parsed.value;
 }
 
 /// @brief The delays of @p taps in ascending order, in the spelling `tapsFromDelayList` reads.
@@ -195,21 +245,17 @@ namespace detail {
  *
  * The reading is the same for every mode — a run of `degree` bits in time order — and only where
  * those bits sit differs. Exactly @p degree characters are required, each `'0'` or `'1'`; anything
- * else throws `std::invalid_argument` quoting @p bits.
+ * else is a `gr::Error` quoting @p bits.
  */
-[[nodiscard]] constexpr std::uint64_t seedFromBitString(std::string_view bits, std::uint8_t degree) {
+[[nodiscard]] inline std::expected<std::uint64_t, gr::Error> seedFromBitString(std::string_view bits, std::uint8_t degree) {
     if (bits.size() != static_cast<std::size_t>(degree)) {
-        throw std::invalid_argument("gr::digital::seedFromBitString: the seed must be exactly " + detail::decimalText(degree) + " bits, got '" + std::string(bits) + "'");
+        return std::unexpected(gr::Error(std::format("gr::digital::seedFromBitString: the seed must be exactly {} bits, got '{}'", degree, bits)));
     }
-
-    std::uint64_t seed = 0ULL;
-    for (const char bit : bits) {
-        if (bit != '0' && bit != '1') {
-            throw std::invalid_argument("gr::digital::seedFromBitString: the seed must be '0' and '1' characters, got '" + std::string(bits) + "'");
-        }
-        seed = (seed << 1U) | static_cast<std::uint64_t>(bit == '1' ? 1U : 0U);
+    const detail::Parsed<std::uint64_t> parsed = detail::parseSeedBits(bits);
+    if (!parsed.reason.empty()) {
+        return std::unexpected(gr::Error(std::format("gr::digital::seedFromBitString: {}, got '{}'", parsed.reason, bits)));
     }
-    return seed;
+    return parsed.value;
 }
 
 /**
@@ -225,7 +271,7 @@ namespace standard {
 /// @brief CCSDS 131.0-B pseudo-randomizer, `h(x) = x^8 + x^7 + x^5 + x^3 + 1` read as a characteristic polynomial.
 /// Seed `"11111111"`, period 255. The sequence opens `FF 48 0E C0 9A 0D 70 BC`, whose first 40 bits are the value the
 /// standard publishes; the reciprocal reading `"3,5,7,8"` opens `FF 1A AF 66 52` and does not.
-inline constexpr TapMask ccsds131 = tapsFromDelayList("1,3,5,8");
+inline constexpr TapMask ccsds131 = detail::delayListConstant("1,3,5,8");
 
 /// @brief CCSDS 131.0-B-5 10.4.1's primary pseudo-randomizer, `h(x) = x^17 + x^14 + 1` read as a characteristic
 /// polynomial, period 131071. It is the primary sequence of the current issue; 10.4.2 keeps the degree-8 `ccsds131`
@@ -236,7 +282,7 @@ inline constexpr TapMask ccsds131 = tapsFromDelayList("1,3,5,8");
 /// The sequence opens `1C 71 B9 1B A9 BA 84 57`, whose first 40 bits are the value 10.4.3 note 2 publishes; the
 /// reciprocal reading `"14,17"` opens `1C 71 FF FF 00 03 80 0F` from the same seed, parting at the third byte, so a
 /// swapped reading is visible against the published value.
-inline constexpr TapMask ccsds131_17 = tapsFromDelayList("3,17");
+inline constexpr TapMask ccsds131_17 = detail::delayListConstant("3,17");
 
 /// @brief The CC11xx / SX12xx data-whitening sequence, `x^9 + x^5 + 1` read as a characteristic polynomial. Seed
 /// `"111111111"`, period 511, eight bits per item taken `LsbFirst`, under which the sequence opens
@@ -244,7 +290,7 @@ inline constexpr TapMask ccsds131_17 = tapsFromDelayList("3,17");
 /// and bit order are confirmed together by one string rather than one at a time. `MsbFirst` on the same taps opens
 /// `FF 87 B8 59 B7 A1 CC 24`, and the reciprocal reading `"5,9"` opens `FF C1 FB E8 4C 90 72 8B` least significant bit
 /// first and `FF 83 DF 17 32 09 4E D1` most significant.
-inline constexpr TapMask pn9 = tapsFromDelayList("4,9");
+inline constexpr TapMask pn9 = detail::delayListConstant("4,9");
 
 /// @brief The Silicon Laboratories Si4463 (EZRadioPRO) whitening tap set, which is `pn9`'s. The chip's PN engine is a
 /// 16-bit LFSR whose PN9 mode wires the tap mask `PKT_WHT_POLY = 0x0108`, seeded from `PKT_WHT_SEED`, default
@@ -264,7 +310,7 @@ inline constexpr TapMask si4463 = pn9;
 /// the same polynomial is also written `x^17 + x^12 + 1`, whose characteristic reading is the reciprocal `"5,17"`, and
 /// both are primitive with period 131071, so the recursion is the only thing that separates them. From an all-ones
 /// seed the additive form of `"12,17"` opens `FF FF 80 07 C0 7F E7 C1` and `"5,17"` opens `FF FF 83 E0 C7 CE 13 7C`.
-inline constexpr TapMask g3ruh = tapsFromDelayList("12,17");
+inline constexpr TapMask g3ruh = detail::delayListConstant("12,17");
 
 /// @brief DVB energy dispersal, ETSI EN 300 744 and EN 300 421, `1 + X^14 + X^15`. The standard loads
 /// `100101010000000` into its fifteen stages and takes the output from the adder combining stages 14 and 15, so the
@@ -272,29 +318,29 @@ inline constexpr TapMask g3ruh = tapsFromDelayList("12,17");
 /// header's convention is `"000000111111011"`. Period 32767, sequence `03 F6 08 34 30 B8 A3 93`, whose opening bits are
 /// the ones the standard's figure prints. Emitting the register's contents instead opens `95 01 7E 07 04 12 18 6C`, and
 /// the reciprocal reading `"1,15"` opens `03 F7 FA B5 59 B3 22 44`.
-inline constexpr TapMask dvb = tapsFromDelayList("14,15");
+inline constexpr TapMask dvb = detail::delayListConstant("14,15");
 
 /// @brief IEEE Std 802.11, `x^7 + x^4 + 1` read as a delay polynomial; the OFDM PHY uses it additively and the DSSS and
 /// HR/DSSS PHYs self-synchronizingly, which is why the family is a use and not a property of the polynomial.
 /// Additive seed `"0000111"`, period 127, sequence `0E F2 C9 02 26 2E B6 0C`, reproducing all 127 bits the standard
 /// publishes for the all-ones initial state; the reciprocal reading `"3,7"` opens `0F E3 B1 4B EA 85 BC E5`.
-inline constexpr TapMask ieee80211 = tapsFromDelayList("4,7");
+inline constexpr TapMask ieee80211 = detail::delayListConstant("4,7");
 
 /// @brief ITU-T V-series GSTN data modems, form A, `1 + x^-18 + x^-23`; the negative exponents are delays, so there is
 /// no reading to resolve. Self-synchronizing in the V-series, period 8388607 used additively, `FF FF FE 00 00 7C 00 1F`
 /// from an all-ones seed. This is V.32's `GPC`: the calling station scrambles with it and descrambles with `itu_5_23`.
-inline constexpr TapMask itu_18_23 = tapsFromDelayList("18,23");
+inline constexpr TapMask itu_18_23 = detail::delayListConstant("18,23");
 
 /// @brief ITU-T V-series GSTN data modems, form B, `1 + x^-5 + x^-23`. Period 8388607, `FF FF FE 0F 83 E3 07 3E` from an
 /// all-ones seed. This is V.32's `GPA`: the answering station scrambles with it and descrambles with `itu_18_23`.
-inline constexpr TapMask itu_5_23 = tapsFromDelayList("5,23");
+inline constexpr TapMask itu_5_23 = detail::delayListConstant("5,23");
 
 /// @brief ITU-T V.22 and V.22bis, `1 + x^-14 + x^-17`. Period 131071, `FF FF 80 01 C0 07 E0 1C` from an all-ones seed.
-inline constexpr TapMask itu_14_17 = tapsFromDelayList("14,17");
+inline constexpr TapMask itu_14_17 = detail::delayListConstant("14,17");
 
 /// @brief IEEE Std 802.3 10GBASE-R 64B/66B, `1 + x^39 + x^58`, self-synchronizing and the widest named entry. The
 /// standard publishes no sequence to check a seed against; a 64B/66B link agrees on the polynomial alone.
-inline constexpr TapMask ieee8023_64b66b = tapsFromDelayList("39,58");
+inline constexpr TapMask ieee8023_64b66b = detail::delayListConstant("39,58");
 
 } // namespace standard
 
@@ -332,17 +378,17 @@ struct ScramblerProfile {
 
 /// @brief The named profiles, in the order `profileByName` lists them when it does not find one.
 inline constexpr std::array<ScramblerProfile, 5> kProfiles{{
-    {"ccsds131", ProfileFamily::Additive, standard::ccsds131, seedFromBitString("11111111", 8U), 8U, BitOrder::MsbFirst, ""},                 //
-    {"ccsds131_17", ProfileFamily::Additive, standard::ccsds131_17, seedFromBitString("00011100011100011", 17U), 8U, BitOrder::MsbFirst, ""}, //
-    {"pn9", ProfileFamily::Additive, standard::pn9, seedFromBitString("111111111", 9U), 8U, BitOrder::LsbFirst, ""},                          //
-    {"si4463", ProfileFamily::Additive, standard::si4463, seedFromBitString("111100001", 9U), 8U, BitOrder::LsbFirst, ""},                    //
-    {"g3ruh", ProfileFamily::Multiplicative, standard::g3ruh, 0ULL, 8U, BitOrder::MsbFirst, ""}                                               //
+    {"ccsds131", ProfileFamily::Additive, standard::ccsds131, detail::seedConstant("11111111", 8U), 8U, BitOrder::MsbFirst, ""},                 //
+    {"ccsds131_17", ProfileFamily::Additive, standard::ccsds131_17, detail::seedConstant("00011100011100011", 17U), 8U, BitOrder::MsbFirst, ""}, //
+    {"pn9", ProfileFamily::Additive, standard::pn9, detail::seedConstant("111111111", 9U), 8U, BitOrder::LsbFirst, ""},                          //
+    {"si4463", ProfileFamily::Additive, standard::si4463, detail::seedConstant("111100001", 9U), 8U, BitOrder::LsbFirst, ""},                    //
+    {"g3ruh", ProfileFamily::Multiplicative, standard::g3ruh, 0ULL, 8U, BitOrder::MsbFirst, ""}                                                  //
 }};
 
-/// @brief The profile named @p name, or `std::invalid_argument` listing every name there is.
+/// @brief The profile named @p name, or a `gr::Error` listing every name there is.
 ///
 /// A profile that resolves may still be unusable: `unrecorded` is what says so, and `applyProfile` is what refuses.
-[[nodiscard]] inline const ScramblerProfile& profileByName(std::string_view name) {
+[[nodiscard]] inline std::expected<ScramblerProfile, gr::Error> profileByName(std::string_view name) {
     for (const ScramblerProfile& entry : kProfiles) {
         if (entry.name == name) {
             return entry;
@@ -356,7 +402,7 @@ inline constexpr std::array<ScramblerProfile, 5> kProfiles{{
         }
         known += entry.name;
     }
-    throw std::invalid_argument("gr::digital::profileByName: unknown profile '" + std::string(name) + "', the names are " + known);
+    return std::unexpected(gr::Error(std::format("gr::digital::profileByName: unknown profile '{}', the names are {}", name, known)));
 }
 
 /**
@@ -421,7 +467,7 @@ inline void resetScrambler(ScramblerConfig& cfg) noexcept {
  * @brief Sets @p cfg to the stated scrambler, deriving the register width, the step width, the table and the seeded register.
  *
  * An empty tap set, a `bitsPerItem` outside `[1, 8]` and a seed carrying bits above `degree` throw
- * `std::invalid_argument` and leave @p cfg as it was, so a rejected setting cannot half-apply. An
+ * `gr::exception` and leave @p cfg as it was, so a rejected setting cannot half-apply. An
  * all-zero seed is accepted here and is a dead generator under `Additive`, producing an all-zero
  * sequence for ever; refusing it belongs to whatever declares the setting, since it is a legitimate
  * starting history for the two multiplicative modes.
@@ -435,16 +481,16 @@ inline void resetScrambler(ScramblerConfig& cfg) noexcept {
  */
 inline void configureScrambler(ScramblerConfig& cfg, TapMask taps, std::uint64_t seed, ScramblerMode mode, unsigned bitsPerItem, BitOrder order) {
     if (taps == 0ULL) {
-        throw std::invalid_argument("gr::digital::configureScrambler: the tap set must name at least one delay");
+        throw gr::exception("gr::digital::configureScrambler: the tap set must name at least one delay");
     }
     if (bitsPerItem < 1U || bitsPerItem > 8U) {
-        throw std::invalid_argument("gr::digital::configureScrambler: bitsPerItem must be in [1, 8], got " + detail::decimalText(bitsPerItem));
+        throw gr::exception(std::format("gr::digital::configureScrambler: bitsPerItem must be in [1, 8], got {}", bitsPerItem));
     }
 
     const std::uint8_t  degree  = degreeOf(taps);
     const std::uint64_t regMask = degree == 64U ? ~0ULL : ((1ULL << degree) - 1ULL);
     if ((seed & ~regMask) != 0ULL) {
-        throw std::invalid_argument("gr::digital::configureScrambler: the seed carries bits above degree " + detail::decimalText(degree) + ", got " + detail::decimalText(seed));
+        throw gr::exception(std::format("gr::digital::configureScrambler: the seed carries bits above degree {}, got {}", degree, seed));
     }
 
     // the register the pure recursion starts from; under Additive the seed is the sequence's own first bits, so the
@@ -526,15 +572,19 @@ inline void configureScrambler(ScramblerConfig& cfg, TapMask taps, std::uint64_t
 /// answer rather than an error; and a profile whose constants are not recorded throws naming the document they are in,
 /// because the alternative is a default nobody stated.
 inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerMode mode) {
-    const ScramblerProfile& entry  = profileByName(name);
+    const std::expected<ScramblerProfile, gr::Error> found = profileByName(name);
+    if (!found) {
+        throw gr::exception(found.error().message);
+    }
+    const ScramblerProfile& entry  = *found;
     const ProfileFamily     wanted = mode == ScramblerMode::Additive ? ProfileFamily::Additive : ProfileFamily::Multiplicative;
     if (entry.family != wanted) {
         const std::string_view family = entry.family == ProfileFamily::Additive ? "additive" : "multiplicative (self-synchronizing)";
         const std::string_view asked  = wanted == ProfileFamily::Additive ? "additive" : "multiplicative";
-        throw std::invalid_argument("gr::digital::applyProfile: profile '" + std::string(name) + "' is " + std::string(family) + " and cannot be used " + std::string(asked));
+        throw gr::exception(std::format("gr::digital::applyProfile: profile '{}' is {} and cannot be used {}", name, family, asked));
     }
     if (!entry.unrecorded.empty()) {
-        throw std::invalid_argument("gr::digital::applyProfile: profile '" + std::string(name) + "' cannot be applied because " + std::string(entry.unrecorded));
+        throw gr::exception(std::format("gr::digital::applyProfile: profile '{}' cannot be applied because {}", name, entry.unrecorded));
     }
 
     configureScrambler(cfg, entry.taps, entry.seed, mode, static_cast<unsigned>(entry.bitsPerItem), entry.order);
@@ -546,10 +596,10 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
  * A whitening mask is bytes and is published as bytes, so it is spelled in hexadecimal rather than as the `'0'` and
  * `'1'` characters `taps` and `seed` use. The returned bytes hold the sequence most significant bit first, so bit `i`
  * of the sequence is bit `7 - (i mod 8)` of byte `i / 8`. Anything that is not a hexadecimal digit or a space, an odd
- * number of digits, and an empty sequence throw `std::invalid_argument` quoting @p text.
+ * number of digits, and an empty sequence are each a `gr::Error` quoting @p text.
  */
-[[nodiscard]] inline std::vector<std::uint8_t> sequenceFromHex(std::string_view text) {
-    const auto reject = [text](std::string_view reason) { return std::invalid_argument("gr::digital::sequenceFromHex: " + std::string(reason) + ", got '" + std::string(text) + "'"); };
+[[nodiscard]] inline std::expected<std::vector<std::uint8_t>, gr::Error> sequenceFromHex(std::string_view text) {
+    const auto reject = [text](std::string_view reason) { return std::unexpected(gr::Error(std::format("gr::digital::sequenceFromHex: {}, got '{}'", reason, text))); };
 
     std::vector<std::uint8_t> bytes;
     unsigned                  pending = 0U;
@@ -566,7 +616,7 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
         } else if (c >= 'a' && c <= 'f') {
             value = static_cast<unsigned>(c - 'a') + 10U;
         } else {
-            throw reject("a character that is neither a hexadecimal digit nor a space");
+            return reject("a character that is neither a hexadecimal digit nor a space");
         }
 
         pending = (pending << 4U) | value;
@@ -577,10 +627,10 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
         }
     }
     if (digits != 0U) {
-        throw reject("an odd number of hexadecimal digits");
+        return reject("an odd number of hexadecimal digits");
     }
     if (bytes.empty()) {
-        throw reject("the sequence must name at least one byte");
+        return reject("the sequence must name at least one byte");
     }
     return bytes;
 }
@@ -600,19 +650,19 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
  * not counted; at one bit per item, or where `bitsPerItem` divides `S`, no item straddles.
  *
  * @p sequence must hold between 1 and 2^20 bits, most significant bit first, and `bitsPerItem` must be in `[1, 8]`.
- * Anything else throws `std::invalid_argument` and leaves @p cfg as it was.
+ * Anything else throws `gr::exception` and leaves @p cfg as it was.
  */
 inline void configureExplicit(ScramblerConfig& cfg, std::span<const std::uint8_t> sequence, std::size_t bitCount, unsigned bitsPerItem, BitOrder order, bool repeat) {
     constexpr std::size_t kMaxBits = 1UZ << 20;
 
     if (bitCount == 0UZ || bitCount > kMaxBits) {
-        throw std::invalid_argument("gr::digital::configureExplicit: the sequence must hold between 1 and 1048576 bits, got " + detail::decimalText(bitCount));
+        throw gr::exception(std::format("gr::digital::configureExplicit: the sequence must hold between 1 and 1048576 bits, got {}", bitCount));
     }
     if (bitCount > sequence.size() * 8UZ) {
-        throw std::invalid_argument("gr::digital::configureExplicit: the sequence holds " + detail::decimalText(sequence.size() * 8UZ) + " bits, fewer than the " + detail::decimalText(bitCount) + " claimed");
+        throw gr::exception(std::format("gr::digital::configureExplicit: the sequence holds {} bits, fewer than the {} claimed", sequence.size() * 8UZ, bitCount));
     }
     if (bitsPerItem < 1U || bitsPerItem > 8U) {
-        throw std::invalid_argument("gr::digital::configureExplicit: bitsPerItem must be in [1, 8], got " + detail::decimalText(bitsPerItem));
+        throw gr::exception(std::format("gr::digital::configureExplicit: bitsPerItem must be in [1, 8], got {}", bitsPerItem));
     }
 
     // one period plus the eight wrap bits an unaligned read of the last phase needs, which are the sequence's own first
@@ -675,24 +725,27 @@ inline void configureExplicit(ScramblerConfig& cfg, std::span<const std::uint8_t
  */
 inline void configureMonitor(ScramblerConfig& cfg, bool invertOutput, std::uint32_t forceAfter, std::string_view monitorDelays) {
     if (forceAfter != 0U && (forceAfter < 2U || forceAfter > 4096U)) {
-        throw std::invalid_argument("gr::digital::configureMonitor: forceAfter must be zero or in [2, 4096], got " + detail::decimalText(forceAfter));
+        throw gr::exception(std::format("gr::digital::configureMonitor: forceAfter must be zero or in [2, 4096], got {}", forceAfter));
     }
     if (forceAfter == 0U && !monitorDelays.empty()) {
-        throw std::invalid_argument("gr::digital::configureMonitor: monitorDelays describes a disabled mechanism when forceAfter is zero, got '" + std::string(monitorDelays) + "'");
+        throw gr::exception(std::format("gr::digital::configureMonitor: monitorDelays describes a disabled mechanism when forceAfter is zero, got '{}'", monitorDelays));
     }
     if (cfg.mode == ScramblerMode::Additive && (invertOutput || forceAfter != 0U)) {
-        throw std::invalid_argument("gr::digital::configureMonitor: the output inversion and the forced-transition rule belong to the multiplicative pair, which has feedback for them to act on");
+        throw gr::exception("gr::digital::configureMonitor: the output inversion and the forced-transition rule belong to the multiplicative pair, which has feedback for them to act on");
     }
 
     std::uint8_t nearer  = 0U;
     std::uint8_t further = 0U;
     if (forceAfter != 0U) {
-        const TapMask delays = tapsFromDelayList(monitorDelays);
-        if (std::popcount(delays) != 2) {
-            throw std::invalid_argument("gr::digital::configureMonitor: monitorDelays must name exactly two distinct delays, got '" + std::string(monitorDelays) + "'");
+        const std::expected<TapMask, gr::Error> delays = tapsFromDelayList(monitorDelays);
+        if (!delays) {
+            throw gr::exception(delays.error().message);
         }
-        nearer  = minDelayOf(delays);
-        further = degreeOf(delays);
+        if (std::popcount(*delays) != 2) {
+            throw gr::exception(std::format("gr::digital::configureMonitor: monitorDelays must name exactly two distinct delays, got '{}'", monitorDelays));
+        }
+        nearer  = minDelayOf(*delays);
+        further = degreeOf(*delays);
     }
 
     cfg.invertOutput = invertOutput;

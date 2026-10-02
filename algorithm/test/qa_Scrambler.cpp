@@ -9,11 +9,11 @@
 #include <print>
 #include <random>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/BitPacking.hpp>
 #include <gnuradio-4.0/algorithm/digital/Scrambler.hpp>
 
@@ -70,11 +70,11 @@ constexpr std::string_view kMultiplicative[] = {"18,23", "5,23", "14,17", "4,7",
 
 [[nodiscard]] ScramblerConfig configured(std::string_view taps, std::uint64_t seed, ScramblerMode mode, unsigned width, BitOrder order) {
     ScramblerConfig cfg{};
-    configureScrambler(cfg, tapsFromDelayList(taps), seed, mode, width, order);
+    configureScrambler(cfg, tapsFromDelayList(taps).value(), seed, mode, width, order);
     return cfg;
 }
 
-[[nodiscard]] ScramblerConfig additive(std::string_view taps, std::string_view seed, unsigned width = 8U, BitOrder order = BitOrder::MsbFirst) { return configured(taps, seedFromBitString(seed, degreeOf(tapsFromDelayList(taps))), ScramblerMode::Additive, width, order); }
+[[nodiscard]] ScramblerConfig additive(std::string_view taps, std::string_view seed, unsigned width = 8U, BitOrder order = BitOrder::MsbFirst) { return configured(taps, seedFromBitString(seed, degreeOf(tapsFromDelayList(taps).value())).value(), ScramblerMode::Additive, width, order); }
 
 [[nodiscard]] std::uint64_t maskOf(std::uint8_t degree) { return degree == 64U ? ~std::uint64_t{0} : ((std::uint64_t{1} << degree) - std::uint64_t{1}); }
 
@@ -248,7 +248,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         ScramblerConfig cfg = additive("1,3,5,8", "11111111");
         expect(eq(hexOf(sequenceItems(cfg, 8UZ)), std::string{"FF 48 0E C0 9A 0D 70 BC"})) << "the first five bytes are the value the standard publishes";
         expect(that % (cfg.form == SequenceForm::Table)) << "degree 8 takes the table form";
-        expect(eq(gr::digital::standard::ccsds131, tapsFromDelayList("1,3,5,8"))) << "the named constant carries the reading that reproduces the check value";
+        expect(eq(gr::digital::standard::ccsds131, tapsFromDelayList("1,3,5,8").value())) << "the named constant carries the reading that reproduces the check value";
 
         const std::vector<std::uint8_t> plain{0x47, 0x53, 0x4F, 0x43, 0x21, 0x21, 0x21, 0x21};
         resetScrambler(cfg);
@@ -271,7 +271,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
     "IEEE 802.11 reproduces its published sequence and repeats at 127"_test = [] {
         ScramblerConfig cfg = additive("4,7", "0000111");
         expect(eq(hexOf(sequenceItems(cfg, 8UZ)), std::string{"0E F2 C9 02 26 2E B6 0C"})) << "all 127 bits the standard publishes for the all-ones initial state";
-        expect(eq(gr::digital::standard::ieee80211, tapsFromDelayList("4,7")));
+        expect(eq(gr::digital::standard::ieee80211, tapsFromDelayList("4,7").value()));
 
         const auto  bits    = sequenceBits("4,7", "0000111", 1200UZ);
         std::size_t offside = 0UZ;
@@ -321,7 +321,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
     // Every named additive generator is maximal length, walked over one full period.
     "every named generator is maximal length"_test = [] {
         for (const Entry& entry : kAdditive) {
-            const std::uint8_t degree = degreeOf(tapsFromDelayList(entry.taps));
+            const std::uint8_t degree = degreeOf(tapsFromDelayList(entry.taps).value());
             const std::size_t  period = entry.period;
 
             expect(that % (maskOf(degree) == period)) << std::format("{}: the period must be 2^{} - 1", entry.name, degree);
@@ -400,7 +400,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         std::size_t cases    = 0UZ;
         std::size_t failures = 0UZ;
         for (const std::string_view taps : kMultiplicative) {
-            const std::uint8_t degree = degreeOf(tapsFromDelayList(taps));
+            const std::uint8_t degree = degreeOf(tapsFromDelayList(taps).value());
             for (const unsigned width : {1U, 8U}) {
                 for (const BitOrder order : kOrders) {
                     const std::size_t   items  = 8000UZ / width + 1UZ;
@@ -428,7 +428,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
     "a wrong seed costs a descrambler exactly its first degree bits"_test = [] {
         std::mt19937_64 engine{0x082EFA98EC4E6C89ULL};
         for (const std::string_view taps : kMultiplicative) {
-            const std::uint8_t degree  = degreeOf(tapsFromDelayList(taps));
+            const std::uint8_t degree  = degreeOf(tapsFromDelayList(taps).value());
             const auto         source  = randomItems(4000UZ, 1U, 0x452821E638D01377ULL);
             ScramblerConfig    tx      = configured(taps, 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
             const auto         channel = through(tx, source);
@@ -457,7 +457,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
     // The same theorem stated as a mid-stream join, which is what a receiver switched on mid-burst does.
     "a mid-stream join converges in degree bits"_test = [] {
         for (const std::string_view taps : kMultiplicative) {
-            const std::uint8_t degree  = degreeOf(tapsFromDelayList(taps));
+            const std::uint8_t degree  = degreeOf(tapsFromDelayList(taps).value());
             const auto         source  = randomItems(4000UZ, 1U, 0xBE5466CF34E90C6CULL);
             ScramblerConfig    tx      = configured(taps, std::uint64_t{0x2B7E151628AED2A6} & maskOf(degree), ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
             const auto         channel = through(tx, source);
@@ -481,7 +481,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         const auto      source = randomItems(4000UZ, 1U, 0x9216D5D98979FB1BULL);
 
         for (const std::string_view taps : kMultiplicative) {
-            const TapMask      mask   = tapsFromDelayList(taps);
+            const TapMask      mask   = tapsFromDelayList(taps).value();
             const std::uint8_t degree = degreeOf(mask);
             const std::size_t  wanted = 1UZ + static_cast<std::size_t>(tapCountOf(mask));
 
@@ -593,7 +593,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         std::size_t           failures = 0UZ;
 
         for (const std::string_view taps : {"1,3,5,8", "14,15", "18,23", "39,58", "1,2,5,7"}) {
-            const std::uint8_t degree = degreeOf(tapsFromDelayList(taps));
+            const std::uint8_t degree = degreeOf(tapsFromDelayList(taps).value());
             for (const unsigned width : {1U, 8U}) {
                 for (const ScramblerMode mode : kModes) {
                     const auto      source = randomItems(5000UZ, width, 0xDA1D8CB0DB0C0EA6ULL + cases);
@@ -656,25 +656,27 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
     // Configuration is the only thing that can fail, and it fails before a sample moves.
     "validation rejects, and leaves the configuration intact"_test = [] {
         for (const std::string_view bad : {"", "0,3", "1,65", "3,3", "1,3;5", "1,3,", ",1", "1,,3", "  "}) {
-            expect(throws<std::invalid_argument>([bad] { [[maybe_unused]] const TapMask ignored = tapsFromDelayList(bad); })) << std::format("taps '{}'", bad);
+            expect(!tapsFromDelayList(bad).has_value()) << std::format("taps '{}'", bad);
         }
-        expect(eq(tapsFromDelayList(" 8 , 5 ,3, 1 "), tapsFromDelayList("1,3,5,8"))) << "spaces and order do not change a delay set";
-        expect(eq(tapsFromDelayList("64"), TapMask{1} << 63U)) << "the widest register the kernel offers";
+        expect(eq(tapsFromDelayList(" 8 , 5 ,3, 1 ").value(), tapsFromDelayList("1,3,5,8").value())) << "spaces and order do not change a delay set";
+        expect(eq(tapsFromDelayList("64").value(), TapMask{1} << 63U)) << "the widest register the kernel offers";
 
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const std::uint64_t ignored = seedFromBitString("1111", 8U); })) << "a seed shorter than the degree";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const std::uint64_t ignored = seedFromBitString("111111111", 8U); })) << "and one longer";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const std::uint64_t ignored = seedFromBitString("1111211", 7U); })) << "and one that is not bits";
-        expect(eq(seedFromBitString("10000000", 8U), std::uint64_t{0x80})) << "the leftmost character is the most significant of the degree significant bits";
+        const auto shortSeed = seedFromBitString("1111", 8U);
+        expect(!shortSeed.has_value() && shortSeed.error().message.contains("exactly 8 bits")) << "a seed shorter than the degree";
+        expect(!seedFromBitString("111111111", 8U).has_value()) << "and one longer";
+        const auto notBits = seedFromBitString("1111211", 7U);
+        expect(!notBits.has_value() && notBits.error().message.contains("'1111211'")) << "and one that is not bits";
+        expect(eq(seedFromBitString("10000000", 8U).value(), std::uint64_t{0x80})) << "the leftmost character is the most significant of the degree significant bits";
 
         ScramblerConfig       cfg    = additive("1,3,5,8", "11111111");
         const ScramblerConfig before = cfg;
-        const TapMask         ccsds  = tapsFromDelayList("1,3,5,8");
+        constexpr TapMask     ccsds  = gr::digital::standard::ccsds131;
 
-        expect(throws<std::invalid_argument>([&cfg] { configureScrambler(cfg, 0ULL, 0ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst); })) << "an empty tap set";
+        expect(throws<gr::exception>([&cfg] { configureScrambler(cfg, 0ULL, 0ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst); })) << "an empty tap set";
         for (const unsigned bad : {0U, 9U, 16U}) {
-            expect(throws<std::invalid_argument>([&cfg, bad] { configureScrambler(cfg, ccsds, 0xFFULL, ScramblerMode::Additive, bad, BitOrder::MsbFirst); })) << std::format("bitsPerItem = {}", bad);
+            expect(throws<gr::exception>([&cfg, bad] { configureScrambler(cfg, ccsds, 0xFFULL, ScramblerMode::Additive, bad, BitOrder::MsbFirst); })) << std::format("bitsPerItem = {}", bad);
         }
-        expect(throws<std::invalid_argument>([&cfg] { configureScrambler(cfg, ccsds, 0x100ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst); })) << "a seed carrying bits above the degree";
+        expect(throws<gr::exception>([&cfg] { configureScrambler(cfg, ccsds, 0x100ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst); })) << "a seed carrying bits above the degree";
 
         expect(eq(cfg.taps, before.taps)) << "a rejected setting leaves the previous configuration standing";
         expect(eq(cfg.seed, before.seed));
@@ -683,13 +685,8 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         expect(eq(cfg.reg, before.reg));
         expect(eq(hexOf(sequenceItems(cfg, 8UZ)), std::string{"FF 48 0E C0 9A 0D 70 BC"})) << "and it still produces its sequence";
 
-        bool quoted = false;
-        try {
-            [[maybe_unused]] const TapMask ignored = tapsFromDelayList("1,65");
-        } catch (const std::invalid_argument& error) {
-            quoted = std::string(error.what()).find("'1,65'") != std::string::npos;
-        }
-        expect(quoted) << "the offending value is quoted back in the message";
+        const auto aboveRange = tapsFromDelayList("1,65");
+        expect(!aboveRange.has_value() && aboveRange.error().message.contains("'1,65'")) << "the offending value is quoted back in the message";
 
         // an all-zero seed is a dead generator, not an error: it is a legitimate history for the two
         // multiplicative modes, and refusing it belongs to whatever declares the setting
@@ -728,7 +725,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         std::size_t     disagreements = 0UZ;
 
         for (const std::string_view taps : {"1,3,5,8", "4,7", "14,15", "18,23", "5,23", "39,58", "1,2,5,7"}) {
-            const TapMask      mask   = tapsFromDelayList(taps);
+            const TapMask      mask   = tapsFromDelayList(taps).value();
             const std::uint8_t degree = degreeOf(mask);
             for (unsigned width = 1U; width <= 8U; ++width) {
                 for (const BitOrder order : kOrders) {
@@ -790,7 +787,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             {"39,58", 58U, 39U, 2U, 8U, 0UZ}};
 
         for (const Derived& row : kDerived) {
-            const TapMask   mask = tapsFromDelayList(row.taps);
+            const TapMask   mask = tapsFromDelayList(row.taps).value();
             ScramblerConfig cfg{};
             configureScrambler(cfg, mask, 0x1ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst);
 
@@ -809,13 +806,13 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         }
 
         // the named constants are the readings the table records
-        expect(eq(gr::digital::standard::ccsds131, tapsFromDelayList("1,3,5,8")));
-        expect(eq(gr::digital::standard::dvb, tapsFromDelayList("14,15")));
-        expect(eq(gr::digital::standard::ieee80211, tapsFromDelayList("4,7")));
-        expect(eq(gr::digital::standard::itu_18_23, tapsFromDelayList("18,23")));
-        expect(eq(gr::digital::standard::itu_5_23, tapsFromDelayList("5,23")));
-        expect(eq(gr::digital::standard::itu_14_17, tapsFromDelayList("14,17")));
-        expect(eq(gr::digital::standard::ieee8023_64b66b, tapsFromDelayList("39,58")));
+        expect(eq(gr::digital::standard::ccsds131, tapsFromDelayList("1,3,5,8").value()));
+        expect(eq(gr::digital::standard::dvb, tapsFromDelayList("14,15").value()));
+        expect(eq(gr::digital::standard::ieee80211, tapsFromDelayList("4,7").value()));
+        expect(eq(gr::digital::standard::itu_18_23, tapsFromDelayList("18,23").value()));
+        expect(eq(gr::digital::standard::itu_5_23, tapsFromDelayList("5,23").value()));
+        expect(eq(gr::digital::standard::itu_14_17, tapsFromDelayList("14,17").value()));
+        expect(eq(gr::digital::standard::ieee8023_64b66b, tapsFromDelayList("39,58").value()));
         expect(eq(static_cast<unsigned>(degreeOf(gr::digital::standard::ieee8023_64b66b)), 58U)) << "the widest named entry, and the reason degree runs to 64";
     };
 
@@ -834,7 +831,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         // a zero seed is a dead generator, which is why an additive block refuses one
         for (const Entry& entry : kAdditive) {
-            const std::uint8_t degree = degreeOf(tapsFromDelayList(entry.taps));
+            const std::uint8_t degree = degreeOf(tapsFromDelayList(entry.taps).value());
             ScramblerConfig    dead   = configured(entry.taps, 0ULL, ScramblerMode::Additive, 1U, BitOrder::MsbFirst);
             const auto         bits   = sequenceItems(dead, 64UZ);
             expect(std::ranges::all_of(bits, [](std::uint8_t bit) { return bit == 0U; })) << std::format("{} at degree {} generates nothing from an all-zero seed", entry.name, degree);
@@ -848,7 +845,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         // the multiplicative equivalent needs neither: a descrambler run over zeros produces exactly the input
         // that holds a scrambler's output at a constant, from any seed
         for (const std::string_view taps : {"18,23", "4,7"}) {
-            const std::uint8_t                 degree = degreeOf(tapsFromDelayList(taps));
+            const std::uint8_t                 degree = degreeOf(tapsFromDelayList(taps).value());
             const std::array<std::uint64_t, 2> seeds{std::uint64_t{0}, std::uint64_t{0x71574E69A458FEA3} & maskOf(degree)};
             for (const std::uint64_t seed : seeds) {
                 ScramblerConfig                 shape = configured(taps, seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
@@ -931,7 +928,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             {"g3ruh", "12,17", "11111111111111111", 131071UZ}};
 
         for (const Row& row : kRows) {
-            const std::uint8_t degree = degreeOf(tapsFromDelayList(row.taps));
+            const std::uint8_t degree = degreeOf(tapsFromDelayList(row.taps).value());
             expect(that % (maskOf(degree) == row.period)) << std::format("{}: the period must be 2^{} - 1", row.name, degree);
 
             const auto  bits    = sequenceBits(row.taps, row.seed, row.period + 128UZ);
@@ -983,8 +980,8 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             matches = chip[i] == reference[i + 5UZ];
         }
         expect(matches) << "si4463's phase is pn9's sequence advanced five steps";
-        expect(eq(profileByName("si4463").taps, tapsFromDelayList("4,9")));
-        expect(that % profileByName("si4463").unrecorded.empty()) << "the profile's constants are recorded, so it applies";
+        expect(eq(profileByName("si4463").value().taps, tapsFromDelayList("4,9").value()));
+        expect(that % profileByName("si4463").value().unrecorded.empty()) << "the profile's constants are recorded, so it applies";
     };
 
     // Scramble then descramble is the identity, per profile and per family.
@@ -992,7 +989,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         constexpr std::size_t kItems = 100000UZ;
 
         for (const std::string_view name : {"ccsds131", "ccsds131_17", "pn9", "si4463"}) {
-            const auto& entry = profileByName(name);
+            const auto entry = profileByName(name).value();
             for (const unsigned width : {1U, 8U}) {
                 ScramblerConfig cfg{};
                 configureScrambler(cfg, entry.taps, entry.seed, ScramblerMode::Additive, width, entry.order);
@@ -1007,8 +1004,8 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         // the multiplicative profile: correct from item `degree` whatever the descrambler started from, which is the
         // self-synchronizing property g3ruh rests on
-        const auto  source = randomItems(20000UZ, 1U, 0xC2B2AE3D27D4EB4FULL);
-        const auto& g3ruh  = profileByName("g3ruh");
+        const auto source = randomItems(20000UZ, 1U, 0xC2B2AE3D27D4EB4FULL);
+        const auto g3ruh  = profileByName("g3ruh").value();
         for (const std::uint64_t seed : {std::uint64_t{0}, std::uint64_t{0x1FFFF}, std::uint64_t{0x0ACE1}}) {
             ScramblerConfig tx{};
             configureScrambler(tx, g3ruh.taps, g3ruh.seed, ScramblerMode::MultiplicativeScramble, 1U, g3ruh.order);
@@ -1064,31 +1061,32 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         expect(that % (firstDifference(whole, covered) == kPeriod)) << "and the two sources part exactly where the sequence ran out";
 
         // (d) the spelling and its refusals
-        expect(eq(hexOf(sequenceFromHex("FF E1 1D 9A")), std::string{"FF E1 1D 9A"}));
-        expect(eq(hexOf(sequenceFromHex("ffe11d9a")), std::string{"FF E1 1D 9A"})) << "either case, spaces optional";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto ignored = sequenceFromHex("FF E"); })) << "an odd number of digits";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto ignored = sequenceFromHex("FF ZZ"); })) << "a character that is not a hexadecimal digit";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto ignored = sequenceFromHex("   "); })) << "an empty sequence";
-        expect(throws<std::invalid_argument>([&packed] {
+        expect(eq(hexOf(sequenceFromHex("FF E1 1D 9A").value()), std::string{"FF E1 1D 9A"}));
+        expect(eq(hexOf(sequenceFromHex("ffe11d9a").value()), std::string{"FF E1 1D 9A"})) << "either case, spaces optional";
+        const auto oddDigits = sequenceFromHex("FF E");
+        expect(!oddDigits.has_value() && oddDigits.error().message.contains("odd number")) << "an odd number of digits";
+        expect(!sequenceFromHex("FF ZZ").has_value()) << "a character that is not a hexadecimal digit";
+        expect(!sequenceFromHex("   ").has_value()) << "an empty sequence";
+        expect(throws<gr::exception>([&packed] {
             ScramblerConfig cfg{};
             configureExplicit(cfg, packed, 0UZ, 8U, BitOrder::MsbFirst, true);
         })) << "a zero-length mask";
-        expect(throws<std::invalid_argument>([&packed] {
+        expect(throws<gr::exception>([&packed] {
             ScramblerConfig cfg{};
             configureExplicit(cfg, packed, (1UZ << 20) + 1UZ, 8U, BitOrder::MsbFirst, true);
         })) << "a mask above 2^20 bits";
-        expect(throws<std::invalid_argument>([&packed] {
+        expect(throws<gr::exception>([&packed] {
             ScramblerConfig cfg{};
             configureExplicit(cfg, packed, 9U * 1024UZ, 8U, BitOrder::MsbFirst, true);
         })) << "more bits claimed than supplied";
-        expect(throws<std::invalid_argument>([&packed] {
+        expect(throws<gr::exception>([&packed] {
             ScramblerConfig cfg{};
             configureExplicit(cfg, packed, 511UZ, 9U, BitOrder::MsbFirst, true);
         })) << "an item width outside [1, 8]";
 
         // configuring a tap set afterwards puts the mask source back, so nothing of the explicit configuration leaks
         ScramblerConfig reused = supplied;
-        configureScrambler(reused, tapsFromDelayList("4,9"), seedFromBitString("111111111", 9U), ScramblerMode::Additive, 8U, BitOrder::LsbFirst);
+        configureScrambler(reused, tapsFromDelayList("4,9").value(), seedFromBitString("111111111", 9U).value(), ScramblerMode::Additive, 8U, BitOrder::LsbFirst);
         expect(that % (reused.source == SequenceSource::Lfsr && reused.nUnscrambledItems == 0UZ)) << "a reconfiguration is whole";
     };
 
@@ -1227,18 +1225,18 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         ScramblerConfig cfg = ScramblerConfig{};
         applyProfile(cfg, "pn9", ScramblerMode::Additive);
-        expect(that % (cfg.taps == tapsFromDelayList("4,9") && cfg.seed == 511ULL && cfg.bitsPerItem == 8U && cfg.order == BitOrder::LsbFirst)) << "a profile fills the four settings the generator is built from";
+        expect(that % (cfg.taps == tapsFromDelayList("4,9").value() && cfg.seed == 511ULL && cfg.bitsPerItem == 8U && cfg.order == BitOrder::LsbFirst)) << "a profile fills the four settings the generator is built from";
         expect(that % (cfg.forceAfter == 0U && !cfg.invertOutput && cfg.sequenceRepeat)) << "and names no other setting";
 
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             ScramblerConfig c{};
             applyProfile(c, "g3ruh", ScramblerMode::Additive);
         })) << "a self-synchronizing agreement run additively is a silent wrong answer";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             ScramblerConfig c{};
             applyProfile(c, "pn9", ScramblerMode::MultiplicativeScramble);
         })) << "and an additive one run self-synchronizingly likewise";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             ScramblerConfig c{};
             applyProfile(c, "pn9", ScramblerMode::MultiplicativeDescramble);
         }));
@@ -1246,21 +1244,26 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             ScramblerConfig c{};
             applyProfile(c, "si4463", ScramblerMode::Additive);
         })) << "a profile with recorded constants applies";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto& ignored = profileByName("ccsds"); })) << "an unknown name lists the ones there are";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto& ignored = profileByName(""); })) << "and so does the empty one, which is how a caller selects nothing";
+        const auto unknown = profileByName("ccsds");
+        expect(!unknown.has_value() && unknown.error().message.contains("ccsds131, ccsds131_17, pn9, si4463, g3ruh")) << "an unknown name lists the ones there are";
+        expect(!profileByName("").has_value()) << "and so does the empty one, which is how a caller selects nothing";
+        expect(throws<gr::exception>([] {
+            ScramblerConfig c{};
+            applyProfile(c, "ccsds", ScramblerMode::Additive);
+        })) << "applying an unknown name refuses the setting";
 
         // the forced-transition group's own refusals
         ScramblerConfig pair = configured("3,20", 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
-        expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 1U, "1,2"); })) << "N below 2";
-        expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 4097U, "1,2"); })) << "N above 4096";
-        expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 0U, "1,2"); })) << "delays describing a disabled mechanism";
-        expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 32U, "1"); })) << "one delay where two are needed";
-        expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 32U, "1,2,3"); })) << "three delays where two are needed";
-        expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 32U, "1,65"); })) << "a monitored delay above 64";
+        expect(throws<gr::exception>([&pair] { configureMonitor(pair, false, 1U, "1,2"); })) << "N below 2";
+        expect(throws<gr::exception>([&pair] { configureMonitor(pair, false, 4097U, "1,2"); })) << "N above 4096";
+        expect(throws<gr::exception>([&pair] { configureMonitor(pair, false, 0U, "1,2"); })) << "delays describing a disabled mechanism";
+        expect(throws<gr::exception>([&pair] { configureMonitor(pair, false, 32U, "1"); })) << "one delay where two are needed";
+        expect(throws<gr::exception>([&pair] { configureMonitor(pair, false, 32U, "1,2,3"); })) << "three delays where two are needed";
+        expect(throws<gr::exception>([&pair] { configureMonitor(pair, false, 32U, "1,65"); })) << "a monitored delay above 64";
 
         ScramblerConfig additiveCfg = configured("4,9", 511ULL, ScramblerMode::Additive, 8U, BitOrder::LsbFirst);
-        expect(throws<std::invalid_argument>([&additiveCfg] { configureMonitor(additiveCfg, false, 32U, "1,2"); })) << "the rule belongs to the family that has feedback for it to act on";
-        expect(throws<std::invalid_argument>([&additiveCfg] { configureMonitor(additiveCfg, true, 0U, ""); })) << "and so does the inversion";
+        expect(throws<gr::exception>([&additiveCfg] { configureMonitor(additiveCfg, false, 32U, "1,2"); })) << "the rule belongs to the family that has feedback for it to act on";
+        expect(throws<gr::exception>([&additiveCfg] { configureMonitor(additiveCfg, true, 0U, ""); })) << "and so does the inversion";
 
         // with the group off, the multiplicative pair is bit for bit what it was before the rule existed
         const auto      source = randomItems(8192UZ, 8U, 0xA54FF53A5F1D36F1ULL);
