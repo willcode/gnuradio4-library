@@ -1,27 +1,23 @@
 #ifndef GNURADIO_SVD_HPP
 #define GNURADIO_SVD_HPP
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/algorithm/math/TensorMath.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <expected>
+#include <format>
 #include <limits>
 #include <numeric>
 #include <ranges>
+#include <source_location>
 
 namespace gr::math {
 
 namespace svd {
-enum class Status : std::uint8_t {
-    Success,
-    EarlyReturn,   /// truncated to k singular values
-    MaxIterations, /// did not converge within iteration limit
-    InvalidInput,
-    NumericalError
-};
-
 enum class Algorithm : std::uint8_t {
     Jacobi,       /// one-sided Jacobi iteration (robust, parallelisable, best for tall matrices)
     GolubReinsch, /// Householder bidiagonalisation + implicit QR (faster for large matrices)
@@ -35,6 +31,14 @@ struct Config {
     std::size_t k             = 0;               /// 0 = all singular values, >0 = first k only
     Algorithm   algorithm     = Algorithm::Auto; /// defaults to numerically safe and then efficient choice
     bool        fullMatrices  = false;           /// false = thin SVD, true = full U and V
+};
+
+/// The factors of A = U * diag(S) * V^H: U is m x k, S holds k real non-negative values in descending order, V is n x k.
+template<typename T>
+struct Decomposition {
+    Tensor<T>                                          U;
+    Tensor<gr::meta::fundamental_base_value_type_t<T>> S;
+    Tensor<T>                                          V;
 };
 } // namespace svd
 
@@ -137,7 +141,7 @@ void rotateColumns(Tensor<T>& M, std::size_t i, std::size_t j, BaseValueType c, 
 // one-sided Jacobi SVD: works best when m >= n (tall matrices)
 // A is modified in-place to become U, V and singularValues are outputs
 template<typename T, typename BaseValueType = gr::meta::fundamental_base_value_type_t<T>>
-svd::Status svdJacobi(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singularValues, std::size_t maxIter, BaseValueType tol, bool computeV) {
+std::expected<void, gr::Error> svdJacobi(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singularValues, std::size_t maxIter, BaseValueType tol, bool computeV, std::source_location loc) {
     const std::size_t m = A.extent(0);
     const std::size_t n = A.extent(1);
 
@@ -146,7 +150,7 @@ svd::Status svdJacobi(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singula
             V->resize({n, 0});
         }
         singularValues.resize({0});
-        return svd::Status::Success;
+        return {};
     }
 
     // initialise V as identity if needed
@@ -220,7 +224,10 @@ svd::Status svdJacobi(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singula
         }
     }
 
-    return converged ? svd::Status::Success : svd::Status::MaxIterations;
+    if (!converged) {
+        return std::unexpected(gr::Error(std::format("gesvd: Jacobi iteration did not converge within {} sweeps", maxIter), loc));
+    }
+    return {};
 }
 
 // ============================================================================
@@ -652,7 +659,7 @@ void accumulateV(const Tensor<T>& A, const std::vector<BaseValueType>& tauV, Ten
 }
 
 template<typename T, typename BaseValueType = gr::meta::fundamental_base_value_type_t<T>>
-svd::Status svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singularValues, std::size_t maxIter, BaseValueType tol, bool computeV) {
+std::expected<void, gr::Error> svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singularValues, std::size_t maxIter, BaseValueType tol, bool computeV, std::source_location loc) {
     const std::size_t m      = A.extent(0);
     const std::size_t n      = A.extent(1);
     const std::size_t minDim = std::min(m, n);
@@ -662,7 +669,7 @@ svd::Status svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& s
         if (computeV && V) {
             V->resize({n, 0});
         }
-        return svd::Status::Success;
+        return {};
     }
 
     // step 1: bidiagonalise A
@@ -761,7 +768,10 @@ svd::Status svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& s
         *V = std::move(Vmat);
     }
 
-    return (iter < maxIter) ? svd::Status::Success : svd::Status::MaxIterations;
+    if (iter >= maxIter) {
+        return std::unexpected(gr::Error(std::format("gesvd: Golub-Reinsch iteration did not converge within {} iterations", maxIter), loc));
+    }
+    return {};
 }
 
 template<typename BaseValueType, typename T>
@@ -818,32 +828,30 @@ void sortSingularValues(Tensor<BaseValueType>& S, Tensor<T>* U, Tensor<T>* V) {
  * set config.fullMatrices = true for full SVD
  *
  * @param policy execution policy (cpu_policy, cpu_parallel_policy)
- * @param U output left singular vectors [m × k] where k = min(m,n) or m if fullMatrices
- * @param S output singular values [k], always real and non-negative, descending order
- * @param V output right singular vectors [n × k] where k = min(m,n) or n if fullMatrices
  * @param A input matrix [m × n]
- * @param config SVD configuration
- * @return status indicating success or type of failure
+ * @param config SVD configuration; config.k > 0 keeps the first k singular values and vectors
+ * @return the factors U [m × k], S [k] and V [n × k] with k = min(m,n), or an error when A is not
+ *         rank 2 or the iteration does not converge
  */
-template<ExecutionPolicy Policy, TensorLike TensorU, TensorLike TensorS, TensorLike TensorV, TensorLike TensorA>
-requires std::same_as<typename TensorU::value_type, typename TensorA::value_type> && std::same_as<typename TensorV::value_type, typename TensorA::value_type> && std::same_as<typename TensorS::value_type, gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>
-svd::Status gesvd(Policy&& /*policy*/, TensorU& U, TensorS& S, TensorV& V, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>& config = {}) {
-    using T             = typename TensorA::value_type;
+template<ExecutionPolicy Policy, TensorLike TensorA, typename T = typename TensorA::value_type>
+[[nodiscard]] std::expected<svd::Decomposition<T>, gr::Error> gesvd(Policy&& /*policy*/, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}, std::source_location loc = std::source_location::current()) {
     using BaseValueType = gr::meta::fundamental_base_value_type_t<T>;
 
     if (A.rank() != 2) {
-        return svd::Status::InvalidInput;
+        return std::unexpected(gr::Error(std::format("gesvd: A must be a rank-2 tensor, got rank {}", A.rank()), loc));
     }
 
     const std::size_t m      = A.extent(0);
     const std::size_t n      = A.extent(1);
     const std::size_t minDim = std::min(m, n);
 
+    svd::Decomposition<T> result;
+    auto& [U, S, V] = result;
     if (m == 0 || n == 0) {
         U.resize({m, 0});
         S.resize({0});
         V.resize({n, 0});
-        return svd::Status::Success;
+        return result;
     }
 
     std::size_t actualK = (config.k > 0 && config.k <= minDim) ? config.k : minDim;
@@ -885,26 +893,29 @@ svd::Status gesvd(Policy&& /*policy*/, TensorU& U, TensorS& S, TensorV& V, const
     }
 
     // perform SVD
-    svd::Status           status;
-    Tensor<T>             Vtmp;
-    Tensor<BaseValueType> Stmp;
+    std::expected<void, gr::Error> status;
+    Tensor<T>                      Vtmp;
+    Tensor<BaseValueType>          Stmp;
 
     if (transposed) {
         if (algo == svd::Algorithm::Jacobi) {
-            status = detail::svdJacobi(Awork, &Vtmp, Stmp, maxIter, tol, true);
+            status = detail::svdJacobi(Awork, &Vtmp, Stmp, maxIter, tol, true, loc);
         } else {
-            status = detail::svdGolubReinsch(Awork, &Vtmp, Stmp, maxIter, tol, true);
+            status = detail::svdGolubReinsch(Awork, &Vtmp, Stmp, maxIter, tol, true, loc);
         }
         V = std::move(Awork);
         U = std::move(Vtmp);
         S = std::move(Stmp);
     } else {
         if (algo == svd::Algorithm::Jacobi) {
-            status = detail::svdJacobi(Awork, &V, S, maxIter, tol, true);
+            status = detail::svdJacobi(Awork, &V, S, maxIter, tol, true, loc);
         } else {
-            status = detail::svdGolubReinsch(Awork, &V, S, maxIter, tol, true);
+            status = detail::svdGolubReinsch(Awork, &V, S, maxIter, tol, true, loc);
         }
         U = std::move(Awork);
+    }
+    if (!status) {
+        return std::unexpected(status.error());
     }
 
     // ensure correct dimensions for thin SVD
@@ -967,13 +978,9 @@ svd::Status gesvd(Policy&& /*policy*/, TensorU& U, TensorS& S, TensorV& V, const
         U = std::move(U_final);
         S = std::move(S_final);
         V = std::move(V_final);
-
-        if (status == svd::Status::Success) {
-            status = svd::Status::EarlyReturn;
-        }
     }
 
-    return status;
+    return result;
 }
 
 /**
@@ -982,17 +989,13 @@ svd::Status gesvd(Policy&& /*policy*/, TensorU& U, TensorS& S, TensorV& V, const
  * computes the thin SVD by default (U is m×min(m,n), V is n×min(m,n))
  * set config.fullMatrices = true for full SVD
  *
- * @param U output left singular vectors [m × k] where k = min(m,n) or m if fullMatrices
- * @param S output singular values [k], always real and non-negative, descending order
- * @param V output right singular vectors [n × k] where k = min(m,n) or n if fullMatrices
  * @param A input matrix [m × n]
  * @param config SVD configuration
- * @return status indicating success or type of failure
+ * @return the factors U, S and V, or an error when A is not rank 2 or the iteration does not converge
  */
-template<TensorLike TensorU, TensorLike TensorS, TensorLike TensorV, TensorLike TensorA>
-requires std::same_as<typename TensorU::value_type, typename TensorA::value_type> && std::same_as<typename TensorV::value_type, typename TensorA::value_type> && std::same_as<typename TensorS::value_type, gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>
-svd::Status gesvd(TensorU& U, TensorS& S, TensorV& V, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>& config = {}) {
-    return gesvd(cpu_policy{}, U, S, V, A, config);
+template<TensorLike TensorA, typename T = typename TensorA::value_type>
+[[nodiscard]] std::expected<svd::Decomposition<T>, gr::Error> gesvd(const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}, std::source_location loc = std::source_location::current()) {
+    return gesvd(cpu_policy{}, A, config, loc);
 }
 
 /**
@@ -1002,28 +1005,27 @@ svd::Status gesvd(TensorU& U, TensorS& S, TensorV& V, const TensorA& A, const sv
  * more efficient when only singular values are needed
  *
  * @param policy execution policy
- * @param S output singular values [min(m,n)], real and non-negative, descending order
  * @param A input matrix [m × n]
  * @param config SVD configuration
- * @return status indicating success or type of failure
+ * @return the singular values [min(m,n)], real and non-negative, descending order, or an error when A
+ *         is not rank 2 or the iteration does not converge
  */
-template<ExecutionPolicy Policy, TensorLike TensorS, TensorLike TensorA>
-requires std::same_as<typename TensorS::value_type, gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>
-svd::Status gesvd(Policy&& /*policy*/, TensorS& S, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>& config = {}) {
-    using T             = typename TensorA::value_type;
+template<ExecutionPolicy Policy, TensorLike TensorA, typename T = typename TensorA::value_type>
+[[nodiscard]] std::expected<Tensor<gr::meta::fundamental_base_value_type_t<T>>, gr::Error> singularValues(Policy&& /*policy*/, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}, std::source_location loc = std::source_location::current()) {
     using BaseValueType = gr::meta::fundamental_base_value_type_t<T>;
 
     if (A.rank() != 2) {
-        return svd::Status::InvalidInput;
+        return std::unexpected(gr::Error(std::format("singularValues: A must be a rank-2 tensor, got rank {}", A.rank()), loc));
     }
 
     const std::size_t m      = A.extent(0);
     const std::size_t n      = A.extent(1);
     const std::size_t minDim = std::min(m, n);
 
+    Tensor<BaseValueType> S;
     if (m == 0 || n == 0) {
         S.resize({0});
-        return svd::Status::Success;
+        return S;
     }
 
     std::size_t actualK = (config.k > 0 && config.k <= minDim) ? config.k : minDim;
@@ -1054,12 +1056,15 @@ svd::Status gesvd(Policy&& /*policy*/, TensorS& S, const TensorA& A, const svd::
     bool      transposed = (m < n);
     Tensor<T> Awork      = transposed ? *conjTranspose(A) : Tensor<T>(A); // A is rank 2, checked above
 
-    svd::Status status;
-    Tensor<T>*  noV = nullptr; // explicit type for template deduction
+    std::expected<void, gr::Error> status;
+    Tensor<T>*                     noV = nullptr; // explicit type for template deduction
     if (algo == svd::Algorithm::Jacobi) {
-        status = detail::svdJacobi(Awork, noV, S, maxIter, tol, false);
+        status = detail::svdJacobi(Awork, noV, S, maxIter, tol, false, loc);
     } else {
-        status = detail::svdGolubReinsch(Awork, noV, S, maxIter, tol, false);
+        status = detail::svdGolubReinsch(Awork, noV, S, maxIter, tol, false, loc);
+    }
+    if (!status) {
+        return std::unexpected(status.error());
     }
 
     // ensure correct size
@@ -1082,13 +1087,9 @@ svd::Status gesvd(Policy&& /*policy*/, TensorS& S, const TensorA& A, const svd::
             S_final[i] = S[i];
         }
         S = std::move(S_final);
-
-        if (status == svd::Status::Success) {
-            status = svd::Status::EarlyReturn;
-        }
     }
 
-    return status;
+    return S;
 }
 
 /**
@@ -1097,15 +1098,13 @@ svd::Status gesvd(Policy&& /*policy*/, TensorS& S, const TensorA& A, const svd::
  * computes only the singular values S without U and V matrices
  * more efficient when only singular values are needed
  *
- * @param S output singular values [min(m,n)], real and non-negative, descending order
  * @param A input matrix [m × n]
  * @param config SVD configuration
- * @return status indicating success or type of failure
+ * @return the singular values, or an error when A is not rank 2 or the iteration does not converge
  */
-template<TensorLike TensorS, TensorLike TensorA>
-requires std::same_as<typename TensorS::value_type, gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>
-svd::Status gesvd(TensorS& S, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>& config = {}) {
-    return gesvd(cpu_policy{}, S, A, config);
+template<TensorLike TensorA, typename T = typename TensorA::value_type>
+[[nodiscard]] std::expected<Tensor<gr::meta::fundamental_base_value_type_t<T>>, gr::Error> singularValues(const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<T>>& config = {}, std::source_location loc = std::source_location::current()) {
+    return singularValues(cpu_policy{}, A, config, loc);
 }
 
 } // namespace gr::math

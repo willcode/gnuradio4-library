@@ -115,11 +115,11 @@ template<std::floating_point T>
     }
 
     // compute pseudoinverse via SVD: A^+ = V * S^{-1} * U^T
-    Tensor<T> U, V, S;
-    auto      status = gr::math::gesvd(U, S, V, A);
-    if (status != gr::math::svd::Status::Success && status != gr::math::svd::Status::EarlyReturn) {
+    auto factors = gr::math::gesvd(A);
+    if (!factors) {
         return std::vector<T>(W, T{1} / static_cast<T>(W)); // fallback: uniform
     }
+    const auto& [U, S, V] = *factors;
 
     const std::size_t rank = std::min({U.extent(1), S.size(), V.extent(1)});
     Tensor<T>         Apinv({p + 1UZ, W});

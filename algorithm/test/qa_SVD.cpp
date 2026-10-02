@@ -117,6 +117,19 @@ template<typename T>
 }
 
 // Reconstruct A from U, S, V and check against original
+/// Moves gesvd's factors into U, S and V and returns true, or returns false with U, S and V untouched.
+template<gr::TensorLike TensorA, typename T = typename TensorA::value_type, typename RealT = gr::meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] bool decompose(gr::Tensor<T>& U, gr::Tensor<RealT>& S, gr::Tensor<T>& V, const TensorA& A, const svd::Config<RealT>& config = {}) {
+    auto result = gesvd(A, config);
+    if (!result) {
+        return false;
+    }
+    U = std::move(result->U);
+    S = std::move(result->S);
+    V = std::move(result->V);
+    return true;
+}
+
 template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>>
 [[nodiscard]] bool verifyReconstruction(const gr::Tensor<T>& A, const gr::Tensor<T>& U, const gr::Tensor<RealT>& S, const gr::Tensor<T>& V, RealT tol) {
     const std::size_t m = A.extent(0);
@@ -208,9 +221,9 @@ const boost::ut::suite<"SVD Basic Properties"> _svd_basic = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         for (const auto& s : S) {
             expect(ge(s, RealT{0})) << Config::name();
         }
@@ -228,7 +241,7 @@ const boost::ut::suite<"SVD Basic Properties"> _svd_basic = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         for (std::size_t i = 0; i + 1 < S.size(); ++i) {
             expect(ge(S[i], S[i + 1])) << Config::name();
@@ -247,7 +260,7 @@ const boost::ut::suite<"SVD Basic Properties"> _svd_basic = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(eq(U.extent(0), 4UZ)) << Config::name();
         expect(eq(U.extent(1), 4UZ)) << Config::name();
@@ -268,7 +281,7 @@ const boost::ut::suite<"SVD Basic Properties"> _svd_basic = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(eq(U.extent(0), 6UZ)) << Config::name();
         expect(eq(U.extent(1), 3UZ)) << Config::name();
@@ -289,7 +302,7 @@ const boost::ut::suite<"SVD Basic Properties"> _svd_basic = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(eq(U.extent(0), 3UZ)) << Config::name();
         expect(eq(U.extent(1), 3UZ)) << Config::name();
@@ -317,7 +330,7 @@ const boost::ut::suite<"SVD Reconstruction"> _svd_reconstruction = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(verifyReconstruction(A, U, S, V, defaultTolerance<T>())) << Config::name();
     } | AllSvdConfigs{};
@@ -334,7 +347,7 @@ const boost::ut::suite<"SVD Reconstruction"> _svd_reconstruction = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(verifyReconstruction(A, U, S, V, defaultTolerance<T>())) << Config::name();
     } | AllSvdConfigs{};
@@ -351,7 +364,7 @@ const boost::ut::suite<"SVD Reconstruction"> _svd_reconstruction = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(verifyReconstruction(A, U, S, V, defaultTolerance<T>())) << Config::name();
     } | AllSvdConfigs{};
@@ -374,7 +387,7 @@ const boost::ut::suite<"SVD Orthogonality"> _svd_orthogonality = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(verifyOrthogonal(U, defaultTolerance<T>())) << Config::name();
     } | AllSvdConfigs{};
@@ -391,7 +404,7 @@ const boost::ut::suite<"SVD Orthogonality"> _svd_orthogonality = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(verifyOrthogonal(V, defaultTolerance<T>())) << Config::name();
     } | AllSvdConfigs{};
@@ -417,7 +430,7 @@ const boost::ut::suite<"SVD Special Matrices"> _svd_special = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, I, config);
+        expect(fatal(decompose(U, S, V, I, config)));
 
         for (const auto& s : S) {
             expect(approx_equal(s, RealT{1}, defaultTolerance<T>())) << Config::name();
@@ -440,7 +453,7 @@ const boost::ut::suite<"SVD Special Matrices"> _svd_special = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, D, config);
+        expect(fatal(decompose(U, S, V, D, config)));
 
         Tensor<RealT> expected({4});
         expected = {7, 5, 3, 1};
@@ -459,7 +472,7 @@ const boost::ut::suite<"SVD Special Matrices"> _svd_special = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, Z, config);
+        expect(fatal(decompose(U, S, V, Z, config)));
 
         for (const auto& s : S) {
             expect(approx_equal(s, RealT{0}, defaultTolerance<T>())) << Config::name();
@@ -478,7 +491,7 @@ const boost::ut::suite<"SVD Special Matrices"> _svd_special = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(eq(S.size(), 1UZ)) << Config::name();
         expect(approx_equal(S[0], RealT{5}, defaultTolerance<T>())) << Config::name();
@@ -504,8 +517,8 @@ const boost::ut::suite<"SVD Algorithm Comparison"> _svd_algo_compare = [] {
             Tensor<double> U_j, V_j, S_j;
             Tensor<double> U_gr, V_gr, S_gr;
 
-            gesvd(U_j, S_j, V_j, A, jacobiConfig);
-            gesvd(U_gr, S_gr, V_gr, A, grConfig);
+            expect(fatal(decompose(U_j, S_j, V_j, A, jacobiConfig)));
+            expect(fatal(decompose(U_gr, S_gr, V_gr, A, grConfig)));
 
             // verify singular values match
             expect(tensors_approximately_equal(S_j, S_gr, 1e-9));
@@ -528,8 +541,8 @@ const boost::ut::suite<"SVD Algorithm Comparison"> _svd_algo_compare = [] {
             Tensor<double> U_j, V_j, S_j;
             Tensor<double> U_gr, V_gr, S_gr;
 
-            gesvd(U_j, S_j, V_j, A, jacobiConfig);
-            gesvd(U_gr, S_gr, V_gr, A, grConfig);
+            expect(fatal(decompose(U_j, S_j, V_j, A, jacobiConfig)));
+            expect(fatal(decompose(U_gr, S_gr, V_gr, A, grConfig)));
 
             expect(tensors_approximately_equal(S_j, S_gr, 1e-9));
         };
@@ -547,8 +560,8 @@ const boost::ut::suite<"SVD Algorithm Comparison"> _svd_algo_compare = [] {
             Tensor<double> U_j, V_j, S_j;
             Tensor<double> U_gr, V_gr, S_gr;
 
-            gesvd(U_j, S_j, V_j, A, jacobiConfig);
-            gesvd(U_gr, S_gr, V_gr, A, grConfig);
+            expect(fatal(decompose(U_j, S_j, V_j, A, jacobiConfig)));
+            expect(fatal(decompose(U_gr, S_gr, V_gr, A, grConfig)));
 
             expect(tensors_approximately_equal(S_j, S_gr, 1e-9));
         };
@@ -566,8 +579,8 @@ const boost::ut::suite<"SVD Algorithm Comparison"> _svd_algo_compare = [] {
             Tensor<double> U_j, V_j, S_j;
             Tensor<double> U_gr, V_gr, S_gr;
 
-            gesvd(U_j, S_j, V_j, A, jacobiConfig);
-            gesvd(U_gr, S_gr, V_gr, A, grConfig);
+            expect(fatal(decompose(U_j, S_j, V_j, A, jacobiConfig)));
+            expect(fatal(decompose(U_gr, S_gr, V_gr, A, grConfig)));
 
             expect(tensors_approximately_equal(S_j, S_gr, 1e-9));
         };
@@ -586,8 +599,8 @@ const boost::ut::suite<"SVD Algorithm Comparison"> _svd_algo_compare = [] {
             Tensor<double> U_j, V_j, S_j;
             Tensor<double> U_gr, V_gr, S_gr;
 
-            gesvd(U_j, S_j, V_j, A, jacobiConfig);
-            gesvd(U_gr, S_gr, V_gr, A, grConfig);
+            expect(fatal(decompose(U_j, S_j, V_j, A, jacobiConfig)));
+            expect(fatal(decompose(U_gr, S_gr, V_gr, A, grConfig)));
 
             expect(tensors_approximately_equal(S_j, S_gr, 1e-6));
         };
@@ -609,8 +622,8 @@ const boost::ut::suite<"SVD Algorithm Comparison"> _svd_algo_compare = [] {
             Tensor<double> U_j, V_j, S_j;
             Tensor<double> U_gr, V_gr, S_gr;
 
-            gesvd(U_j, S_j, V_j, H, jacobiConfig);
-            gesvd(U_gr, S_gr, V_gr, H, grConfig);
+            expect(fatal(decompose(U_j, S_j, V_j, H, jacobiConfig)));
+            expect(fatal(decompose(U_gr, S_gr, V_gr, H, grConfig)));
 
             expect(tensors_approximately_equal(S_j, S_gr, 1e-9));
         };
@@ -633,9 +646,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         expect(eq(U.size(), 0UZ)) << Config::name();
         expect(eq(S.size(), 0UZ)) << Config::name();
         expect(eq(V.size(), 0UZ)) << Config::name();
@@ -653,7 +666,7 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(eq(U.extent(0), 1UZ)) << Config::name();
         expect(eq(S.size(), 1UZ)) << Config::name();
@@ -675,7 +688,7 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         expect(eq(U.extent(0), 5UZ)) << Config::name();
         expect(eq(S.size(), 1UZ)) << Config::name();
@@ -697,9 +710,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         expect(eq(U.extent(0), 100UZ)) << Config::name();
         expect(eq(U.extent(1), 2UZ)) << Config::name();
         expect(eq(S.size(), 2UZ)) << Config::name();
@@ -720,9 +733,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         expect(eq(U.extent(0), 2UZ)) << Config::name();
         expect(eq(U.extent(1), 2UZ)) << Config::name();
         expect(eq(S.size(), 2UZ)) << Config::name();
@@ -744,7 +757,7 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        gesvd(U, S, V, A, config);
+        expect(fatal(decompose(U, S, V, A, config)));
 
         // Only one non-zero singular value
         expect(gt(S[0], RealT{1})) << Config::name();
@@ -769,9 +782,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, D, config);
+        auto          status = decompose(U, S, V, D, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         // Check reconstruction even with clustered values
         expect(verifyReconstruction(D, U, S, V, defaultTolerance<T>())) << Config::name();
     } | RealSvdConfigs{};
@@ -788,9 +801,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         expect(verifyReconstruction(A, U, S, V, defaultTolerance<T>())) << Config::name();
     } | RealSvdConfigs{};
 
@@ -806,9 +819,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         expect(verifyReconstruction(A, U, S, V, defaultTolerance<T>())) << Config::name();
     } | RealSvdConfigs{};
 
@@ -830,9 +843,9 @@ const boost::ut::suite<"SVD Edge Cases"> _svd_edge_cases = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, V_mat, config);
+        auto          status = decompose(U, S, V, V_mat, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         // Vandermonde matrices are ill-conditioned, need looser tolerance
         auto tol = std::is_same_v<RealT, float> ? static_cast<RealT>(1e-3f) : static_cast<RealT>(1e-8);
         expect(verifyReconstruction(V_mat, U, S, V, tol)) << Config::name();
@@ -861,9 +874,9 @@ const boost::ut::suite<"SVD Numerical Stability"> _svd_stability = [] {
 
             Tensor<T>     U, V;
             Tensor<RealT> S;
-            auto          status = gesvd(U, S, V, H, config);
+            auto          status = decompose(U, S, V, H, config);
 
-            expect(status == svd::Status::Success) << Config::name();
+            expect(status) << Config::name();
             // Hilbert matrices are highly ill-conditioned (cond ~10^5 for 5x5), need looser tolerance
             auto tol = std::is_same_v<RealT, float> ? static_cast<RealT>(1e-2f) : static_cast<RealT>(1e-8);
             expect(verifyReconstruction(H, U, S, V, tol)) << Config::name();
@@ -886,7 +899,7 @@ const boost::ut::suite<"SVD Numerical Stability"> _svd_stability = [] {
 
             Tensor<T>     U, V;
             Tensor<RealT> S;
-            gesvd(U, S, V, A, config);
+            expect(fatal(decompose(U, S, V, A, config)));
 
             expect(approx_equal(S[0], RealT{1e6}, RealT{1})) << Config::name();
             expect(approx_equal(S[1], RealT{1}, static_cast<RealT>(1e-6f))) << Config::name();
@@ -907,9 +920,9 @@ const boost::ut::suite<"SVD Numerical Stability"> _svd_stability = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         // Smallest singular value should be very small
         expect(lt(S[2], static_cast<RealT>(1e-4f))) << Config::name();
     } | RealSvdConfigs{};
@@ -926,9 +939,9 @@ const boost::ut::suite<"SVD Numerical Stability"> _svd_stability = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success) << Config::name();
+        expect(status) << Config::name();
         // All singular values must be non-negative
         for (const auto& s : S) {
             expect(ge(s, RealT{0})) << Config::name();
@@ -955,9 +968,9 @@ const boost::ut::suite<"SVD Large Matrices"> _svd_large = [] {
 
             Tensor<T>     U, V;
             Tensor<RealT> S;
-            auto          status = gesvd(U, S, V, A, config);
+            auto          status = decompose(U, S, V, A, config);
 
-            expect(status == svd::Status::Success) << Config::name();
+            expect(status) << Config::name();
             expect(eq(S.size(), 50UZ)) << Config::name();
 
             for (std::size_t i = 0; i + 1 < S.size(); ++i) {
@@ -979,9 +992,9 @@ const boost::ut::suite<"SVD Large Matrices"> _svd_large = [] {
 
         Tensor<T>     U, V;
         Tensor<RealT> S;
-        auto          status = gesvd(U, S, V, A, config);
+        auto          status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success);
+        expect(status);
         expect(eq(S.size(), 100UZ));
     };
 
@@ -998,9 +1011,9 @@ const boost::ut::suite<"SVD Large Matrices"> _svd_large = [] {
 
             Tensor<T>     U, V;
             Tensor<RealT> S;
-            auto          status = gesvd(U, S, V, A, config);
+            auto          status = decompose(U, S, V, A, config);
 
-            expect(status == svd::Status::Success) << Config::name();
+            expect(status) << Config::name();
             expect(eq(U.extent(0), 30UZ)) << Config::name();
             expect(eq(U.extent(1), 30UZ)) << Config::name();
             expect(eq(S.size(), 30UZ)) << Config::name();
@@ -1023,9 +1036,9 @@ const boost::ut::suite<"SVD Configuration"> _svd_config = [] {
         config.k = 3;
 
         Tensor<double> U, V, S;
-        auto           status = gesvd(U, S, V, A, config);
+        auto           status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::EarlyReturn);
+        expect(status);
         expect(eq(S.size(), 3UZ));
         expect(eq(U.extent(1), 3UZ));
         expect(eq(V.extent(1), 3UZ));
@@ -1043,9 +1056,9 @@ const boost::ut::suite<"SVD Configuration"> _svd_config = [] {
         config.tolerance = 1e-14;
 
         Tensor<double> U, V, S;
-        auto           status = gesvd(U, S, V, A, config);
+        auto           status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success);
+        expect(status);
     };
 
     "custom max iterations"_test = [] {
@@ -1056,26 +1069,56 @@ const boost::ut::suite<"SVD Configuration"> _svd_config = [] {
         config.maxIterations = 1000;
 
         Tensor<double> U, V, S;
-        auto           status = gesvd(U, S, V, A, config);
+        auto           status = decompose(U, S, V, A, config);
 
-        expect(status == svd::Status::Success);
+        expect(status);
     };
 
     "singular values only (no U, V)"_test = [] {
         Tensor<double> A({5, 5});
         randomize(A, -10.0, 10.0);
 
-        Tensor<double> S;
-        auto           status = gesvd(S, A);
-
-        expect(status == svd::Status::Success);
+        const auto values = singularValues(A);
+        expect(fatal(values.has_value()));
+        const Tensor<double>& S = *values;
         expect(eq(S.size(), 5UZ));
 
         // Compare with full SVD
         Tensor<double> U, V, S_full;
-        gesvd(U, S_full, V, A);
+        expect(fatal(decompose(U, S_full, V, A)));
 
         expect(tensors_approximately_equal(S, S_full, 1e-9));
+    };
+};
+
+const boost::ut::suite<"SVD refusals"> _svd_refusals = [] {
+    using namespace boost::ut;
+    using gr::Tensor;
+
+    "a tensor that is not rank 2 is refused"_test = [] {
+        const Tensor<double> v({4});
+        const auto           factors = gesvd(v);
+        expect(fatal(!factors.has_value()));
+        expect(factors.error().message.contains("rank-2")) << factors.error().message;
+        const auto values = singularValues(v);
+        expect(fatal(!values.has_value()));
+        expect(values.error().message.contains("rank-2")) << values.error().message;
+    };
+
+    "an iteration that does not converge is refused"_test = [] {
+        Tensor<double> A({6, 6});
+        randomize(A, -10.0, 10.0);
+        svd::Config<double> config;
+        config.algorithm     = svd::Algorithm::Jacobi;
+        config.maxIterations = 1; // one sweep rotates every pair, so it cannot be the converged sweep
+        const auto factors   = gesvd(A, config);
+        expect(fatal(!factors.has_value()));
+        expect(factors.error().message.contains("did not converge")) << factors.error().message;
+        const auto values = singularValues(A, config);
+        expect(fatal(!values.has_value()));
+        expect(values.error().message.contains("did not converge")) << values.error().message;
+        config.maxIterations = 0; // the default limit
+        expect(gesvd(A, config).has_value()) << "the same matrix converges within the default limit";
     };
 };
 
@@ -1092,7 +1135,7 @@ const boost::ut::suite<"SVD Complex Support"> _svd_complex = [] {
 
         Tensor<Complex> U, V;
         Tensor<double>  S;
-        gesvd(U, S, V, A);
+        expect(fatal(decompose(U, S, V, A)));
 
         expect(verifyReconstruction(A, U, S, V, 1e-9));
     };
@@ -1103,7 +1146,7 @@ const boost::ut::suite<"SVD Complex Support"> _svd_complex = [] {
 
         Tensor<Complex> U, V;
         Tensor<double>  S;
-        gesvd(U, S, V, A);
+        expect(fatal(decompose(U, S, V, A)));
 
         expect(verifyOrthogonal(U, 1e-9));
     };
@@ -1114,7 +1157,7 @@ const boost::ut::suite<"SVD Complex Support"> _svd_complex = [] {
 
         Tensor<Complex> U, V;
         Tensor<double>  S;
-        gesvd(U, S, V, A);
+        expect(fatal(decompose(U, S, V, A)));
 
         expect(verifyOrthogonal(V, 1e-9));
     };
@@ -1125,9 +1168,9 @@ const boost::ut::suite<"SVD Complex Support"> _svd_complex = [] {
 
         Tensor<ComplexF> U, V;
         Tensor<float>    S;
-        auto             status = gesvd(U, S, V, A);
+        auto             status = decompose(U, S, V, A);
 
-        expect(status == svd::Status::Success);
+        expect(status);
         expect(eq(S.size(), 3UZ));
 
         for (const auto& s : S) {
@@ -1150,9 +1193,9 @@ const boost::ut::suite<"SVD Complex Support"> _svd_complex = [] {
 
         Tensor<Complex> U, V;
         Tensor<double>  S;
-        auto            status = gesvd(U, S, V, A);
+        auto            status = decompose(U, S, V, A);
 
-        expect(status == svd::Status::Success);
+        expect(status);
         expect(verifyReconstruction(A, U, S, V, 1e-9));
     };
 };

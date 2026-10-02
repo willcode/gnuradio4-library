@@ -992,9 +992,9 @@ const boost::ut::suite<"visual spectrum analysis"> ssaVisualisationTests = [] {
         const auto [nRows, nCols] = std::pair{H.extent(0), H.extent(1)}; // L, K = N - L + 1
 
         // SSA Step 2: SVD decomposition H = U · S · V^T
-        gr::Tensor<double> U, S, V;
-        auto               status = gr::math::gesvd(U, S, V, H);
-        expect(status == gr::math::svd::Status::Success || status == gr::math::svd::Status::EarlyReturn);
+        const auto factors = gr::math::gesvd(H);
+        expect(fatal(factors.has_value()));
+        const auto& [U, S, V] = *factors;
 
         const std::size_t nSV = std::min({nComponents, S.size(), nRows, nCols});
 

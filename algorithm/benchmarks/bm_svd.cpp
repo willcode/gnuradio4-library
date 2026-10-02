@@ -60,26 +60,23 @@ void testSVD(std::size_t m, std::size_t n) {
         randomizeMatrix(A);
 
         if constexpr (FullSVD) {
-            Tensor<T>     U, V;
-            Tensor<RealT> S;
-
             // warm-up
-            auto status = gesvd(U, S, V, A);
-            expect(status == svd::Status::Success || status == svd::Status::EarlyReturn) << bmName << fatal;
+            const auto factors = gesvd(A);
+            expect(factors.has_value()) << bmName << fatal;
+            const Tensor<RealT>& S = factors->S;
 
-            ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&] { std::ignore = gesvd(U, S, V, A); };
+            ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&] { std::ignore = gesvd(A); };
 
             // sanity check: singular values should be non-negative
             expect(S.size() > 0UZ) << bmName << fatal;
             expect(ge(S[0], RealT{0})) << bmName << fatal;
         } else {
-            Tensor<RealT> S;
-
             // warm-up
-            auto status = gesvd(S, A);
-            expect(status == svd::Status::Success || status == svd::Status::EarlyReturn) << bmName << fatal;
+            const auto values = singularValues(A);
+            expect(values.has_value()) << bmName << fatal;
+            const Tensor<RealT>& S = *values;
 
-            ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&] { std::ignore = gesvd(S, A); };
+            ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&] { std::ignore = singularValues(A); };
 
             // sanity check
             expect(S.size() > 0UZ) << bmName << fatal;

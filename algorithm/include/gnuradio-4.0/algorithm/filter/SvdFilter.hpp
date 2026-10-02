@@ -86,11 +86,11 @@ template<typename T>
     const std::size_t m = A.extent(0);
     const std::size_t n = A.extent(1);
 
-    Tensor<T>     U, V;
-    Tensor<RealT> S;
-    if (auto status = gr::math::gesvd(U, S, V, A); status != gr::math::svd::Status::Success && status != gr::math::svd::Status::EarlyReturn) {
+    auto factors = gr::math::gesvd(A);
+    if (!factors) {
         return std::unexpected(gr::Error("SVD computation failed", location));
     }
+    const auto& [U, S, V] = *factors;
 
     const std::size_t k = std::min(detail::computeEffectiveRank(std::span<const RealT>(S.data(), S.size()), config), std::min(m, n));
 
