@@ -448,7 +448,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             x = {1.0f, 2.0f, 3.0f, 4.0f};
             y.fill(0.0f);
 
-            expect(nothrow([&] { gemv(y, A, x); })) << "y = A * x";
+            expect(gemv(y, A, x).has_value()) << "y = A * x";
 
             expect(approx(y[0], 30.0f, 1e-6f));
             expect(approx(y[1], 70.0f, 1e-6f));
@@ -464,7 +464,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             x = {1.0, 1.0, 1.0};
             y = {10.0, 20.0};
 
-            expect(nothrow([&] { gemv(y, A, x, 0.5, 2.0); })) << "y = 0.5 * A * x + 2.0 * y";
+            expect(gemv(y, A, x, 0.5, 2.0).has_value()) << "y = 0.5 * A * x + 2.0 * y";
 
             // expected: 0.5 * [6, 15] + 2 * [10, 20] = [3, 7.5] + [20, 40] = [23, 47.5]
             expect(approx(y[0], 23.0, 1e-6));
@@ -482,7 +482,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             randomize(x);
             y.fill(0.0f);
 
-            expect(nothrow([&] { gemv<Trans>(y, A, x); })) << "y = A^T * x";
+            expect(gemv<Trans>(y, A, x).has_value()) << "y = A^T * x";
 
             // manual verification
             Tensor<float> y_expected({4});
@@ -506,7 +506,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
 
             y.fill(0.0f);
 
-            expect(nothrow([&] { gemv(y, A, x); })) << "y = A * x";
+            expect(gemv(y, A, x).has_value()) << "y = A * x";
 
             // Expected: sum(1:6) = 21 for each row
             expect(std::all_of(y.begin(), y.end(), [](float val) -> bool { return approx(val, 21.0f, 1e-6f); }));
@@ -520,7 +520,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             Tensor<double> y({0});
 
             // Should handle gracefully
-            expect(nothrow([&] { gemv(y, A, x); }));
+            expect(gemv(y, A, x).has_value());
         };
 
         "single element"_test = [] {
@@ -532,7 +532,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             x[0] = 3.0f;
             y[0] = 2.0f;
 
-            gemv(y, A, x, 1.0f, 0.0f);
+            expect(fatal(gemv(y, A, x, 1.0f, 0.0f).has_value()));
             expect(approx(y[0], 15.0f, 1e-6f));
         };
 
@@ -541,7 +541,12 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             Tensor<double> x({5}); // Wrong size
             Tensor<double> y({3});
 
-            expect(throws([&] { gemv(y, A, x); }));
+            const auto refused = gemv(y, A, x);
+            expect(fatal(!refused.has_value()));
+            expect(refused.error().message.contains("incompatible dimensions")) << refused.error().message;
+            const auto notMatrix = gemv(y, x, x);
+            expect(fatal(!notMatrix.has_value()));
+            expect(notMatrix.error().message.contains("A must be 2D")) << notMatrix.error().message;
         };
 
         "large vectors"_test = [] {
@@ -553,7 +558,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             randomize(x, -1.0, 1.0);
             y.fill(0.0);
 
-            expect(nothrow([&] { gemv(y, A, x); }));
+            expect(gemv(y, A, x).has_value());
 
             // Check that result is bounded
             auto max_y = *std::max_element(y.begin(), y.end());
@@ -582,7 +587,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
 
             C.fill(0.0f);
 
-            expect(nothrow([&] { gemm(C, A, B); })) << "C = A * B";
+            expect(gemm(C, A, B).has_value()) << "C = A * B";
 
             // expected:
             // C[0,0] = 1*7 + 2*9 + 3*11 = 58
@@ -608,7 +613,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             C = {1.0, 1.0, 1.0, 1.0};
 
             // C = 2.0 * A * B + 3.0 * C
-            gemm(C, A, B, 2.0, 3.0);
+            expect(fatal(gemm(C, A, B, 2.0, 3.0).has_value()));
 
             // A * B = [19, 22; 43, 50]
             // C = 2 * [19, 22; 43, 50] + 3 * [1, 1; 1, 1]
@@ -635,13 +640,13 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
 
             // C = A * B^T (3x4) * (4x3) = (3x3)
             C.fill(0.0f);
-            gemm<NoTrans, Trans>(C, A, B);
+            expect(fatal(gemm<NoTrans, Trans>(C, A, B).has_value()));
             expect(eq(C.extent(0), 3UZ));
             expect(eq(C.extent(1), 3UZ));
 
             // D = A^T * A (4x3) * (3x4) = (4x4)
             D.fill(0.0f);
-            gemm<Trans, NoTrans>(D, A, A);
+            expect(fatal(gemm<Trans, NoTrans>(D, A, A).has_value()));
             expect(eq(D.extent(0), 4UZ));
             expect(eq(D.extent(1), 4UZ));
 
@@ -659,7 +664,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             G.fill(0.0f);
 
             // G = A^T * F^T: (4x3) * (3x5) = (4x5)
-            gemm<Trans, Trans>(G, A, F);
+            expect(fatal(gemm<Trans, Trans>(G, A, F).has_value()));
             expect(eq(G.extent(0), 4UZ));
             expect(eq(G.extent(1), 5UZ));
         };
@@ -685,7 +690,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
 
             C.fill(0.0f);
 
-            expect(nothrow([&] { gemm(C, A, B); })) << "compute: C = A * B";
+            expect(gemm(C, A, B).has_value()) << "compute: C = A * B";
             expect(approx(C[0, 0], 6.0f, 1e-4f));
             expect(gt(C[1, 2], 0.0f)); // Should be non-zero
         };
@@ -703,7 +708,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             float beta  = 2.0f;
 
             // C = alpha * A * B + beta * C
-            gemm(C, A, B, alpha, beta);
+            expect(fatal(gemm(C, A, B, alpha, beta).has_value()));
 
             // Expected: 0.5 * (1 * 3 * 2) + 2 * 3 = 0.5 * 6 + 6 = 9
             expect(approx(C[0, 0], 9.0f, 1e-6f));
@@ -722,7 +727,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             C.fill(0.0f);
 
             // C = A * B^T
-            gemm<NoTrans, Trans>(C, A, B);
+            expect(fatal(gemm<NoTrans, Trans>(C, A, B).has_value()));
 
             // Verify dimensions
             expect(eq(C.extent(0), 3UZ));
@@ -742,7 +747,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             Tensor<double> B({0, 0});
             Tensor<double> C({0, 0});
 
-            expect(nothrow([&] { gemm(C, A, B); }));
+            expect(gemm(C, A, B).has_value());
 
             // Mismatched empty
             Tensor<double> D({2, 0});
@@ -750,7 +755,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             Tensor<double> F({2, 3});
             F.fill(0.0);
 
-            expect(nothrow([&] { gemm(F, D, E); }));
+            expect(gemm(F, D, E).has_value());
             expect(std::all_of(F.begin(), F.end(), [](double x) { return x == 0.0; }));
         };
 
@@ -763,7 +768,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             B[0] = 4.0f;
             C[0] = 5.0f;
 
-            gemm(C, A, B, 2.0f, 3.0f);
+            expect(fatal(gemm(C, A, B, 2.0f, 3.0f).has_value()));
             // C = 2 * 3 * 4 + 3 * 5 = 24 + 15 = 39
             expect(approx(C[0], 39.0f, 1e-6f));
         };
@@ -773,12 +778,17 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             Tensor<double> B({5, 6}); // Cannot multiply 3x4 with 5x6
             Tensor<double> C({3, 6});
 
-            expect(throws([&] { gemm(C, A, B); }));
+            const auto refused = gemm(C, A, B);
+            expect(fatal(!refused.has_value()));
+            expect(refused.error().message.contains("incompatible matrix dimensions")) << refused.error().message;
+            const auto notMatrix = gemm(C, A, Tensor<double>({4}));
+            expect(fatal(!notMatrix.has_value()));
+            expect(notMatrix.error().message.contains("2D")) << notMatrix.error().message;
 
             // Output dimension mismatch
             Tensor<double> D({4, 2});
             Tensor<double> E({3, 3}); // Wrong output size
-            expect(throws([&] { gemm(E, A, D); }));
+            expect(!gemm(E, A, D).has_value());
         };
 
         "very small values (underflow)"_test = [] {
@@ -791,7 +801,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             B.fill(tiny);
             C.fill(0.0f);
 
-            gemm(C, A, B);
+            expect(fatal(gemm(C, A, B).has_value()));
 
             // Result should underflow to zero
             expect(std::all_of(C.begin(), C.end(), [](float x) { return x == 0.0f || std::abs(x) < std::numeric_limits<float>::min(); }));
@@ -807,7 +817,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             B.fill(large);
             C.fill(0.0f);
 
-            gemm(C, A, B);
+            expect(fatal(gemm(C, A, B).has_value()));
 
             // Result should be infinity or very large
             bool has_overflow = std::any_of(C.begin(), C.end(), [](float x) { return std::isinf(x) || std::abs(x) > std::numeric_limits<float>::max() / 100; });
@@ -824,7 +834,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             randomize(B, -0.1, 0.1);
             C.fill(0.0);
 
-            expect(nothrow([&] { gemm(C, A, B); }));
+            expect(gemm(C, A, B).has_value());
 
             // Wide and short
             Tensor<double> D({2, 100});
@@ -835,7 +845,7 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             randomize(E, -0.1, 0.1);
             F.fill(0.0);
 
-            expect(nothrow([&] { gemm(F, D, E); }));
+            expect(gemm(F, D, E).has_value());
         };
     };
 
@@ -852,20 +862,20 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             // (A * B) * C
             Tensor<double> AB({2, 4});
             AB.fill(0.0);
-            gemm(AB, A, B);
+            expect(fatal(gemm(AB, A, B).has_value()));
 
             Tensor<double> ABC1({2, 2});
             ABC1.fill(0.0);
-            gemm(ABC1, AB, C);
+            expect(fatal(gemm(ABC1, AB, C).has_value()));
 
             // A * (B * C)
             Tensor<double> BC({3, 2});
             BC.fill(0.0);
-            gemm(BC, B, C);
+            expect(fatal(gemm(BC, B, C).has_value()));
 
             Tensor<double> ABC2({2, 2});
             ABC2.fill(0.0);
-            gemm(ABC2, A, BC);
+            expect(fatal(gemm(ABC2, A, BC).has_value()));
 
             expect(tensors_approximately_equal(ABC1, ABC2, 1e-10)) << "should be approximately equal (within numerical tolerance)";
         };
@@ -883,13 +893,13 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             // A * I = A
             Tensor<float> AI({3, 3});
             AI.fill(0.0f);
-            gemm(AI, A, I);
+            expect(fatal(gemm(AI, A, I).has_value()));
             expect(tensors_approximately_equal(AI, A, 1e-6f));
 
             // I * A = A
             Tensor<float> IA({3, 3});
             IA.fill(0.0f);
-            gemm(IA, I, A);
+            expect(fatal(gemm(IA, I, A).has_value()));
             expect(tensors_approximately_equal(IA, A, 1e-6f));
         };
 
@@ -903,12 +913,12 @@ const boost::ut::suite<"Level 3: Matrix-Matrix (GEMM)"> _level4_gemm = [] {
             C.fill(42.0); // Non-zero initial value
 
             // A * 0 = 0 (with beta = 0)
-            gemm(C, A, Z, 1.0, 0.0);
+            expect(fatal(gemm(C, A, Z, 1.0, 0.0).has_value()));
             expect(std::all_of(C.begin(), C.end(), [](double x) { return x == 0.0; }));
 
             // with beta != 0
             C.fill(10.0);
-            gemm(C, A, Z, 1.0, 2.0); // C = A*Z + 2*C = 0 + 20 = 20
+            expect(fatal(gemm(C, A, Z, 1.0, 2.0).has_value())); // C = A*Z + 2*C = 0 + 20 = 20
             expect(std::all_of(C.begin(), C.end(), [](double x) -> bool { return approx(x, 20.0, 1e-6); }));
         };
     };
@@ -1060,7 +1070,7 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             C.fill(0.0f);
 
             auto start = std::chrono::high_resolution_clock::now();
-            gemm(C, A, B);
+            expect(fatal(gemm(C, A, B).has_value()));
             auto end = std::chrono::high_resolution_clock::now();
 
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -1087,8 +1097,8 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             C_serial.fill(0.0);
 
             // Use the simplified interface without policy
-            gemm(C_serial, A, B);
-            gemm(C, A, B);
+            expect(fatal(gemm(C_serial, A, B).has_value()));
+            expect(fatal(gemm(C, A, B).has_value()));
 
             // Results should be identical (within floating point tolerance)
             expect(tensors_approximately_equal(C, C_serial, 1e-10));
@@ -1130,7 +1140,7 @@ const boost::ut::suite<"Level F: Corner Cases"> _level6_corner = [] {
             A.fill(100);
             B.fill(100);
 
-            gemm(C, A, B);
+            expect(fatal(gemm(C, A, B).has_value()));
 
             // Check results are computed
             bool has_values = std::any_of(C.begin(), C.end(), [](std::int16_t x) { return x != 0; });
@@ -1770,7 +1780,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<C64> A = matrix(2, 3, aValues);
         const Tensor<C64> B = matrix(3, 2, bValues);
         Tensor<C64>       C({2UZ, 2UZ});
-        gemm(C, A, B);
+        expect(fatal(gemm(C, A, B).has_value()));
         expectProduct(C, "NoTrans, NoTrans");
     };
 
@@ -1778,7 +1788,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<C64> A  = matrix(2, 3, aValues);
         const Tensor<C64> Bt = transpose(matrix(3, 2, bValues)).value(); // stored as B^T, 2x3
         Tensor<C64>       C({2UZ, 2UZ});
-        gemm<NoTrans, Trans>(C, A, Bt);
+        expect(fatal(gemm<NoTrans, Trans>(C, A, Bt).has_value()));
         expectProduct(C, "NoTrans, Trans");
     };
 
@@ -1786,7 +1796,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<C64> A  = matrix(2, 3, aValues);
         const Tensor<C64> Bh = conjTranspose(matrix(3, 2, bValues)).value(); // stored as B^H, 2x3
         Tensor<C64>       C({2UZ, 2UZ});
-        gemm<NoTrans, ConjTrans>(C, A, Bh);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, A, Bh).has_value()));
         expectProduct(C, "NoTrans, ConjTrans");
     };
 
@@ -1794,7 +1804,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<C64> Ah = conjTranspose(matrix(2, 3, aValues)).value(); // stored as A^H, 3x2
         const Tensor<C64> B  = matrix(3, 2, bValues);
         Tensor<C64>       C({2UZ, 2UZ});
-        gemm<ConjTrans, NoTrans>(C, Ah, B);
+        expect(fatal(gemm<ConjTrans, NoTrans>(C, Ah, B).has_value()));
         expectProduct(C, "ConjTrans, NoTrans");
     };
 
@@ -1802,7 +1812,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<C64> Ah = conjTranspose(matrix(2, 3, aValues)).value();
         const Tensor<C64> Bh = conjTranspose(matrix(3, 2, bValues)).value();
         Tensor<C64>       C({2UZ, 2UZ});
-        gemm<ConjTrans, ConjTrans>(C, Ah, Bh);
+        expect(fatal(gemm<ConjTrans, ConjTrans>(C, Ah, Bh).has_value()));
         expectProduct(C, "ConjTrans, ConjTrans");
     };
 
@@ -1810,7 +1820,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         const Tensor<C64> At = transpose(matrix(2, 3, aValues)).value(); // stored as A^T, 3x2
         const Tensor<C64> Bt = transpose(matrix(3, 2, bValues)).value();
         Tensor<C64>       C({2UZ, 2UZ});
-        gemm<Trans, Trans>(C, At, Bt);
+        expect(fatal(gemm<Trans, Trans>(C, At, Bt).has_value()));
         expectProduct(C, "Trans, Trans");
     };
 
@@ -1826,7 +1836,7 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
             }
         }
         Tensor<double> C({M, N});
-        gemm<NoTrans, Trans>(C, A, Bt);
+        expect(fatal(gemm<NoTrans, Trans>(C, A, Bt).has_value()));
         bool allMatch = true;
         for (std::size_t i = 0UZ; i < M; ++i) {
             for (std::size_t j = 0UZ; j < N; ++j) {
@@ -1844,10 +1854,10 @@ const boost::ut::suite<"Level 3b: GEMM operand forms against worked values"> _le
         Bt = {7.0f, 9.0f, 11.0f, 8.0f, 10.0f, 12.0f};
         const std::array<float, 4> expected{58.0f, 64.0f, 139.0f, 154.0f};
         Tensor<float>              C({2UZ, 2UZ});
-        gemm<NoTrans, Trans>(C, A, Bt);
+        expect(fatal(gemm<NoTrans, Trans>(C, A, Bt).has_value()));
         expect(std::ranges::equal(C, expected)) << "NoTrans, Trans";
         C.fill(0.0f);
-        gemm<NoTrans, ConjTrans>(C, A, Bt);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, A, Bt).has_value()));
         expect(std::ranges::equal(C, expected)) << "NoTrans, ConjTrans";
     };
 
@@ -1942,10 +1952,10 @@ const boost::ut::suite<"Level 3c: GEMM with a transposed right operand, square a
         const Tensor<T> X = matrixOf<T>(3, 2, {T{1}, T{2}, T{3}, T{-4}, T{5}, T{6}});
         const Tensor<T> I = matrixOf<T>(2, 2, {T{1}, T{0}, T{0}, T{1}});
         Tensor<T>       C({3UZ, 2UZ});
-        gemm<NoTrans, Trans>(C, X, I);
+        expect(fatal(gemm<NoTrans, Trans>(C, X, I).has_value()));
         expect(sameEntries(C, X)) << "Trans";
         C.fill(T{7});
-        gemm<NoTrans, ConjTrans>(C, X, I);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, X, I).has_value()));
         expect(sameEntries(C, X)) << "ConjTrans";
     } | std::tuple<float, double, std::complex<float>, std::complex<double>>{};
 
@@ -1953,10 +1963,10 @@ const boost::ut::suite<"Level 3c: GEMM with a transposed right operand, square a
         const Tensor<T> X = matrixOf<T>(3, 2, {T{1, 1}, T{2, -1}, T{4, -4}, T{0, 3}, T{-2, 5}, T{1, 0}});
         const Tensor<T> I = matrixOf<T>(2, 2, {T{1}, T{0}, T{0}, T{1}});
         Tensor<T>       C({3UZ, 2UZ});
-        gemm<NoTrans, Trans>(C, X, I);
+        expect(fatal(gemm<NoTrans, Trans>(C, X, I).has_value()));
         expect(sameEntries(C, X)) << "Trans";
         C.fill(T{7});
-        gemm<NoTrans, ConjTrans>(C, X, I);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, X, I).has_value()));
         expect(sameEntries(C, X)) << "ConjTrans";
     } | std::tuple<std::complex<float>, std::complex<double>>{};
 
@@ -1969,10 +1979,10 @@ const boost::ut::suite<"Level 3c: GEMM with a transposed right operand, square a
         const Tensor<T> XT = matrixOf<T>(3, 2, {T{1, 5}, T{1, 3}, T{0, 5}, T{-3, -3}, T{3, 2}, T{2, 1}});
         const Tensor<T> XH = matrixOf<T>(3, 2, {T{1, -3}, T{1, 3}, T{0, -7}, T{-3, -3}, T{-1, -2}, T{2, 1}});
         Tensor<T>       C({3UZ, 2UZ});
-        gemm<NoTrans, Trans>(C, X, W);
+        expect(fatal(gemm<NoTrans, Trans>(C, X, W).has_value()));
         expect(sameEntries(C, XT)) << "Trans";
         expect(sameEntries(XT, productWithTransposed<false>(X, W))) << "the worked values agree with the definition";
-        gemm<NoTrans, ConjTrans>(C, X, W);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, X, W).has_value()));
         expect(sameEntries(C, XH)) << "ConjTrans";
         expect(sameEntries(XH, productWithTransposed<true>(X, W))) << "the worked values agree with the definition";
     } | std::tuple<std::complex<float>, std::complex<double>>{};
@@ -1983,10 +1993,10 @@ const boost::ut::suite<"Level 3c: GEMM with a transposed right operand, square a
         const Tensor<T> W  = matrixOf<T>(2, 2, {T{1}, T{2}, T{3}, T{-1}});
         const Tensor<T> XT = matrixOf<T>(3, 2, {T{5}, T{1}, T{6}, T{-3}, T{3}, T{2}});
         Tensor<T>       C({3UZ, 2UZ});
-        gemm<NoTrans, Trans>(C, X, W);
+        expect(fatal(gemm<NoTrans, Trans>(C, X, W).has_value()));
         expect(sameEntries(C, XT)) << "Trans";
         C.fill(T{7});
-        gemm<NoTrans, ConjTrans>(C, X, W);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, X, W).has_value()));
         expect(sameEntries(C, XT)) << "ConjTrans equals Trans for a real element type";
     } | std::tuple<float, double>{};
 
@@ -2008,9 +2018,9 @@ const boost::ut::suite<"Level 3c: GEMM with a transposed right operand, square a
             }
         }
         Tensor<T> C({3UZ, 4UZ});
-        gemm<NoTrans, Trans>(C, X, W);
+        expect(fatal(gemm<NoTrans, Trans>(C, X, W).has_value()));
         expect(sameEntries(C, productWithTransposed<false>(X, W))) << "Trans";
-        gemm<NoTrans, ConjTrans>(C, X, W);
+        expect(fatal(gemm<NoTrans, ConjTrans>(C, X, W).has_value()));
         expect(sameEntries(C, productWithTransposed<true>(X, W))) << "ConjTrans";
         expect(!sameEntries(productWithTransposed<true>(X, W), productWithTransposed<false>(X, W)) || !gr::meta::complex_like<T>) << "the two forms differ for a complex element type";
     } | std::tuple<float, double, std::complex<float>, std::complex<double>>{};
@@ -2053,16 +2063,16 @@ const boost::ut::suite<"Level 2b: GEMV over a complex element type"> _level3b_ge
 
         Tensor<T> y2({2UZ});
         y2.fill(T{7, 7});
-        gemv(y2, A, x3);
+        expect(fatal(gemv(y2, A, x3).has_value()));
         expect(y2[0] == T{2, 2} && y2[1] == T{4, 4}) << "NoTrans";
 
         Tensor<T> y3({3UZ});
         y3.fill(T{7, 7});
-        gemv<Trans>(y3, A, x2);
+        expect(fatal(gemv<Trans>(y3, A, x2).has_value()));
         expect(y3[0] == T{1, 1} && y3[1] == T{3, 1} && y3[2] == T{0, 2}) << "Trans does not conjugate";
 
         y3.fill(T{7, 7});
-        gemv<ConjTrans>(y3, A, x2);
+        expect(fatal(gemv<ConjTrans>(y3, A, x2).has_value()));
         expect(y3[0] == T{1, -1} && y3[1] == T{1, 1} && y3[2] == T{0, 4}) << "ConjTrans conjugates";
     } | std::tuple<std::complex<float>, std::complex<double>>{};
 
@@ -2073,7 +2083,7 @@ const boost::ut::suite<"Level 2b: GEMV over a complex element type"> _level3b_ge
         x = {T{1, 0}, T{0, 1}, T{1, 1}};
         Tensor<T> y({2UZ});
         y.fill(T{1, 0});
-        gemv(y, A, x, T{2, 0}, T{0, 1});
+        expect(fatal(gemv(y, A, x, T{2, 0}, T{0, 1}).has_value()));
         expect(y[0] == T{4, 5} && y[1] == T{8, 9});
     } | std::tuple<std::complex<float>, std::complex<double>>{};
 
@@ -2099,17 +2109,17 @@ const boost::ut::suite<"Level 2b: GEMV over a complex element type"> _level3b_ge
 
         Tensor<T>       yN = vectorOf(M, 1UZ);
         const Tensor<T> eN = gemvByDefinition<NoTrans>(A, vectorOf(N, 0UZ), yN, alpha, beta);
-        gemv(yN, A, vectorOf(N, 0UZ), alpha, beta);
+        expect(fatal(gemv(yN, A, vectorOf(N, 0UZ), alpha, beta).has_value()));
         expect(sameEntries(yN, eN)) << "NoTrans";
 
         Tensor<T>       yT = vectorOf(N, 2UZ);
         const Tensor<T> eT = gemvByDefinition<Trans>(A, vectorOf(M, 3UZ), yT, alpha, beta);
-        gemv<Trans>(yT, A, vectorOf(M, 3UZ), alpha, beta);
+        expect(fatal(gemv<Trans>(yT, A, vectorOf(M, 3UZ), alpha, beta).has_value()));
         expect(sameEntries(yT, eT)) << "Trans";
 
         Tensor<T>       yH = vectorOf(N, 2UZ);
         const Tensor<T> eH = gemvByDefinition<ConjTrans>(A, vectorOf(M, 3UZ), yH, alpha, beta);
-        gemv<ConjTrans>(yH, A, vectorOf(M, 3UZ), alpha, beta);
+        expect(fatal(gemv<ConjTrans>(yH, A, vectorOf(M, 3UZ), alpha, beta).has_value()));
         expect(sameEntries(yH, eH)) << "ConjTrans";
         expect(!sameEntries(eH, eT)) << "the conjugated and plain transposes differ on this operand";
     } | std::tuple<std::complex<float>, std::complex<double>>{};
@@ -2120,8 +2130,8 @@ const boost::ut::suite<"Level 2b: GEMV over a complex element type"> _level3b_ge
         x = {1.0, -1.0};
         Tensor<double> yT({3UZ});
         Tensor<double> yH({3UZ});
-        gemv<Trans>(yT, A, x);
-        gemv<ConjTrans>(yH, A, x);
+        expect(fatal(gemv<Trans>(yT, A, x).has_value()));
+        expect(fatal(gemv<ConjTrans>(yH, A, x).has_value()));
         expect(yT[0] == -3.0 && yT[1] == -3.0 && yT[2] == -3.0);
         expect(std::ranges::equal(yT, yH));
     };

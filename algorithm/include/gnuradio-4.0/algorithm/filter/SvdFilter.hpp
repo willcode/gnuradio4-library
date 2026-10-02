@@ -9,6 +9,7 @@
 #include <numeric>
 #include <source_location>
 #include <span>
+#include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/HistoryBuffer.hpp>
@@ -115,7 +116,7 @@ template<typename T>
 
     Tensor<T> result({m, n});
     result.fill(T{0});
-    gr::math::gemm(result, US, VkH);
+    std::ignore = gr::math::gemm(result, US, VkH); // m x k times k x n into m x n: the shapes agree by construction
     return result;
 }
 

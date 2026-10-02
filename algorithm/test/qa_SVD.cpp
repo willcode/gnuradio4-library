@@ -137,7 +137,7 @@ template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>
     // US = U * S_diag
     gr::Tensor<T> US({m, k});
     US.fill(T{0});
-    gemm(US, U, S_diag);
+    boost::ut::expect(boost::ut::fatal(gemm(US, U, S_diag).has_value()));
 
     // A_recon = US * V^H (use transpose for real, conjTranspose for complex)
     gr::Tensor<T> Vh;
@@ -148,7 +148,7 @@ template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>
     }
     gr::Tensor<T> A_recon({m, n});
     A_recon.fill(T{0});
-    gemm(A_recon, US, Vh);
+    boost::ut::expect(boost::ut::fatal(gemm(A_recon, US, Vh).has_value()));
 
     // Compute relative Frobenius error for debugging
     RealT normDiff{0}, normA{0};
@@ -178,7 +178,7 @@ template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>
     gr::Tensor<T> Qh = conjTranspose(Q).value();
     gr::Tensor<T> QhQ({cols, cols});
     QhQ.fill(T{0});
-    gemm(QhQ, Qh, Q);
+    boost::ut::expect(boost::ut::fatal(gemm(QhQ, Qh, Q).has_value()));
 
     for (std::size_t i = 0; i < cols; ++i) {
         for (std::size_t j = 0; j < cols; ++j) {
@@ -1278,11 +1278,11 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
             Tensor<double> UT = transpose(U).value();
             Tensor<double> UtA({3, 3});
             UtA.fill(0.0);
-            gemm(UtA, UT, A_orig);
+            expect(fatal(gemm(UtA, UT, A_orig).has_value()));
 
             Tensor<double> UtAV({3, 3});
             UtAV.fill(0.0);
-            gemm(UtAV, UtA, V);
+            expect(fatal(gemm(UtAV, UtA, V).has_value()));
 
             expect(tensors_approximately_equal(UtAV, B, 1e-9));
         };
@@ -1333,11 +1333,11 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
             Tensor<double> UT = transpose(U).value();
             Tensor<double> UtA({4, 4});
             UtA.fill(0.0);
-            gemm(UtA, UT, A_orig);
+            expect(fatal(gemm(UtA, UT, A_orig).has_value()));
 
             Tensor<double> UtAV({4, 4});
             UtAV.fill(0.0);
-            gemm(UtAV, UtA, V);
+            expect(fatal(gemm(UtAV, UtA, V).has_value()));
 
             // Verify U^T * A * V = B (bidiagonal)
             expect(tensors_approximately_equal(UtAV, B, 1e-9));
@@ -1345,11 +1345,11 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
             // Verify A = U * B * V^T (reconstruction)
             Tensor<double> UB({4, 4});
             UB.fill(0.0);
-            gemm(UB, U, B);
+            expect(fatal(gemm(UB, U, B).has_value()));
             Tensor<double> UBVt({4, 4});
             UBVt.fill(0.0);
             Tensor<double> Vt = transpose(V).value();
-            gemm(UBVt, UB, Vt);
+            expect(fatal(gemm(UBVt, UB, Vt).has_value()));
 
             expect(tensors_approximately_equal(A_orig, UBVt, 1e-9));
         };

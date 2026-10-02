@@ -14,8 +14,11 @@
 #include <concepts>
 #include <cstring>
 #include <execution>
+#include <expected>
+#include <format>
 #include <memory>
 #include <numeric>
+#include <source_location>
 #include <span>
 #include <vir/simd.h>
 
@@ -244,13 +247,13 @@ gr::Tensor<T> transposedCopy(const TensorIn& tensor) {
  */
 template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, typename ExecutionPolicy, TensorLike TensorC, TensorLike TensorA, TensorLike TensorB, typename T = typename TensorC::value_type>
 requires TensorOf<TensorC, T> && TensorOf<TensorA, T> && TensorOf<TensorB, T>
-void gemm(ExecutionPolicy&& /*policy*/, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) {
+[[nodiscard]] std::expected<void, gr::Error> gemm(ExecutionPolicy&& /*policy*/, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}, std::source_location loc = std::source_location::current()) {
     if (C.rank() != 2 || A.rank() != 2 || B.rank() != 2) {
-        throw std::runtime_error("gemm requires 2D tensors");
+        return std::unexpected(gr::Error(std::format("gemm requires 2D tensors, got ranks C {} A {} B {}", C.rank(), A.rank(), B.rank()), loc));
     }
 
     if (!C.is_contiguous() || !A.is_contiguous() || !B.is_contiguous()) {
-        throw std::runtime_error("gemm requires contiguous tensors");
+        return std::unexpected(gr::Error("gemm requires contiguous tensors", loc));
     }
 
     static_assert(TransA != TransposeOp::Dynamic && TransB != TransposeOp::Dynamic, "gemm: TransposeOp::Dynamic is not supported; pass NoTrans, Trans or ConjTrans");
@@ -289,7 +292,7 @@ void gemm(ExecutionPolicy&& /*policy*/, TensorC& C, const TensorA& A, const Tens
     const auto C_ext = C.extents();
 
     if (A_ext[0] != C_ext[0] || B_ext[1] != C_ext[1] || A_ext[1] != B_ext[0]) {
-        throw std::runtime_error("gemm: incompatible matrix dimensions");
+        return std::unexpected(gr::Error(std::format("gemm: incompatible matrix dimensions, op(A) {}x{} op(B) {}x{} C {}x{}", A_ext[0], A_ext[1], B_ext[0], B_ext[1], C_ext[0], C_ext[1]), loc));
     }
 
     const std::size_t M = C_ext[0];
@@ -307,6 +310,7 @@ void gemm(ExecutionPolicy&& /*policy*/, TensorC& C, const TensorA& A, const Tens
     } else {
         CacheOptimizedGemm<T>::compute(A_op, B_op, C, alpha, beta); // large matrices -> use cache-blocked algorithm with explicit SIMD
     }
+    return {};
 }
 
 } // namespace detail

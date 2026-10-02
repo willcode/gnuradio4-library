@@ -134,7 +134,7 @@ void testGEMM() {
     randomise(A, T{-1}, T{1});
     randomise(B, T{-1}, T{1});
 
-    gr::math::gemm(C_ref, A, B);
+    expect(fatal(gr::math::gemm(C_ref, A, B).has_value()));
     const std::size_t scaling = 2UZ * Parameter::M * Parameter::K * Parameter::N;
 
     if constexpr (runReference) {
@@ -145,7 +145,7 @@ void testGEMM() {
     } else {
         const std::string bmName = std::format("GEMM         {:12} M={},K={},N={}", typeName, Parameter::M, Parameter::K, Parameter::N);
 
-        ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&]() { gr::math::gemm(C_prod, A, B); };
+        ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&]() { std::ignore = gr::math::gemm(C_prod, A, B); };
         expect(le(max_abs_diff_2d(C_prod, C_ref), static_cast<T>(1e-4f))) << bmName << fatal;
     }
 }
@@ -195,7 +195,7 @@ void testGEMV() {
     randomise(A, T{-1}, T{1});
     randomise(x, T{-1}, T{1});
 
-    gr::math::gemv(y_ref, A, x);
+    expect(fatal(gr::math::gemv(y_ref, A, x).has_value()));
     const std::size_t scaling = 2UZ * Parameter::M * Parameter::K;
 
     if constexpr (runReference) {
@@ -206,7 +206,7 @@ void testGEMV() {
     } else {
         const std::string bmName = std::format("GEMV         {:12} M={},K={}", typeName, Parameter::M, Parameter::K);
 
-        ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&]() { gr::math::gemv(y_prod, A, x); };
+        ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&]() { std::ignore = gr::math::gemv(y_prod, A, x); };
         expect(le(max_abs_diff_1d(y_prod, y_ref), static_cast<T>(1e-4f))) << bmName << fatal;
     }
 }

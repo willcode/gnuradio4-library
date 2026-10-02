@@ -119,14 +119,6 @@ concept CpuExecutionPolicy = ExecutionPolicy<T> && (!T::is_gpu);
 template<typename T>
 concept GpuExecutionPolicy = ExecutionPolicy<T> && T::is_gpu;
 
-struct dimension_mismatch : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
-struct invalid_transpose : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
 } // namespace gr::math
 
 namespace gr {
@@ -1039,17 +1031,16 @@ namespace gr::math {
  * A transposed or conjugate-transposed B is copied into a contiguous temporary first, as is a
  * conjugate-transposed complex A. TransposeOp::Dynamic does not satisfy the constraint.
  *
- * @throws dimension_mismatch If dimensions are incompatible
- * @throws std::runtime_error If tensors are not contiguous
+ * Returns a gr::Error when a tensor is not rank 2 or not contiguous, or when the dimensions are incompatible.
  */
 template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorC, TensorOf<T> TensorA, TensorOf<T> TensorB>
 requires(TransA != TransposeOp::Dynamic && TransB != TransposeOp::Dynamic)
-void gemm(Policy&& policy, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) {
+[[nodiscard]] std::expected<void, gr::Error> gemm(Policy&& policy, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}, std::source_location loc = std::source_location::current()) {
     if (C.size() == 0 || A.size() == 0 || B.size() == 0) {
-        return; // nothing to compute for empty tensors
+        return {}; // nothing to compute for empty tensors
     }
     if constexpr (CpuExecutionPolicy<Policy>) {
-        detail::gemm<TransA, TransB>(policy, C, A, B, alpha, beta);
+        return detail::gemm<TransA, TransB>(policy, C, A, B, alpha, beta, loc);
     } else if constexpr (GpuExecutionPolicy<Policy>) {
         static_assert(gr::meta::always_false<T>, "GPU GEMM not yet implemented");
     }
@@ -1057,8 +1048,8 @@ void gemm(Policy&& policy, TensorC& C, const TensorA& A, const TensorB& B, T alp
 
 template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, TensorLike TensorC, TensorLike TensorA, TensorLike TensorB, typename T = TensorC::value_type>
 requires(TransA != TransposeOp::Dynamic && TransB != TransposeOp::Dynamic)
-void gemm(TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) { // simplified interface: C = A * B & auto-detect policy version
-    gemm<TransA, TransB>(cpu_policy{}, C, A, B, alpha, beta);
+[[nodiscard]] std::expected<void, gr::Error> gemm(TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}, std::source_location loc = std::source_location::current()) { // simplified interface: C = A * B & auto-detect policy version
+    return gemm<TransA, TransB>(cpu_policy{}, C, A, B, alpha, beta, loc);
 }
 
 /**
@@ -1079,16 +1070,17 @@ void gemm(TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta
  * @param beta Scalar multiplier for y (default: 0)
  *
  * A complex element type goes through a scalar kernel in every transpose form, and ConjTrans
- * conjugates a complex A. TransposeOp::Dynamic does not satisfy the constraint.
+ * conjugates a complex A. TransposeOp::Dynamic does not satisfy the constraint. Returns a gr::Error
+ * when A is not rank 2, x or y is not rank 1, or the dimensions are incompatible.
  */
 template<TransposeOp TransA = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorY, TensorOf<T> TensorA, TensorOf<T> TensorX>
 requires(TransA != TransposeOp::Dynamic)
-void gemv(Policy&& policy, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) {
+[[nodiscard]] std::expected<void, gr::Error> gemv(Policy&& policy, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}, std::source_location loc = std::source_location::current()) {
     if (y.size() == 0 || A.size() == 0 || x.size() == 0) {
-        return; // nothing to compute for empty tensors
+        return {}; // nothing to compute for empty tensors
     }
     if constexpr (CpuExecutionPolicy<Policy>) {
-        detail::gemv<TransA>(policy, y, A, x, alpha, beta);
+        return detail::gemv<TransA>(policy, y, A, x, alpha, beta, loc);
     } else if constexpr (GpuExecutionPolicy<Policy>) {
         static_assert(gr::meta::always_false<T>, "GPU GEMV not yet implemented");
     }
@@ -1096,8 +1088,8 @@ void gemv(Policy&& policy, TensorY& y, const TensorA& A, const TensorX& x, T alp
 
 template<TransposeOp TransA = TransposeOp::NoTrans, TensorLike TensorY, TensorLike TensorA, TensorLike TensorX, typename T = TensorY::value_type>
 requires(TransA != TransposeOp::Dynamic)
-void gemv(TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) { // simplified: y = A * x && auto-detect policy version
-    gemv<TransA>(cpu_policy{}, y, A, x, alpha, beta);
+[[nodiscard]] std::expected<void, gr::Error> gemv(TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}, std::source_location loc = std::source_location::current()) { // simplified: y = A * x && auto-detect policy version
+    return gemv<TransA>(cpu_policy{}, y, A, x, alpha, beta, loc);
 }
 
 } // namespace gr::math

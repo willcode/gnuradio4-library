@@ -11,8 +11,11 @@
 #include <complex>
 #include <concepts>
 #include <cstring>
+#include <expected>
+#include <format>
 #include <memory>
 #include <numeric>
+#include <source_location>
 #include <span>
 #include <vir/simd.h>
 
@@ -323,12 +326,12 @@ struct ScalarGemv {
 /// Dispatches to the SIMD kernels for an arithmetic element type and to ScalarGemv for a complex one.
 template<TransposeOp TransA = TransposeOp::NoTrans, typename ExecutionPolicy, TensorLike TensorY, TensorLike TensorA, TensorLike TensorX, typename T = typename TensorY::value_type>
 requires TensorOf<TensorY, T> && TensorOf<TensorA, T> && TensorOf<TensorX, T>
-void gemv(ExecutionPolicy&& /*policy*/, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) {
+[[nodiscard]] std::expected<void, gr::Error> gemv(ExecutionPolicy&& /*policy*/, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}, std::source_location loc = std::source_location::current()) {
     if (A.rank() != 2) {
-        throw std::runtime_error("gemv: A must be 2D");
+        return std::unexpected(gr::Error(std::format("gemv: A must be 2D, got rank {}", A.rank()), loc));
     }
     if (x.rank() != 1 || y.rank() != 1) {
-        throw std::runtime_error("gemv: x and y must be 1D");
+        return std::unexpected(gr::Error(std::format("gemv: x and y must be 1D, got ranks {} and {}", x.rank(), y.rank()), loc));
     }
 
     static_assert(TransA != TransposeOp::Dynamic, "gemv: TransposeOp::Dynamic is not supported; pass NoTrans, Trans or ConjTrans");
@@ -340,7 +343,7 @@ void gemv(ExecutionPolicy&& /*policy*/, TensorY& y, const TensorA& A, const Tens
         const auto y_ext = y.extents();
 
         if (A_ext[0] != y_ext[0] || A_ext[1] != x_ext[0]) {
-            throw std::runtime_error("gemv: incompatible dimensions for y = A*x");
+            return std::unexpected(gr::Error(std::format("gemv: incompatible dimensions for y = A*x, A {}x{} x {} y {}", A_ext[0], A_ext[1], x_ext[0], y_ext[0]), loc));
         }
 
         const std::size_t N = A_ext[1];
@@ -360,7 +363,7 @@ void gemv(ExecutionPolicy&& /*policy*/, TensorY& y, const TensorA& A, const Tens
 
         // for A^T * x: input size is A_ext[0], output size is A_ext[1]
         if (A_ext[1] != y_ext[0] || A_ext[0] != x_ext[0]) {
-            throw std::runtime_error("gemv: incompatible dimensions for y = A^T*x");
+            return std::unexpected(gr::Error(std::format("gemv: incompatible dimensions for y = A^T*x, A {}x{} x {} y {}", A_ext[0], A_ext[1], x_ext[0], y_ext[0]), loc));
         }
 
         if constexpr (gr::meta::complex_like<T>) {
@@ -369,6 +372,7 @@ void gemv(ExecutionPolicy&& /*policy*/, TensorY& y, const TensorA& A, const Tens
             GemvTrans<T>::compute(A, x, y, alpha, beta);
         }
     }
+    return {};
 }
 
 } // namespace gr::math::detail
