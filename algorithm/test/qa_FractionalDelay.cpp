@@ -75,6 +75,12 @@ using Complex = std::complex<float>;
 } // namespace
 
 const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
+    "a bank of no arms is an error"_test = [] {
+        const auto design = designFractionalDelay(0UZ);
+        expect(fatal(!design.has_value()));
+        expect(design.error().message.contains("at least one arm")) << design.error().message;
+    };
+
     "the error bound is the resampler's, at the sizes the table states"_test = [] {
         // The five rows of the closed form. A change to it fails here, before it silently widens the envelope of a
         // delay measurement.
@@ -103,7 +109,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         constexpr Arm arms[] = {{8UZ, 1}, {32UZ, 1}, {32UZ, 3}, {128UZ, 1}};
 
         for (const Arm& arm : arms) {
-            const gr::filter::ResamplerDesign design = designFractionalDelay(arm.bank, kRolloff);
+            const gr::filter::ResamplerDesign design = designFractionalDelay(arm.bank, kRolloff).value();
             const double                      interp = arbitraryInterpolationError(arm.bank, kRolloff, arm.order);
             const double                      bound  = interp + rippleFloor(design.rippleDb) + stopbandFloor(design.stopbandDb);
 
@@ -149,7 +155,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         const double f0     = kToneHz / kSampleRate;
         const double perTap = kRangeRate / kSpeedOfLight; // dtau/dt, and therefore delay samples per sample
 
-        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff);
+        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff).value();
         FractionalDelayLine<Complex>      line(32UZ, 1, design.taps, 21ULL);
 
         const std::vector<Complex> in = tone(f0, kSamples);
@@ -209,7 +215,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
         const std::uint64_t maxWhole = delays.front() >> 32;
         expect(maxWhole == 400ULL) << "8.339 ms at 48 kS/s is 400 whole samples, got" << maxWhole;
 
-        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff);
+        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff).value();
         FractionalDelayLine<Complex>      line(32UZ, 1, design.taps, maxWhole);
         expect(line.historySamples() == maxWhole + line.tapsPerArm() + 1UZ);
 
@@ -221,7 +227,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     "the stream does not depend on how it is chunked"_test = [] {
         constexpr std::size_t kSamples = 20'000UZ;
 
-        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff);
+        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff).value();
 
         const std::vector<Complex> in = tone(0.17, kSamples);
         std::vector<std::uint64_t> delays(kSamples);
@@ -249,7 +255,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     };
 
     "the accessors state the lag, and the history follows the delay"_test = [] {
-        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff);
+        const gr::filter::ResamplerDesign design = designFractionalDelay(32UZ, kRolloff).value();
         FractionalDelayLine<Complex>      line(32UZ, 1, design.taps, 400ULL);
 
         expect(line.bankSize() == 32UZ);
@@ -265,7 +271,7 @@ const boost::ut::suite<"FractionalDelay"> _fractional_delay = [] {
     };
 
     "what the line refuses"_test = [] {
-        const gr::filter::ResamplerDesign design = designFractionalDelay(8UZ, kRolloff);
+        const gr::filter::ResamplerDesign design = designFractionalDelay(8UZ, kRolloff).value();
 
         expect(throws<gr::exception>([&] { (void)FractionalDelayLine<Complex>(0UZ, 1, design.taps); })) << "a bank with no arms";
         expect(throws<gr::exception>([&] { (void)FractionalDelayLine<Complex>(8UZ, 2, design.taps); })) << "an order that is not 0, 1 or 3";

@@ -111,7 +111,7 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 
 [[nodiscard]] std::vector<float> run(ArbitraryResampler<float>& kernel, const std::vector<float>& x) {
     std::vector<float> y(kernel.outputsFor(x.size()));
-    kernel.process(std::span<const float>(x), std::span<float>(y));
+    kernel.process(std::span<const float>(x), std::span<float>(y)).value();
     return y;
 }
 
@@ -149,7 +149,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
                 in[i] = static_cast<double>(x[i]);
             }
             std::vector<double> got(kernel.outputsFor(x.size()));
-            kernel.process(std::span<const double>(in), std::span<double>(got));
+            kernel.process(std::span<const double>(in), std::span<double>(got)).value();
 
             const std::vector<double> want = arbitraryByDefinition(row.bank, stepFor(row.bank, row.rate), row.order, taps, x, made);
 
@@ -217,7 +217,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         std::size_t fed = 0UZ;
         for (int i = 0; i < 256; ++i) {
             const std::size_t made = kernel.outputsFor(block.size());
-            expect(eq(kernel.process(std::span<const float>(block), std::span<float>(out.data(), made)), made));
+            expect(eq(kernel.process(std::span<const float>(block), std::span<float>(out.data(), made)).value(), made));
             fed += block.size();
         }
 
@@ -246,7 +246,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
                         const std::size_t take = std::min(chunk, x.size() - at);
                         const std::size_t made = kernel.outputsFor(take);
                         y.resize(y.size() + made);
-                        kernel.process(std::span<const float>(x.data() + at, take), std::span<float>(y.data() + y.size() - made, made));
+                        kernel.process(std::span<const float>(x.data() + at, take), std::span<float>(y.data() + y.size() - made, made)).value();
                     }
                     expect(that % (y == whole)) << rate << " order " << order << " in chunks of " << chunk;
                 }
@@ -258,7 +258,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
                     const std::size_t take = std::min<std::size_t>(1UZ + (rng() % 1500U), x.size() - at);
                     const std::size_t made = ragged.outputsFor(take);
                     y.resize(y.size() + made);
-                    ragged.process(std::span<const float>(x.data() + at, take), std::span<float>(y.data() + y.size() - made, made));
+                    ragged.process(std::span<const float>(x.data() + at, take), std::span<float>(y.data() + y.size() - made, made)).value();
                     at += take;
                 }
                 expect(that % (y == whole)) << rate << " order " << order << " in random chunks";
@@ -286,8 +286,8 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
                 const std::size_t  made = a.outputsFor(body.size());
                 std::vector<float> ya(made);
                 std::vector<float> yb(made);
-                a.process(std::span<const float>(quiet.data(), body.size()), std::span<float>(ya));
-                b.process(std::span<const float>(loud.data(), body.size()), std::span<float>(yb));
+                a.process(std::span<const float>(quiet.data(), body.size()), std::span<float>(ya)).value();
+                b.process(std::span<const float>(loud.data(), body.size()), std::span<float>(yb)).value();
                 expect(that % (ya == yb)) << rate << " order " << order << ": something past the span was read";
             }
         }
@@ -325,7 +325,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
             expect(approx(stopEdge, row.stopEdge, 1e-7)) << row.bank << " at " << row.rate;
             expect(eq(gr::filter::fir::design::kaiserLength(60.0, 0.2 * stopEdge) | 1UZ, static_cast<std::size_t>(row.estimated))) << row.bank << " at " << row.rate << ": Kaiser's estimate";
 
-            const ResamplerDesign design = designArbitraryResampler(row.bank, row.rate);
+            const ResamplerDesign design = designArbitraryResampler(row.bank, row.rate).value();
             expect(that % design.ok) << row.bank << " at " << row.rate << ": the search met both targets";
             expect(eq(design.designLength, row.searched)) << row.bank << " at " << row.rate << ": searched length";
             expect(lt(design.stopbandDb, -60.0)) << row.bank << " at " << row.rate << ": stopband " << design.stopbandDb;
@@ -342,7 +342,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
 
     "a constant comes out a constant"_test = [] {
         for (const double rate : {19.0 / 24.0, 1.0, 48.0 / 44.1, 1.7}) {
-            const ResamplerDesign     design = designArbitraryResampler(32UZ, rate);
+            const ResamplerDesign     design = designArbitraryResampler(32UZ, rate).value();
             ArbitraryResampler<float> kernel(rate, 32UZ, 1, std::span<const float>(design.taps));
 
             const std::vector<float> x(6UZ * kernel.tapsPerArm() + 4096UZ, 1.0f);
@@ -379,17 +379,17 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
             return 20.0 * std::log10(std::max(binAmplitude(steady, kOut / 4UZ), 1e-300));
         };
 
-        const double scaled = alias(designArbitraryResampler(kBank, kRate));
+        const double scaled = alias(designArbitraryResampler(kBank, kRate).value());
         expect(lt(scaled, -75.0)) << "the scaled prototype leaves the alias at " << scaled << " dB";
 
-        const double unscaled = alias(designArbitraryResampler(kBank, 1.0));
+        const double unscaled = alias(designArbitraryResampler(kBank, 1.0).value());
         expect(gt(unscaled, -3.0)) << "the unscaled prototype passes the alias at " << unscaled << " dB";
         expect(gt(unscaled - scaled, 70.0)) << "the scaling law is worth " << (unscaled - scaled) << " dB";
     };
 
     "arm zero is the decimation filter"_test = [] {
         constexpr std::size_t kBank  = 32UZ;
-        const ResamplerDesign design = designArbitraryResampler(kBank, 0.2);
+        const ResamplerDesign design = designArbitraryResampler(kBank, 0.2).value();
 
         std::vector<double> arm;
         for (std::size_t r = 0UZ; r * kBank < design.taps.size(); ++r) {
@@ -455,7 +455,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         const std::size_t made = kernel.outputsFor(x.size());
         expect(gt(made, 0UZ));
         std::vector<float> more(made);
-        expect(eq(kernel.process(std::span<const float>(x), std::span<float>(more)), made)) << "and the stream continues";
+        expect(eq(kernel.process(std::span<const float>(x), std::span<float>(more)).value(), made)) << "and the stream continues";
     };
 
     "a prototype change keeps the window and the phase"_test = [] {
@@ -469,8 +469,8 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         const std::size_t  half = 1500UZ;
         std::vector<float> a(plain.outputsFor(half));
         std::vector<float> b(rebuilt.outputsFor(half));
-        plain.process(std::span<const float>(x.data(), half), std::span<float>(a));
-        rebuilt.process(std::span<const float>(x.data(), half), std::span<float>(b));
+        plain.process(std::span<const float>(x.data(), half), std::span<float>(a)).value();
+        rebuilt.process(std::span<const float>(x.data(), half), std::span<float>(b)).value();
 
         rebuilt.setTaps(std::span<const float>(taps));
         expect(eq(rebuilt.phase(), plain.phase())) << "the phase survives the rebuild";
@@ -479,8 +479,8 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         std::vector<float> c(plain.outputsFor(rest));
         std::vector<float> d(rebuilt.outputsFor(rest));
         expect(eq(c.size(), d.size()));
-        plain.process(std::span<const float>(x.data() + half, rest), std::span<float>(c));
-        rebuilt.process(std::span<const float>(x.data() + half, rest), std::span<float>(d));
+        plain.process(std::span<const float>(x.data() + half, rest), std::span<float>(c)).value();
+        rebuilt.process(std::span<const float>(x.data() + half, rest), std::span<float>(d)).value();
         expect(that % (c == d)) << "and so does the window, to the bit";
 
         // a longer prototype keeps what the old window held and zero-fills the deficit
@@ -494,7 +494,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         // At rate one the step is L*2^F, mu is identically zero and only arm 0 runs, which is a
         // unit-gain filter rather than the identity. Asserted so that a fast path added later has
         // to keep the same answer; a caller at exactly one is better served without a resampler.
-        const ResamplerDesign     design = designArbitraryResampler(32UZ, 1.0);
+        const ResamplerDesign     design = designArbitraryResampler(32UZ, 1.0).value();
         ArbitraryResampler<float> kernel(1.0, 32UZ, 1, std::span<const float>(design.taps));
         expect(eq(kernel.step(), 32ULL * kArbitraryOne));
 
@@ -517,15 +517,30 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
 
     "degenerate settings"_test = [] {
         const std::vector<float> taps = noise(320UZ, 67U);
-        expect(throws<std::invalid_argument>([&] { ArbitraryResampler<float>(0.0, 32UZ, 1, std::span<const float>(taps)); }));
-        expect(throws<std::invalid_argument>([&] { ArbitraryResampler<float>(-1.0, 32UZ, 1, std::span<const float>(taps)); }));
-        expect(throws<std::invalid_argument>([&] { ArbitraryResampler<float>(1.0, 0UZ, 1, std::span<const float>(taps)); }));
-        expect(throws<std::invalid_argument>([&] { ArbitraryResampler<float>(1.0, 32UZ, 2, std::span<const float>(taps)); }));
-        expect(throws<std::invalid_argument>([&] { ArbitraryResampler<float>(1.0, 32UZ, 1, std::span<const float>()); }));
-        expect(throws<std::invalid_argument>([&] { std::ignore = designArbitraryResampler(0UZ, 1.0); }));
+        expect(throws<gr::exception>([&] { ArbitraryResampler<float>(0.0, 32UZ, 1, std::span<const float>(taps)); }));
+        expect(throws<gr::exception>([&] { ArbitraryResampler<float>(-1.0, 32UZ, 1, std::span<const float>(taps)); }));
+        expect(throws<gr::exception>([&] { ArbitraryResampler<float>(1.0, 0UZ, 1, std::span<const float>(taps)); }));
+        expect(throws<gr::exception>([&] { ArbitraryResampler<float>(1.0, 32UZ, 2, std::span<const float>(taps)); }));
+        expect(throws<gr::exception>([&] { ArbitraryResampler<float>(1.0, 32UZ, 1, std::span<const float>()); }));
+        const auto noArms = designArbitraryResampler(0UZ, 1.0);
+        expect(fatal(!noArms.has_value()));
+        expect(noArms.error().message.contains("at least one arm")) << noArms.error().message;
+        const auto noRate = designArbitraryResampler(32UZ, 0.0);
+        expect(fatal(!noRate.has_value()));
+        expect(noRate.error().message.contains("must be positive")) << noRate.error().message;
+
+        ArbitraryResampler<float> settled(1.0, 32UZ, 1, std::span<const float>(taps));
+        expect(throws<gr::exception>([&] { settled.setRate(0.0); })) << "a rate change keeps the constructor's domain";
+        expect(throws<gr::exception>([&] { settled.setTaps(std::span<const float>()); })) << "and so does a new prototype";
+        const std::vector<float> in = noise(64UZ, 73U);
+        std::vector<float>       tooSmall(settled.outputsFor(in.size()) - 1UZ);
+        const auto               refused = settled.process(std::span<const float>(in), std::span<float>(tooSmall));
+        expect(fatal(!refused.has_value())) << "an output span shorter than outputsFor()";
+        expect(refused.error().message.contains("shorter than outputsFor()")) << refused.error().message;
+        expect(eq(settled.phase(), 0LL)) << "a refused call consumes nothing";
 
         // a rate above L*2^F drives the step to zero, and the guard exists to stop the loop there
-        expect(throws<std::invalid_argument>([&] { ArbitraryResampler<float>(1.5e11, 32UZ, 1, std::span<const float>(taps)); }));
+        expect(throws<gr::exception>([&] { ArbitraryResampler<float>(1.5e11, 32UZ, 1, std::span<const float>(taps)); }));
 
         // one arm is a plain fractional-delay filter, and it is legal
         const std::vector<float>  three{0.25f, 0.5f, 0.25f};
@@ -551,7 +566,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         constexpr Row kRows[] = {{8UZ, 0, -16.33}, {8UZ, 1, -37.50}, {8UZ, 3, -57.50}, {16UZ, 1, -47.70}, {32UZ, 1, -54.62}, {32UZ, 3, -57.23}};
 
         for (const Row& row : kRows) {
-            const ResamplerDesign design = designArbitraryResampler(row.bank, 1.0);
+            const ResamplerDesign design = designArbitraryResampler(row.bank, 1.0).value();
             const std::size_t     b      = (design.taps.size() + row.bank - 1UZ) / row.bank;
             const double          dg     = 0.5 * static_cast<double>(design.designLength - 1) / static_cast<double>(row.bank);
 

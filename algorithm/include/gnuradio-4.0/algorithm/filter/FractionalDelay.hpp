@@ -77,9 +77,9 @@ inline constexpr std::uint64_t kMaxFractionalDelaySamples = 1ULL << 31;
  *
  * This is `designArbitraryResampler` with `minRate = 1`, the design for a pure delay. The stopband edge is
  * `0.5/L`. The bank neither decimates nor interpolates. It only shifts. The function has its own name. A caller
- * that builds a delay line need not know that the rate to pass is the identity.
+ * that builds a delay line need not know that the rate to pass is the identity. A bank of no arms is an error.
  */
-[[nodiscard]] inline ResamplerDesign designFractionalDelay(std::size_t bankSize, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1) { return designArbitraryResampler(bankSize, 1.0, rolloff, attenuationDb, maxRippleDb); }
+[[nodiscard]] inline std::expected<ResamplerDesign, gr::Error> designFractionalDelay(std::size_t bankSize, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1, std::source_location location = std::source_location::current()) { return designArbitraryResampler(bankSize, 1.0, rolloff, attenuationDb, maxRippleDb, 1UZ << 16, location); }
 
 /// @brief A delay in whole and fractional samples as the `Q32` the line consumes. A delay that is negative, not
 /// finite or past `kMaxFractionalDelaySamples` is an error.

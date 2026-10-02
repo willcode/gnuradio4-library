@@ -7,13 +7,15 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <mutex>
 #include <numbers>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/PolyphaseResampler.hpp>
 
 /**
@@ -279,13 +281,15 @@ struct ShiftedQuotient {
  * designed band leaves the prototype narrower than it needs to be, which costs bandwidth and never
  * aliases. Memoized, because the search at `minRate = 0.2` is over ~5800-tap candidates; the memo
  * holds the last eight designs and drops the oldest.
+ *
+ * A bank of no arms or a rate that is not positive is an error.
  */
-[[nodiscard]] inline ResamplerDesign designArbitraryResampler(std::size_t bankSize, double minRate, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1, std::size_t maxTaps = 1UZ << 16) {
+[[nodiscard]] inline std::expected<ResamplerDesign, gr::Error> designArbitraryResampler(std::size_t bankSize, double minRate, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1, std::size_t maxTaps = 1UZ << 16, std::source_location location = std::source_location::current()) {
     if (bankSize == 0UZ) {
-        throw std::invalid_argument("designArbitraryResampler: the bank must have at least one arm");
+        return std::unexpected(gr::Error("designArbitraryResampler: the bank must have at least one arm", location));
     }
     if (!(minRate > 0.0)) {
-        throw std::invalid_argument("designArbitraryResampler: the rate must be positive");
+        return std::unexpected(gr::Error("designArbitraryResampler: the rate must be positive", location));
     }
 
     const detail::ArbitraryDesignKey key = {bankSize, std::min(1.0, minRate), rolloff, attenuationDb, maxRippleDb, maxTaps};
@@ -383,16 +387,18 @@ public:
      * @p order is 0 (nearest arm), 1 (linear) or 3 (cubic Lagrange). Nothing else is offered: the
      * even orders put the interpolation nodes off-center for no gain, and the weights above order 3
      * cost more than the extra arms they save.
+     *
+     * A bank of no arms, an order other than 0, 1 or 3, no taps or a rate `setRate` refuses throws `gr::exception`.
      */
     ArbitraryResampler(double rate, std::size_t bankSize, int order, std::span<const float> taps) : _bankSize(bankSize), _order(order) {
         if (bankSize == 0UZ) {
-            throw std::invalid_argument("ArbitraryResampler: the bank must have at least one arm");
+            throw gr::exception("ArbitraryResampler: the bank must have at least one arm");
         }
         if (order != 0 && order != 1 && order != 3) {
-            throw std::invalid_argument("ArbitraryResampler: the interpolation order is 0, 1 or 3");
+            throw gr::exception("ArbitraryResampler: the interpolation order is 0, 1 or 3");
         }
         if (taps.empty()) {
-            throw std::invalid_argument("ArbitraryResampler: no taps");
+            throw gr::exception("ArbitraryResampler: no taps");
         }
 
         build(taps);
@@ -414,17 +420,19 @@ public:
      * Changing the step changes the spacing of future outputs, not where the kernel currently is.
      * The prototype is the caller's to reconsider: the design law depends on the rate only through
      * `min(1, r)`, and only a rate that falls below the one the prototype was cut for under-filters.
+     *
+     * A rate that is not positive, or one the 64-bit step cannot represent, throws `gr::exception`.
      */
     void setRate(double rate) {
         if (!(rate > 0.0)) {
-            throw std::invalid_argument("ArbitraryResampler: the rate must be positive");
+            throw gr::exception("ArbitraryResampler: the rate must be positive");
         }
         const double scaled = static_cast<double>(_bankSize) / rate * static_cast<double>(kArbitraryOne);
         if (!(scaled >= 1.0)) {
-            throw std::invalid_argument("ArbitraryResampler: the rate exceeds L*2^32, at which the step rounds to nothing");
+            throw gr::exception("ArbitraryResampler: the rate exceeds L*2^32, at which the step rounds to nothing");
         }
         if (scaled >= 9.2233720368547758e18) {
-            throw std::invalid_argument("ArbitraryResampler: the rate is too small for a 64-bit step");
+            throw gr::exception("ArbitraryResampler: the rate is too small for a 64-bit step");
         }
         _step = static_cast<std::uint64_t>(std::round(scaled));
     }
@@ -434,11 +442,11 @@ public:
      *
      * The position is denominated in arms and the arm count has not changed, so it survives a change
      * of prototype length untouched; the window is carried newest-first and any deficit is
-     * zero-filled, which is the same transient the kernel has at stream start.
+     * zero-filled, which is the same transient the kernel has at stream start. No taps throws `gr::exception`.
      */
     void setTaps(std::span<const float> taps) {
         if (taps.empty()) {
-            throw std::invalid_argument("ArbitraryResampler: no taps");
+            throw gr::exception("ArbitraryResampler: no taps");
         }
         const std::vector<T> carried = _window;
         const std::size_t    was     = _windowLength;
@@ -503,11 +511,13 @@ public:
      * bit. Every sample an output reads comes from @p in: the window runs from `anchor - B` to
      * `anchor`, `anchor` included and accounted for by `outputsFor`, so the span the caller hands
      * over bounds what the kernel touches and `outputsFor` bounds what it reads.
+     *
+     * An @p out shorter than `outputsFor(in.size())` is an error, and nothing is consumed or written.
      */
-    std::size_t process(std::span<const T> in, std::span<T> out) {
+    [[nodiscard]] std::expected<std::size_t, gr::Error> process(std::span<const T> in, std::span<T> out, std::source_location location = std::source_location::current()) {
         const std::size_t made = outputsFor(in.size());
         if (out.size() < made) {
-            throw std::invalid_argument("ArbitraryResampler: the output span is shorter than outputsFor() reports");
+            return std::unexpected(gr::Error("ArbitraryResampler: the output span is shorter than outputsFor() reports", location));
         }
 
         const std::size_t history = _windowLength;
