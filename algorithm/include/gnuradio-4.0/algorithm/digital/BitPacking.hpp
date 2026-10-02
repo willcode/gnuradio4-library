@@ -7,10 +7,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <numeric>
 #include <span>
-#include <stdexcept>
-#include <string>
+
+#include <gnuradio-4.0/Message.hpp>
 
 /**
  * @brief The conversion between a stream of `bitsIn`-bit fields and a stream of `bitsOut`-bit fields.
@@ -48,8 +49,7 @@
  * constant serves all four cases.
  *
  * `configureRepack()` validates and is the only function here that can throw. It throws
- * `std::invalid_argument`, not a graph exception, because this header depends on the standard
- * library alone. `repack()` and `repackTail()` are `noexcept`, read and write nothing outside their
+ * `gr::exception`. `repack()` and `repackTail()` are `noexcept`, read and write nothing outside their
  * spans, and hold no state, so one configured `BitRepack` is safe to call concurrently.
  *
  * The one place a partial output item can exist is the end of a stream, where fewer than `inChunk`
@@ -119,16 +119,16 @@ struct BitRepack {
 /**
  * @brief Sets @p cfg to the stated conversion, deriving the chunk counts, the period and the shift table.
  *
- * Widths outside `[1, 8]` throw `std::invalid_argument` and leave @p cfg as it was, so a rejected
+ * Widths outside `[1, 8]` throw `gr::exception` and leave @p cfg as it was, so a rejected
  * setting cannot half-apply. This is the only function here that can throw and it never runs on the
  * sample path.
  */
 inline void configureRepack(BitRepack& cfg, unsigned bitsIn, unsigned bitsOut, BitOrder orderIn, BitOrder orderOut) {
     if (bitsIn < 1U || bitsIn > 8U) {
-        throw std::invalid_argument("gr::digital::configureRepack: bitsIn must be in [1, 8], got " + std::to_string(bitsIn));
+        throw gr::exception(std::format("gr::digital::configureRepack: bitsIn must be in [1, 8], got {}", bitsIn));
     }
     if (bitsOut < 1U || bitsOut > 8U) {
-        throw std::invalid_argument("gr::digital::configureRepack: bitsOut must be in [1, 8], got " + std::to_string(bitsOut));
+        throw gr::exception(std::format("gr::digital::configureRepack: bitsOut must be in [1, 8], got {}", bitsOut));
     }
 
     const unsigned common = std::gcd(bitsIn, bitsOut);

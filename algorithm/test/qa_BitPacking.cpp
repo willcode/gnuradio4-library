@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/BitPacking.hpp>
 
 namespace {
@@ -335,8 +336,8 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         BitRepack cfg = configured(3U, 5U, BitOrder::LsbFirst, BitOrder::MsbFirst);
 
         for (const unsigned bad : {0U, 9U, 16U}) {
-            expect(throws<std::invalid_argument>([&] { configureRepack(cfg, bad, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst); })) << std::format("bitsIn = {}", bad);
-            expect(throws<std::invalid_argument>([&] { configureRepack(cfg, 8U, bad, BitOrder::MsbFirst, BitOrder::MsbFirst); })) << std::format("bitsOut = {}", bad);
+            expect(throws<gr::exception>([&] { configureRepack(cfg, bad, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst); })) << std::format("bitsIn = {}", bad);
+            expect(throws<gr::exception>([&] { configureRepack(cfg, 8U, bad, BitOrder::MsbFirst, BitOrder::MsbFirst); })) << std::format("bitsOut = {}", bad);
         }
         expect(eq(static_cast<unsigned>(cfg.bitsIn), 3U)) << "a rejected width leaves the previous configuration standing";
         expect(eq(static_cast<unsigned>(cfg.bitsOut), 5U));
