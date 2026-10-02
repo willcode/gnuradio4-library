@@ -11,11 +11,19 @@
 #include <print>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/measurement/Kurtosis.hpp>
 #include <gnuradio-4.0/algorithm/rng/GaussianNoise.hpp>
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
+
+// The moments take exactly the two real and two complex floating-point types, and only the complex two are complex.
+static_assert(gr::measurement::MomentSample<float> && gr::measurement::MomentSample<double>);
+static_assert(gr::measurement::MomentSample<std::complex<float>> && gr::measurement::MomentSample<std::complex<double>>);
+static_assert(!gr::measurement::MomentSample<int> && !gr::measurement::MomentSample<long double> && !gr::measurement::MomentSample<std::complex<long double>>);
+static_assert(!gr::measurement::detail::MomentDomain<float>::isComplex && !gr::measurement::detail::MomentDomain<double>::isComplex);
+static_assert(gr::measurement::detail::MomentDomain<std::complex<float>>::isComplex && gr::measurement::detail::MomentDomain<std::complex<double>>::isComplex);
 
 using namespace boost::ut;
 using gr::measurement::gaussianFourthMoment;

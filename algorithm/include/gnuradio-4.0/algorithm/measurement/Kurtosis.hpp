@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/algorithm/math/SampleType.hpp>
+
 /**
  * @brief The normalized fourth moment of a stream and of a run of spectra, with its bias and spread in closed form.
  *
@@ -65,19 +67,12 @@ namespace gr::measurement {
 
 /// The four sample types the moments are defined over, two real and two complex.
 template<typename T>
-concept MomentSample = std::same_as<T, float> || std::same_as<T, double> || std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>;
+concept MomentSample = gr::math::RealOrComplexSample<T>;
 
 namespace detail {
 
 template<typename T>
-struct MomentDomain {
-    static constexpr bool isComplex = false;
-};
-
-template<std::floating_point F>
-struct MomentDomain<std::complex<F>> {
-    static constexpr bool isComplex = true;
-};
+using MomentDomain = gr::math::RealScalarOf<T>;
 
 } // namespace detail
 
