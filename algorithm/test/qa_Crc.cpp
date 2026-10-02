@@ -16,6 +16,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/Crc.hpp>
 
 namespace {
@@ -418,10 +419,10 @@ const boost::ut::suite<"crc"> crcTests = [] {
     };
 
     "width is validated before anything derived from it is computed"_test = [] {
-        expect(throws([] { (void)Crc(2U, 0x3ULL); })) << "width below 3 throws";
-        expect(throws([] { (void)Crc(100U, 0x07ULL); })) << "width of 100 throws, and does not shift by 100 first";
-        expect(throws([] { (void)Crc(65U, 0x07ULL); }));
-        expect(throws([] { (void)Crc(0U, 0x07ULL); }));
+        expect(throws<gr::exception>([] { (void)Crc(2U, 0x3ULL); })) << "width below 3 throws";
+        expect(throws<gr::exception>([] { (void)Crc(100U, 0x07ULL); })) << "width of 100 throws, and does not shift by 100 first";
+        expect(throws<gr::exception>([] { (void)Crc(65U, 0x07ULL); }));
+        expect(throws<gr::exception>([] { (void)Crc(0U, 0x07ULL); }));
 
         for (const std::uint8_t width : {std::uint8_t{3U}, std::uint8_t{5U}, std::uint8_t{6U}, std::uint8_t{12U}, std::uint8_t{64U}}) {
             expect(nothrow([width] { (void)Crc(width, 0x07ULL); })) << std::format("the kernel accepts width {}, which is about the register and not the message", width);
@@ -507,9 +508,9 @@ const boost::ut::suite<"crc"> crcTests = [] {
             expect(eq(mismatches, 0UZ)) << std::format("{}: {} of {} whole-byte lengths differ", p.name, mismatches, message.size() + 1UZ);
         }
         expect(that % kCatalog[12].inputReflected) << "CRC-32/ISO-HDLC is the reflected control";
-        expect(eq(kernelOf(kCatalog[12]).computeBits(checkMessage(), 72UZ), kCatalog[12].check)) << "CRC-32/ISO-HDLC over \"123456789\" as 72 bits";
+        expect(eq(kernelOf(kCatalog[12]).computeBits(checkMessage(), 72UZ).value(), kCatalog[12].check)) << "CRC-32/ISO-HDLC over \"123456789\" as 72 bits";
         expect(that % !kCatalog[7].inputReflected) << "CRC-16/IBM-3740 is the unreflected control";
-        expect(eq(kernelOf(kCatalog[7]).computeBits(checkMessage(), 72UZ), kCatalog[7].check)) << "CRC-16/IBM-3740 over \"123456789\" as 72 bits";
+        expect(eq(kernelOf(kCatalog[7]).computeBits(checkMessage(), 72UZ).value(), kCatalog[7].check)) << "CRC-16/IBM-3740 over \"123456789\" as 72 bits";
     };
 
     "computeBits equals the bit-serial definition at every length that is not a whole number of bytes"_test = [] {
@@ -541,15 +542,17 @@ const boost::ut::suite<"crc"> crcTests = [] {
                     const std::size_t position = p.inputReflected ? i % 8UZ : 7UZ - i % 8UZ;
                     flipped[i / 8UZ]           = static_cast<std::uint8_t>(flipped[i / 8UZ] ^ (1U << position));
                 }
-                expect(eq(crc.computeBits(flipped, bits), crc.computeBits(message, bits))) << std::format("{}: the bits past {} change the result", p.name, bits);
+                expect(eq(crc.computeBits(flipped, bits).value(), crc.computeBits(message, bits).value())) << std::format("{}: the bits past {} change the result", p.name, bits);
             }
         }
 
         const Crc crc = kernelOf(kCatalog[12]);
-        expect(eq(crc.computeBits(std::span<const std::uint8_t>{}, 0UZ), crc.compute(std::span<const std::uint8_t>{}))) << "zero bits of an empty message";
-        expect(nothrow([&crc, &message] { (void)crc.computeBits(message, 8UZ * message.size()); }));
-        expect(throws([&crc, &message] { (void)crc.computeBits(message, 8UZ * message.size() + 1UZ); })) << "one bit more than the message holds";
-        expect(throws([&crc] { (void)crc.computeBits(std::span<const std::uint8_t>{}, 1UZ); })) << "one bit of an empty message";
+        expect(eq(crc.computeBits(std::span<const std::uint8_t>{}, 0UZ).value(), crc.compute(std::span<const std::uint8_t>{}))) << "zero bits of an empty message";
+        expect(crc.computeBits(message, 8UZ * message.size()).has_value()) << "every bit the message holds";
+        const auto oneBitMore = crc.computeBits(message, 8UZ * message.size() + 1UZ);
+        expect(!oneBitMore.has_value()) << "one bit more than the message holds";
+        expect(!oneBitMore.has_value() && oneBitMore.error().message.contains("exceeds the 13-byte message")) << "the error names the message length";
+        expect(!crc.computeBits(std::span<const std::uint8_t>{}, 1UZ).has_value()) << "one bit of an empty message";
     };
 
     "computeBits counts bits in 64 bits, where a 32-bit count of a long message wraps"_test = [] {
@@ -564,8 +567,8 @@ const boost::ut::suite<"crc"> crcTests = [] {
 
         const auto message = randomBytes(13UZ, 0x40ULL);
         const Crc  crc     = kernelOf(kCatalog[12]);
-        expect(eq(crc.computeBits(message, Count{8} * message.size()), crc.compute(message))) << "the whole message, its count formed in the count type";
-        expect(throws([&crc, &message] { (void)crc.computeBits(message, (Count{1} << 32U) + 8U); })) << "2^32 + 8 bits, whose low 32 bits the message holds";
+        expect(eq(crc.computeBits(message, Count{8} * message.size()).value(), crc.compute(message))) << "the whole message, its count formed in the count type";
+        expect(!crc.computeBits(message, (Count{1} << 32U) + 8U).has_value()) << "2^32 + 8 bits, whose low 32 bits the message holds";
     };
 };
 

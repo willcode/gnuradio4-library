@@ -4,9 +4,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <span>
-#include <stdexcept>
-#include <string>
+
+#include <gnuradio-4.0/Message.hpp>
 
 /**
  * @brief One parameterized cyclic redundancy check, from the six-tuple that names essentially all of them.
@@ -69,7 +71,7 @@ public:
 
     Crc(std::uint8_t width, std::uint64_t polynomial, std::uint64_t initialValue = 0ULL, std::uint64_t finalXor = 0ULL, bool inputReflected = false, bool resultReflected = false) {
         if (width < 3U || width > 64U) {
-            throw std::invalid_argument("gr::digital::Crc: width must be in [3, 64], got " + std::to_string(static_cast<unsigned>(width)));
+            throw gr::exception(std::format("gr::digital::Crc: width must be in [3, 64], got {}", static_cast<unsigned>(width)));
         }
         _width           = width;
         _mask            = width == 64U ? ~0ULL : ((1ULL << width) - 1ULL);
@@ -91,15 +93,15 @@ public:
 
     /// @brief The CRC of the first `bitCount` bits of `message`, packed as the file comment states.
     ///
-    /// The bits of the last byte past `bitCount` are ignored. Throws `std::invalid_argument` when
-    /// `message` holds fewer than `bitCount` bits. The count and its check against the message are 64-bit
+    /// The bits of the last byte past `bitCount` are ignored. Returns a `gr::Error` when `message`
+    /// holds fewer than `bitCount` bits. The count and its check against the message are 64-bit
     /// on every platform. `computeBits(message, std::uint64_t{8} * message.size())` equals
     /// `compute(message)`; the same product formed in a 32-bit `std::size_t` wraps at 2^29 bytes.
-    [[nodiscard]] std::uint64_t computeBits(std::span<const std::uint8_t> message, std::uint64_t bitCount) const {
+    [[nodiscard]] std::expected<std::uint64_t, gr::Error> computeBits(std::span<const std::uint8_t> message, std::uint64_t bitCount) const {
         const std::uint64_t wholeBytes = bitCount / 8U;
         const std::uint64_t extraBits  = bitCount % 8U;
         if (wholeBytes + (extraBits != 0U ? 1U : 0U) > message.size()) {
-            throw std::invalid_argument("gr::digital::Crc: bitCount " + std::to_string(bitCount) + " exceeds the " + std::to_string(message.size()) + "-byte message");
+            return std::unexpected(gr::Error(std::format("gr::digital::Crc: bitCount {} exceeds the {}-byte message", bitCount, message.size())));
         }
         const std::uint8_t* const partial = message.data() + wholeBytes;
         std::uint64_t             reg     = feedBytes(_seed, std::span<const std::uint8_t>(message.data(), partial));
