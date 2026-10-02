@@ -415,6 +415,19 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
 };
 
 #ifndef __EMSCRIPTEN__
+const boost::ut::suite<"FileIO reader state"> fileIoReaderStateTests = [] {
+    using namespace boost::ut;
+    using namespace gr::algorithm::fileio;
+
+    "a second final message is refused"_test = [] {
+        ReaderState state("memory://final", ReaderConfig{});
+        expect(fatal(pushFinal(&state).has_value())) << "the first final message is published";
+        const auto second = pushFinal(&state);
+        expect(fatal(!second.has_value()));
+        expect(second.error().message.contains("more than once")) << second.error().message;
+    };
+};
+
 const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;

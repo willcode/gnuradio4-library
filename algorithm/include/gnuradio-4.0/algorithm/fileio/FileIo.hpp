@@ -25,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
@@ -406,9 +407,11 @@ inline void pushError(ReaderState* state, std::string_view msg) {
     publishMessage(state, std::move(errorMsg));
 }
 
-inline void pushFinal(ReaderState* state, bool publishPending = true) {
+/// Publishes the reader's Final message. Each read path calls it once, at its end; a second call on the same
+/// state publishes nothing and returns an error.
+[[nodiscard]] inline std::expected<void, gr::Error> pushFinal(ReaderState* state, bool publishPending = true) {
     if (state == nullptr) {
-        return;
+        return {};
     }
 
     if (publishPending) {
@@ -419,7 +422,7 @@ inline void pushFinal(ReaderState* state, bool publishPending = true) {
 
     bool expected = false;
     if (!state->finalPublished.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        throw gr::exception("pushFinal called more than once on the same ReadState");
+        return std::unexpected(gr::Error("pushFinal called more than once on the same ReadState"));
     }
 
     gr::Message finalMsg;
@@ -427,11 +430,12 @@ inline void pushFinal(ReaderState* state, bool publishPending = true) {
     finalMsg.cmd      = gr::message::Command::Final;
     finalMsg.data     = gr::property_map{};
     publishMessage(state, std::move(finalMsg));
+    return {};
 }
 
-inline void pushErrorFinal(ReaderState* state, std::string_view msg) {
+[[nodiscard]] inline std::expected<void, gr::Error> pushErrorFinal(ReaderState* state, std::string_view msg) {
     pushError(state, msg);
-    pushFinal(state, false);
+    return pushFinal(state, false);
 }
 
 inline void runReadMemorySource(ReaderState* state, std::span<const std::uint8_t> bytes) {
@@ -441,12 +445,12 @@ inline void runReadMemorySource(ReaderState* state, std::span<const std::uint8_t
 
     const std::size_t offset = state->config.offset.value_or(0);
     if (offset >= bytes.size()) {
-        pushFinal(state);
+        std::ignore = pushFinal(state);
         return;
     }
 
     pushData(state, bytes.subspan(offset));
-    pushFinal(state);
+    std::ignore = pushFinal(state);
 }
 
 inline void runReadMemorySource(std::shared_ptr<ReaderState> state, std::span<const std::uint8_t> bytes) { runReadMemorySource(state.get(), bytes); }
@@ -462,31 +466,31 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
 
     std::error_code ec;
     if (!fs::exists(path, ec) || !fs::is_regular_file(path, ec)) {
-        pushErrorFinal(state.get(), std::format("file not found or not a regular file: {}", state->uri));
+        std::ignore = pushErrorFinal(state.get(), std::format("file not found or not a regular file: {}", state->uri));
         return;
     }
 
     const auto fileSize = fs::file_size(path, ec);
     if (ec) {
-        pushErrorFinal(state.get(), std::format("failed to get file size: {} (ec={})", state->uri, ec.value()));
+        std::ignore = pushErrorFinal(state.get(), std::format("failed to get file size: {} (ec={})", state->uri, ec.value()));
         return;
     }
 
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        pushErrorFinal(state.get(), std::format("failed to open file: {}", state->uri));
+        std::ignore = pushErrorFinal(state.get(), std::format("failed to open file: {}", state->uri));
         return;
     }
 
     const std::size_t offset = state->config.offset.value_or(0);
     if (offset >= fileSize) {
-        pushFinal(state.get());
+        std::ignore = pushFinal(state.get());
         return;
     }
     if (offset > 0) {
         in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
         if (!in) {
-            pushErrorFinal(state.get(), std::format("seek failed to offset {} in file: {}", offset, state->uri));
+            std::ignore = pushErrorFinal(state.get(), std::format("seek failed to offset {} in file: {}", offset, state->uri));
             return;
         }
     }
@@ -515,10 +519,10 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
     }
     if (in.bad()) {
         in.close();
-        pushErrorFinal(state.get(), std::format("I/O error while reading file: {}", state->uri));
+        std::ignore = pushErrorFinal(state.get(), std::format("I/O error while reading file: {}", state->uri));
     } else {
         in.close();
-        pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
+        std::ignore = pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     }
 }
 
@@ -578,7 +582,7 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
 
     if (!state->config.longPolling) {
         std::ignore = runHttpGetNativeOnce(state);
-        pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
+        std::ignore = pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     } else { // long polling
         while (!state->cancelRequested.load(std::memory_order_acquire)) {
             const bool ok = runHttpGetNativeOnce(state);
@@ -586,7 +590,7 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
                 break; // cancel or error. TODO send request on error or break?
             }
         }
-        pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
+        std::ignore = pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     }
 }
 
@@ -660,7 +664,7 @@ inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
         }
 
         if (!longPolling || st->cancelRequested.load(std::memory_order_acquire)) {
-            pushFinal(st, !st->cancelRequested.load(std::memory_order_acquire));
+            std::ignore = pushFinal(st, !st->cancelRequested.load(std::memory_order_acquire));
             emscripten_fetch_close(fetch);
             detail::releaseReaderFetchContext(ctx);
         } else {
@@ -686,7 +690,7 @@ inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
         } else {
             pushError(st, std::format("fetch error (status {})", fetch != nullptr ? fetch->status : -1));
         }
-        pushFinal(st, false);
+        std::ignore = pushFinal(st, false);
         emscripten_fetch_close(fetch);
         detail::releaseReaderFetchContext(ctx);
     };
@@ -696,7 +700,7 @@ inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
     // clang-format on
     if (hasFetch == 0) {
         if (auto currentState = context->weakState.lock(); currentState != nullptr) {
-            pushErrorFinal(currentState.get(), "fetch is not available on this JS context");
+            std::ignore = pushErrorFinal(currentState.get(), "fetch is not available on this JS context");
         }
         detail::releaseReaderFetchContext(context);
         return;
@@ -704,7 +708,7 @@ inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
     emscripten_fetch_t* tmpFetch = emscripten_fetch(&attr, state->uri.c_str());
     if (tmpFetch == nullptr) {
         if (auto currentState = context->weakState.lock(); currentState != nullptr) {
-            pushErrorFinal(currentState.get(), "emscripten_fetch returned null emscripten_fetch_t");
+            std::ignore = pushErrorFinal(currentState.get(), "emscripten_fetch returned null emscripten_fetch_t");
         }
         detail::releaseReaderFetchContext(context);
         return;
@@ -775,7 +779,7 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         };
         handle.fail = [weakState](std::string_view msg) {
             if (auto st = weakState.lock()) {
-                pushErrorFinal(st.get(), msg);
+                std::ignore = pushErrorFinal(st.get(), msg);
             }
         };
 
