@@ -4,9 +4,12 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <expected>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
+
+#include <gnuradio-4.0/Message.hpp>
 
 namespace gr::channel {
 
@@ -20,22 +23,25 @@ namespace gr::channel {
  *
  * Static multipath is this function plus an FIR filter. A time-varying channel needs tap gains that are
  * processes rather than constants, which is what a fading-channel block covers.
+ *
+ * Tables of different lengths, an empty profile, a sample rate that is not positive or a negative delay is an
+ * error.
  */
-[[nodiscard]] inline std::vector<std::complex<float>> tapsFromProfile(std::span<const double> delaysSeconds, std::span<const double> powersDb, double sampleRate, bool normalize = true) {
+[[nodiscard]] inline std::expected<std::vector<std::complex<float>>, gr::Error> tapsFromProfile(std::span<const double> delaysSeconds, std::span<const double> powersDb, double sampleRate, bool normalize = true, std::source_location location = std::source_location::current()) {
     if (delaysSeconds.size() != powersDb.size()) {
-        throw std::invalid_argument("tapsFromProfile: the delay and power tables must be the same length");
+        return std::unexpected(gr::Error("tapsFromProfile: the delay and power tables must be the same length", location));
     }
     if (delaysSeconds.empty()) {
-        throw std::invalid_argument("tapsFromProfile: the profile is empty");
+        return std::unexpected(gr::Error("tapsFromProfile: the profile is empty", location));
     }
     if (!(sampleRate > 0.)) {
-        throw std::invalid_argument("tapsFromProfile: the sample rate must be positive");
+        return std::unexpected(gr::Error("tapsFromProfile: the sample rate must be positive", location));
     }
 
     std::size_t span = 0UZ;
     for (const double delay : delaysSeconds) {
         if (delay < 0.) {
-            throw std::invalid_argument("tapsFromProfile: delays must not be negative");
+            return std::unexpected(gr::Error("tapsFromProfile: delays must not be negative", location));
         }
         span = std::max(span, static_cast<std::size_t>(std::llround(delay * sampleRate)));
     }

@@ -42,13 +42,15 @@ const boost::ut::suite<"delay profile"> delayProfileTests = [] {
         const std::vector<double> powers{0.0, -3.0};
         const std::vector<double> backwards{0.0, -1.0e-6};
 
-        expect(throws<std::invalid_argument>([&] { std::ignore = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers).first(1UZ), 1.0e6); })) << "the delay and power tables must be the same length";
-        expect(throws<std::invalid_argument>([] { std::ignore = tapsFromProfile(std::span<const double>{}, std::span<const double>{}, 1.0e6); })) << "an empty profile names no path";
-        expect(throws<std::invalid_argument>([&] { std::ignore = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 0.0); })) << "a sample rate of zero has no sample to round a delay onto";
-        expect(throws<std::invalid_argument>([&] { std::ignore = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), -1.0e6); })) << "nor a negative one";
-        expect(throws<std::invalid_argument>([&] { std::ignore = tapsFromProfile(std::span<const double>(backwards), std::span<const double>(powers), 1.0e6); })) << "no path arrives before the first";
+        expect(!tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers).first(1UZ), 1.0e6).has_value()) << "the delay and power tables must be the same length";
+        expect(!tapsFromProfile(std::span<const double>{}, std::span<const double>{}, 1.0e6).has_value()) << "an empty profile names no path";
+        expect(!tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 0.0).has_value()) << "a sample rate of zero has no sample to round a delay onto";
+        expect(!tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), -1.0e6).has_value()) << "nor a negative one";
+        const auto early = tapsFromProfile(std::span<const double>(backwards), std::span<const double>(powers), 1.0e6);
+        expect(fatal(!early.has_value())) << "no path arrives before the first";
+        expect(early.error().message.contains("delays must not be negative")) << early.error().message;
 
-        expect(nothrow([&] { std::ignore = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6); })) << "and the profile those four are variations of is accepted";
+        expect(tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6).has_value()) << "and the profile those four are variations of is accepted";
     };
 
     "each delay rounds onto a sample, and the tap set spans the longest"_test = [] {
@@ -56,7 +58,7 @@ const boost::ut::suite<"delay profile"> delayProfileTests = [] {
         // long and the sample no path reaches is a zero.
         const std::vector<double> delays{0.0, 2.4e-6, 2.6e-6};
         const std::vector<double> powers{0.0, -3.0, -6.0};
-        const auto                taps = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6, false);
+        const auto                taps = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6, false).value();
 
         expect(eq(taps.size(), 4UZ)) << "the set spans the first sample to the longest rounded delay";
         expect(eq(std::abs(taps[1UZ]), 0.f)) << "nothing rounds onto sample one";
@@ -71,7 +73,7 @@ const boost::ut::suite<"delay profile"> delayProfileTests = [] {
         // high for two equal paths, which is the error every published tabulation is read with.
         const std::vector<double> together{1.0e-6, 1.2e-6};
         const std::vector<double> equal{-3.0, -3.0};
-        const auto                summed = tapsFromProfile(std::span<const double>(together), std::span<const double>(equal), 1.0e6, false);
+        const auto                summed = tapsFromProfile(std::span<const double>(together), std::span<const double>(equal), 1.0e6, false).value();
 
         expect(eq(summed.size(), 2UZ));
         expect(approx(static_cast<double>(std::norm(summed[1UZ])), 2.0 * std::pow(10.0, -0.3), 1e-6)) << "the two powers add";
@@ -82,8 +84,8 @@ const boost::ut::suite<"delay profile"> delayProfileTests = [] {
         const std::vector<double> delays{0.0, 1.0e-6, 3.0e-6};
         const std::vector<double> powers{0.0, -3.0, -9.0};
 
-        const auto normalized = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6);
-        const auto raw        = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6, false);
+        const auto normalized = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6).value();
+        const auto raw        = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6, false).value();
 
         expect(eq(normalized.size(), raw.size()));
         expect(approx(totalPower(normalized), 1.0, 1e-6)) << "a normalized profile leaves the level a receiver sees where it was";
