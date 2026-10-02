@@ -220,9 +220,9 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
 
             const auto signal{generateSinSample<typename T::InType>(t.N, t.sample_rate, t.frequency, t.amplitude)};
             auto       fftResult         = fftAlgo.compute(signal);
-            auto       magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult, {.computeHalfSpectrum = true});
-            auto       fullSpectrum      = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult);
-            auto       phase             = gr::algorithm::fft::computePhaseSpectrum(fftResult, {.outputInDeg = true, .unwrapPhase = true});
+            auto       magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult, {.computeHalfSpectrum = true}).value();
+            auto       fullSpectrum      = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult).value();
+            auto       phase             = gr::algorithm::fft::computePhaseSpectrum(fftResult, {.outputInDeg = true, .unwrapPhase = true}).value();
             const auto peakIndex{static_cast<std::size_t>(std::distance(magnitudeSpectrum.begin(), std::ranges::max_element(magnitudeSpectrum)))};
             const auto peakAmplitude = magnitudeSpectrum[peakIndex];
             const auto peakFrequency{static_cast<double>(peakIndex) * t.sample_rate / static_cast<double>(t.N)};
@@ -238,14 +238,24 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         using Precision = typename T::value_type;
         std::vector<T> bins(8UZ, T{0, 0});
         bins[1UZ]          = T{4, 0}; // full-spectrum level 4/8, half-spectrum level 2*4/8
-        const auto full    = gr::algorithm::fft::computeMagnitudeSpectrum(bins, {}, {.outputInDb = true});
-        const auto half    = gr::algorithm::fft::computeMagnitudeSpectrum(bins, {}, {.computeHalfSpectrum = true, .outputInDb = true});
+        const auto full    = gr::algorithm::fft::computeMagnitudeSpectrum(bins, {}, {.outputInDb = true}).value();
+        const auto half    = gr::algorithm::fft::computeMagnitudeSpectrum(bins, {}, {.computeHalfSpectrum = true, .outputInDb = true}).value();
         const auto floorDb = static_cast<Precision>(gr::math::kDbFloor);
         expect(eq(full[0UZ], floorDb)) << "a zero bin reads as the floor, not as an infinity";
         expect(eq(half[2UZ], floorDb));
         expect(approx(full[1UZ], Precision(20) * std::log10(Precision(0.5)), Precision(1e-5f)));
         expect(approx(half[1UZ], Precision(0), Precision(1e-5f)));
         expect(std::ranges::all_of(full, [](Precision v) { return std::isfinite(v); }));
+    } | std::tuple<std::complex<float>, std::complex<double>>{};
+
+    "an empty spectrum is refused"_test = []<typename T>() {
+        const std::vector<T> empty;
+        const auto           magnitude = gr::algorithm::fft::computeMagnitudeSpectrum(empty);
+        expect(fatal(!magnitude.has_value()));
+        expect(magnitude.error().message.contains("cannot be empty")) << magnitude.error().message;
+        const auto phase = gr::algorithm::fft::computePhaseSpectrum(empty);
+        expect(fatal(!phase.has_value()));
+        expect(phase.error().message.contains("cannot be empty")) << phase.error().message;
     } | std::tuple<std::complex<float>, std::complex<double>>{};
 
     "FFT algo pattern tests"_test = []<typename T>() {
@@ -284,7 +294,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             }
 
             auto fftResult         = fftAlgo.compute(signal);
-            auto magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult);
+            auto magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult).value();
 
             const auto peakIndex{static_cast<std::size_t>(std::distance(magnitudeSpectrum.begin(), std::ranges::max_element(magnitudeSpectrum)))};
             const auto peakAmplitude{magnitudeSpectrum[peakIndex]};
@@ -689,7 +699,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
                 const double angle = 2. * std::numbers::pi * static_cast<double>((bin * i) % N) / static_cast<double>(N);
                 signal[i]          = Cplx(static_cast<TVal>(std::cos(angle)), static_cast<TVal>(std::sin(angle)));
             }
-            const auto full = gr::algorithm::fft::computeMagnitudeSpectrum(fftAlgo.compute(signal));
+            const auto full = gr::algorithm::fft::computeMagnitudeSpectrum(fftAlgo.compute(signal)).value();
             expect(approx(static_cast<double>(full[bin]), 1., tolerance)) << std::format("<{}> unit complex exponential at bin {}", type_name<TVal>(), bin);
         }
 
@@ -700,13 +710,13 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             cosine[i] = Cplx(static_cast<TVal>(amplitude * std::cos(2. * std::numbers::pi * static_cast<double>(cosineBin * i) / static_cast<double>(N))), TVal(0));
         }
         const auto cosineSpectrum = fftAlgo.compute(cosine);
-        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(cosineSpectrum, {.computeHalfSpectrum = true})[cosineBin]), amplitude, tolerance)) << std::format("<{}> real cosine, half spectrum", type_name<TVal>());
-        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(cosineSpectrum)[cosineBin]), amplitude / 2., tolerance)) << std::format("<{}> real cosine, full spectrum", type_name<TVal>());
+        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(cosineSpectrum, {.computeHalfSpectrum = true}).value()[cosineBin]), amplitude, tolerance)) << std::format("<{}> real cosine, half spectrum", type_name<TVal>());
+        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(cosineSpectrum).value()[cosineBin]), amplitude / 2., tolerance)) << std::format("<{}> real cosine, full spectrum", type_name<TVal>());
 
         const std::vector<Cplx> dc(N, Cplx(TVal(2), TVal(0)));
         const auto              dcSpectrum = fftAlgo.compute(dc);
-        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(dcSpectrum)[0]), 2., tolerance)) << std::format("<{}> DC, full spectrum", type_name<TVal>());
-        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(dcSpectrum, {.computeHalfSpectrum = true})[0]), 2., tolerance)) << std::format("<{}> DC, half spectrum", type_name<TVal>());
+        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(dcSpectrum).value()[0]), 2., tolerance)) << std::format("<{}> DC, full spectrum", type_name<TVal>());
+        expect(approx(static_cast<double>(gr::algorithm::fft::computeMagnitudeSpectrum(dcSpectrum, {.computeHalfSpectrum = true}).value()[0]), 2., tolerance)) << std::format("<{}> DC, half spectrum", type_name<TVal>());
     } | std::tuple<float, double>();
 
     "Unwrap Phase tests"_test = [] {

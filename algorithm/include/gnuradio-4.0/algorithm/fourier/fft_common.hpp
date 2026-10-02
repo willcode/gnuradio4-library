@@ -3,13 +3,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <expected>
 #include <iterator>
 #include <numbers>
 #include <vector>
 
 #include <format>
 #include <ranges>
+#include <source_location>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/math/Decibel.hpp>
 
 namespace gr::algorithm::fft {
@@ -22,13 +25,13 @@ struct ConfigMagnitude {
 
 /// @brief amplitude spectrum of an unnormalized DFT result.
 /// Every bin of the full spectrum is scaled by 1/N. The half spectrum scales by 2/N to account for
-/// the mirrored bin it drops, except at DC and Nyquist, which have no twin.
+/// the mirrored bin it drops, except at DC and Nyquist, which have no twin. An empty fftIn returns an error.
 template<std::ranges::input_range TContainerIn, std::ranges::output_range<typename TContainerIn::value_type::value_type> TContainerOut = std::vector<typename TContainerIn::value_type::value_type>, typename T = TContainerIn::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
-auto computeMagnitudeSpectrum(const TContainerIn& fftIn, TContainerOut&& magOut = {}, ConfigMagnitude config = {}) {
+[[nodiscard]] std::expected<std::remove_cvref_t<TContainerOut>, gr::Error> computeMagnitudeSpectrum(const TContainerIn& fftIn, TContainerOut&& magOut = {}, ConfigMagnitude config = {}, std::source_location loc = std::source_location::current()) {
     const std::size_t N = fftIn.size();
     if (N == 0) {
-        throw std::invalid_argument("fftIn cannot be empty.");
+        return std::unexpected(gr::Error("fftIn cannot be empty.", loc));
     }
 
     const std::size_t magSize = config.computeHalfSpectrum ? (N / 2UZ) : N;
@@ -73,8 +76,8 @@ auto computeMagnitudeSpectrum(const TContainerIn& fftIn, TContainerOut&& magOut 
 
 template<std::ranges::input_range TContainerIn, typename T = TContainerIn::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
-auto computeMagnitudeSpectrum(const TContainerIn& fftIn, ConfigMagnitude config) {
-    return computeMagnitudeSpectrum(fftIn, {}, config);
+[[nodiscard]] auto computeMagnitudeSpectrum(const TContainerIn& fftIn, ConfigMagnitude config, std::source_location loc = std::source_location::current()) {
+    return computeMagnitudeSpectrum(fftIn, {}, config, loc);
 }
 
 struct ConfigPhase {
@@ -110,10 +113,10 @@ void unwrapPhase(TContainerInOut& phase) {
 
 template<std::ranges::input_range TContainerIn, std::ranges::output_range<typename TContainerIn::value_type::value_type> TContainerOut = std::vector<typename TContainerIn::value_type::value_type>, typename T = TContainerIn::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
-auto computePhaseSpectrum(const TContainerIn& fftIn, TContainerOut&& phaseOut = {}, ConfigPhase config = {}) {
+[[nodiscard]] std::expected<std::remove_cvref_t<TContainerOut>, gr::Error> computePhaseSpectrum(const TContainerIn& fftIn, TContainerOut&& phaseOut = {}, ConfigPhase config = {}, std::source_location loc = std::source_location::current()) {
     const std::size_t N = fftIn.size();
     if (N == 0) {
-        throw std::invalid_argument("fftIn cannot be empty.");
+        return std::unexpected(gr::Error("fftIn cannot be empty.", loc));
     }
 
     std::size_t phaseSize    = config.computeHalfSpectrum ? (N / 2) : N;
@@ -148,8 +151,8 @@ auto computePhaseSpectrum(const TContainerIn& fftIn, TContainerOut&& phaseOut = 
 
 template<std::ranges::input_range TContainerIn, typename T = TContainerIn::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
-auto computePhaseSpectrum(const TContainerIn& fftIn, ConfigPhase config) {
-    return computePhaseSpectrum(fftIn, {}, config);
+[[nodiscard]] auto computePhaseSpectrum(const TContainerIn& fftIn, ConfigPhase config, std::source_location loc = std::source_location::current()) {
+    return computePhaseSpectrum(fftIn, {}, config, loc);
 }
 
 } // namespace gr::algorithm::fft
