@@ -6,8 +6,9 @@
 #include <cstdint>
 #include <format>
 #include <span>
-#include <stdexcept>
 #include <vector>
+
+#include <gnuradio-4.0/Message.hpp>
 
 namespace gr::fec {
 
@@ -79,24 +80,24 @@ public:
     /// starting at `offset`. `fillValue` is what `deinterleave()` writes where the window reached nothing.
     [[nodiscard]] static Interleaver block(std::size_t rows, std::size_t cols, std::size_t windowOffset, std::size_t windowLength, T fillValue) {
         if (rows == 0UZ) {
-            throw std::invalid_argument("gr::fec::Interleaver: rows is 0 — a block interleaver needs at least one row");
+            throw gr::exception("gr::fec::Interleaver: rows is 0 — a block interleaver needs at least one row");
         }
         if (cols == 0UZ) {
-            throw std::invalid_argument("gr::fec::Interleaver: cols is 0 — a block interleaver needs at least one column");
+            throw gr::exception("gr::fec::Interleaver: cols is 0 — a block interleaver needs at least one column");
         }
         if (rows > kMaxFrame / cols) {
-            throw std::invalid_argument(std::format("gr::fec::Interleaver: rows {} times cols {} is beyond the frame ceiling of {} items", rows, cols, kMaxFrame));
+            throw gr::exception(std::format("gr::fec::Interleaver: rows {} times cols {} is beyond the frame ceiling of {} items", rows, cols, kMaxFrame));
         }
 
         const std::size_t frame = rows * cols;
         if (windowLength == 0UZ) {
-            throw std::invalid_argument("gr::fec::Interleaver: window_length is 0 — a window that reads nothing is not a readout");
+            throw gr::exception("gr::fec::Interleaver: window_length is 0 — a window that reads nothing is not a readout");
         }
         if (windowOffset >= frame) {
-            throw std::invalid_argument(std::format("gr::fec::Interleaver: window_offset {} is at or past the {}-item frame", windowOffset, frame));
+            throw gr::exception(std::format("gr::fec::Interleaver: window_offset {} is at or past the {}-item frame", windowOffset, frame));
         }
         if (windowLength > frame - windowOffset) {
-            throw std::invalid_argument(std::format("gr::fec::Interleaver: window_length {} from window_offset {} runs past the {}-item frame", windowLength, windowOffset, frame));
+            throw gr::exception(std::format("gr::fec::Interleaver: window_length {} from window_offset {} runs past the {}-item frame", windowLength, windowOffset, frame));
         }
 
         Interleaver self;
@@ -119,13 +120,13 @@ public:
     /// The Forney/Ramsey structure: `branches` delay lines, branch `b` holding `b * unitDelay` cells.
     [[nodiscard]] static Interleaver convolutional(std::size_t branches, std::size_t unitDelay, T fillValue = T{}) {
         if (branches < 2UZ) {
-            throw std::invalid_argument(std::format("gr::fec::Interleaver: branches is {} — below two branches there is nothing to interleave", branches));
+            throw gr::exception(std::format("gr::fec::Interleaver: branches is {} — below two branches there is nothing to interleave", branches));
         }
         if (unitDelay < 1UZ) {
-            throw std::invalid_argument("gr::fec::Interleaver: unit_delay is 0 — every branch would hold no cells");
+            throw gr::exception("gr::fec::Interleaver: unit_delay is 0 — every branch would hold no cells");
         }
         if (branches - 1UZ > kMaxFrame / branches / unitDelay) {
-            throw std::invalid_argument(std::format("gr::fec::Interleaver: branches {} and unit_delay {} give a latency beyond the ceiling of {} items", branches, unitDelay, kMaxFrame));
+            throw gr::exception(std::format("gr::fec::Interleaver: branches {} and unit_delay {} give a latency beyond the ceiling of {} items", branches, unitDelay, kMaxFrame));
         }
 
         Interleaver self;
@@ -143,19 +144,19 @@ public:
     /// An explicit table, read as the gather `out[i] = in[table[i]]`.
     [[nodiscard]] static Interleaver permutation(std::span<const std::size_t> table) {
         if (table.empty()) {
-            throw std::invalid_argument("gr::fec::Interleaver: table is empty — the permutation kind has no default table");
+            throw gr::exception("gr::fec::Interleaver: table is empty — the permutation kind has no default table");
         }
         if (table.size() > kMaxFrame) {
-            throw std::invalid_argument(std::format("gr::fec::Interleaver: table holds {} entries, beyond the frame ceiling of {} items", table.size(), kMaxFrame));
+            throw gr::exception(std::format("gr::fec::Interleaver: table holds {} entries, beyond the frame ceiling of {} items", table.size(), kMaxFrame));
         }
 
         std::vector<bool> seen(table.size(), false);
         for (std::size_t i = 0UZ; i < table.size(); ++i) {
             if (table[i] >= table.size()) {
-                throw std::invalid_argument(std::format("gr::fec::Interleaver: table entry {} is {}, outside a {}-item frame", i, table[i], table.size()));
+                throw gr::exception(std::format("gr::fec::Interleaver: table entry {} is {}, outside a {}-item frame", i, table[i], table.size()));
             }
             if (seen[table[i]]) {
-                throw std::invalid_argument(std::format("gr::fec::Interleaver: table entry {} repeats index {} — the table is not a permutation", i, table[i]));
+                throw gr::exception(std::format("gr::fec::Interleaver: table entry {} repeats index {} — the table is not a permutation", i, table[i]));
             }
             seen[table[i]] = true;
         }

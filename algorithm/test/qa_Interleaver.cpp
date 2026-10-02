@@ -9,9 +9,9 @@
 #include <print>
 #include <random>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/fec/Interleaver.hpp>
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
 
@@ -365,31 +365,31 @@ const boost::ut::suite<"Interleaver"> interleaverTests = [] {
     };
 
     "a configuration that is not an interleaver is refused"_test = [] {
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::block(0UZ, 8UZ); })) << "rows of 0";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::block(8UZ, 0UZ); })) << "cols of 0";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::block(1UZ << 11, 1UZ << 11); })) << "a frame past the ceiling";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::block(0UZ, 8UZ); })) << "rows of 0";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::block(8UZ, 0UZ); })) << "cols of 0";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::block(1UZ << 11, 1UZ << 11); })) << "a frame past the ceiling";
         expect(nothrow([] { (void)Interleaver<std::uint8_t>::block(1UZ << 10, 1UZ << 10); })) << "a frame at the ceiling";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 0UZ, 0UZ, std::uint8_t{}); })) << "a window of no length";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 20UZ, 1UZ, std::uint8_t{}); })) << "a window starting past the frame";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 12UZ, 9UZ, std::uint8_t{}); })) << "a window running past the frame";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 0UZ, 0UZ, std::uint8_t{}); })) << "a window of no length";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 20UZ, 1UZ, std::uint8_t{}); })) << "a window starting past the frame";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 12UZ, 9UZ, std::uint8_t{}); })) << "a window running past the frame";
         expect(nothrow([] { (void)Interleaver<std::uint8_t>::block(4UZ, 5UZ, 12UZ, 8UZ, std::uint8_t{}); })) << "a window ending exactly at the frame";
 
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::convolutional(0UZ, 1UZ); })) << "branches of 0";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::convolutional(1UZ, 1UZ); })) << "one branch interleaves nothing";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::convolutional(4UZ, 0UZ); })) << "unit_delay of 0";
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::convolutional(1UZ << 12, 1UZ); })) << "a latency past the ceiling";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::convolutional(0UZ, 1UZ); })) << "branches of 0";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::convolutional(1UZ, 1UZ); })) << "one branch interleaves nothing";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::convolutional(4UZ, 0UZ); })) << "unit_delay of 0";
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::convolutional(1UZ << 12, 1UZ); })) << "a latency past the ceiling";
         expect(nothrow([] { (void)Interleaver<std::uint8_t>::convolutional(2UZ, 1UZ); })) << "two branches and one cell is the degenerate case, not an error";
 
-        expect(throws<std::invalid_argument>([] { (void)Interleaver<std::uint8_t>::permutation(std::span<const std::size_t>{}); })) << "no table at all";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] { (void)Interleaver<std::uint8_t>::permutation(std::span<const std::size_t>{}); })) << "no table at all";
+        expect(throws<gr::exception>([] {
             const std::vector<std::size_t> table{0UZ, 1UZ, 3UZ};
             (void)Interleaver<std::uint8_t>::permutation(table);
         })) << "an index outside the frame";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             const std::vector<std::size_t> table{0UZ, 1UZ, 1UZ};
             (void)Interleaver<std::uint8_t>::permutation(table);
         })) << "an index used twice";
-        expect(throws<std::invalid_argument>([] {
+        expect(throws<gr::exception>([] {
             std::vector<std::size_t> table(Interleaver<std::uint8_t>::kMaxFrame + 1UZ);
             std::iota(table.begin(), table.end(), 0UZ);
             (void)Interleaver<std::uint8_t>::permutation(table);
