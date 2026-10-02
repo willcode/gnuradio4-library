@@ -207,6 +207,19 @@ struct Chain {
 const boost::ut::suite<"preamble tone"> preambleToneTests = [] {
     using namespace boost::ut;
 
+    "configure throws for a window that cannot carry the tone, and fit returns a length mismatch"_test = [] {
+        PreambleToneEstimator estimator;
+        expect(throws<gr::exception>([&] { estimator.configure(1.0, 8.0); })) << "one sample per symbol";
+        expect(throws<gr::exception>([&] { estimator.configure(4.0, 0.0); })) << "no preamble symbols";
+        expect(throws<gr::exception>([&] { estimator.configure(1.2, 1.0); })) << "a window that rounds to one sample";
+
+        estimator.configure(4.0, 8.0);
+        const std::vector<double> shortWindow(estimator.windowLength() - 1UZ, 0.0);
+        const auto                fitted = estimator.fit(std::span<const double>(shortWindow));
+        expect(fatal(!fitted.has_value()));
+        expect(fitted.error().message.contains("against a window of")) << fitted.error().message;
+    };
+
     const std::vector<float> channel = designedLowpass(0.6);
     const std::vector<float> post    = designedLowpass(0.5);
 
@@ -274,7 +287,7 @@ const boost::ut::suite<"preamble tone"> preambleToneTests = [] {
         std::vector<std::size_t> offsets;
         std::string              phases;
         for (std::size_t start = 200UZ; start <= 205UZ; ++start) {
-            const PreambleToneFit fit  = estimator.fit(std::span<const double>(bare).subspan(start, kWindow));
+            const PreambleToneFit fit  = estimator.fit(std::span<const double>(bare).subspan(start, kWindow)).value();
             const double          next = estimator.instantAfter(fit.phase, 0.0);
             // an instant on the window's own first sample is equally the zeroth lattice point and the sps-th, and
             // which of the two a phase of exactly pi lands on is a rounding decision, so the offset is read modulo
@@ -339,7 +352,7 @@ const boost::ut::suite<"preamble tone"> preambleToneTests = [] {
                     std::ignore = estimator.push(stream[k]);
                 }
             }
-            const PreambleToneFit fit = estimator.fit(std::span<const double>(stream).subspan(300UZ, kWindow));
+            const PreambleToneFit fit = estimator.fit(std::span<const double>(stream).subspan(300UZ, kWindow)).value();
             if (chunk == 1UZ) {
                 first = fit;
             }
@@ -364,7 +377,7 @@ const boost::ut::suite<"preamble tone"> preambleToneTests = [] {
                 for (std::size_t k = 0UZ; k < kWindow; ++k) {
                     ordered[k] = history[(n + 1UZ + k) % kWindow];
                 }
-                const double exact = estimator.fit(std::span<const double>(ordered)).statistic;
+                const double exact = estimator.fit(std::span<const double>(ordered)).value().statistic;
                 worst              = std::max(worst, std::abs(recursive - exact) / std::max(exact, 1e-12));
             }
         }
@@ -508,7 +521,7 @@ const boost::ut::suite<"preamble tone"> preambleToneTests = [] {
             double      smallest = 1.0;
             for (std::size_t trial = 0UZ; trial < kWindows; ++trial) {
                 const Chain           noisy = runChain(std::span<const CD>(baseband), esN0Db, &rng, std::span<const float>(channel), std::span<const float>(post));
-                const PreambleToneFit fit   = estimator.fit(std::span<const double>(noisy.lowpass).subspan(start, kWindow));
+                const PreambleToneFit fit   = estimator.fit(std::span<const double>(noisy.lowpass).subspan(start, kWindow)).value();
                 declared += fit.statistic > kDefault ? 1UZ : 0UZ;
                 total += fit.statistic;
                 smallest = std::min(smallest, fit.statistic);

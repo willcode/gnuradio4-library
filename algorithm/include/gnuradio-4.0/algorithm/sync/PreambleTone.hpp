@@ -6,11 +6,14 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <numbers>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
+
+#include <gnuradio-4.0/Message.hpp>
 
 /**
  * @brief The symbol phase of a burst, measured from the tone an alternating training sequence leaves.
@@ -78,17 +81,19 @@ struct PreambleToneEstimator {
      *
      * @param samplesPerSymbol  input samples per symbol; the tone sits at `1/(2*samplesPerSymbol)`
      * @param preambleSymbols   alternating symbols the window spans; `N = round(product)` samples
+     *
+     * A value outside its domain throws `gr::exception`.
      */
     void configure(double samplesPerSymbol, double preambleSymbols) {
         if (!(samplesPerSymbol > 1.0) || !std::isfinite(samplesPerSymbol)) {
-            throw std::invalid_argument(std::format("gr::sync::PreambleToneEstimator: {} samples per symbol; the tone at half the symbol rate needs more than two samples a period", samplesPerSymbol));
+            throw gr::exception(std::format("gr::sync::PreambleToneEstimator: {} samples per symbol; the tone at half the symbol rate needs more than two samples a period", samplesPerSymbol));
         }
         if (!(preambleSymbols > 0.0) || !std::isfinite(preambleSymbols)) {
-            throw std::invalid_argument(std::format("gr::sync::PreambleToneEstimator: {} preamble symbols; the window has to hold at least one", preambleSymbols));
+            throw gr::exception(std::format("gr::sync::PreambleToneEstimator: {} preamble symbols; the window has to hold at least one", preambleSymbols));
         }
         const auto length = static_cast<std::size_t>(std::llround(preambleSymbols * samplesPerSymbol));
         if (length < 2UZ) {
-            throw std::invalid_argument(std::format("gr::sync::PreambleToneEstimator: a window of {} samples cannot carry a period of the tone", length));
+            throw gr::exception(std::format("gr::sync::PreambleToneEstimator: a window of {} samples cannot carry a period of the tone", length));
         }
 
         _samplesPerSymbol = samplesPerSymbol;
@@ -143,12 +148,13 @@ struct PreambleToneEstimator {
      * @brief The exact fit over one window of exactly `windowLength()` samples.
      *
      * The `O(N)` form, not the recursion's running value: an estimate that reaches a tag is always
-     * recomputed here, so the marginally stable recursion decides only which window to fit.
+     * recomputed here, so the marginally stable recursion decides only which window to fit. A @p window of another
+     * length is an error.
      */
     template<std::floating_point TSample>
-    [[nodiscard]] PreambleToneFit fit(std::span<const TSample> window) const {
+    [[nodiscard]] std::expected<PreambleToneFit, gr::Error> fit(std::span<const TSample> window, std::source_location location = std::source_location::current()) const {
         if (window.size() != _length) {
-            throw std::invalid_argument(std::format("gr::sync::PreambleToneEstimator::fit: {} samples against a window of {}", window.size(), _length));
+            return std::unexpected(gr::Error(std::format("gr::sync::PreambleToneEstimator::fit: {} samples against a window of {}", window.size(), _length), location));
         }
         const double         omega = 2.0 * std::numbers::pi * _frequency;
         std::complex<double> sum{};
