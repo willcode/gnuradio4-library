@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/Constellation.hpp>
 
 namespace {
@@ -193,9 +194,9 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
         const std::array<CD, 8> apsk{CD{1, 0}, CD{0, 1}, CD{-1, 0}, CD{0, -1}, CD{2, 0}, CD{0, 2}, CD{-2, 0}, CD{0, -2}};
         expect(C::custom(apsk).strategy() == DecisionStrategy::Nearest) << "two amplitude rings are neither a circle nor an axis product";
 
-        expect(throws([] { (void)C::psk(6UZ); })) << "arity must be a power of two";
-        expect(throws([] { (void)C::qam(8UZ); })) << "a square QAM arity must be a power of four";
-        expect(throws([] { (void)C::psk(512UZ); })) << "symbols are bytes";
+        expect(throws<gr::exception>([] { (void)C::psk(6UZ); })) << "arity must be a power of two";
+        expect(throws<gr::exception>([] { (void)C::qam(8UZ); })) << "a square QAM arity must be a power of four";
+        expect(throws<gr::exception>([] { (void)C::psk(512UZ); })) << "symbols are bytes";
     };
 
     "the point tables, to nine figures"_test = [] {
@@ -599,10 +600,10 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             for (std::size_t i = 0UZ; i < 20000UZ; ++i) {
                 const CD z = CD(gaussian(engine), gaussian(engine));
 
-                bpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::Exact);
+                bpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::Exact).value();
                 worstBpsk = std::max(worstBpsk, std::abs(soft[0] - 4.0 * z.real() / noisePower));
 
-                qpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::Exact);
+                qpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::Exact).value();
                 worstQpsk = std::max(worstQpsk, std::abs(soft[0] - 4.0 * axis * z.imag() / noisePower));
                 worstQpsk = std::max(worstQpsk, std::abs(soft[1] - 4.0 * axis * z.real() / noisePower));
             }
@@ -640,7 +641,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             Sample{0.000, 0.000000, +0.800000}, Sample{+0.400, +0.505964, +0.294036}, Sample{+0.800, +1.223858, -0.211929}, Sample{+1.600, +3.247715, -1.223858}};
         for (const Sample& sample : samples) {
             // The sample rows are stated per axis, so drive the I axis and hold Q at a level.
-            qam16.softDecisions(CD(sample.x, 0.5 * spacing), 1.0, soft);
+            qam16.softDecisions(CD(sample.x, 0.5 * spacing), 1.0, soft).value();
             expect(lt(std::abs(soft[2] - sample.high), 1.0e-6)) << std::format("16QAM L_hi at x = {:.3f}: {:.6f} against {:.6f}", sample.x, soft[2], sample.high);
             expect(lt(std::abs(soft[3] - sample.low), 1.0e-6)) << std::format("16QAM L_lo at x = {:.3f}: {:.6f} against {:.6f}", sample.x, soft[3], sample.low);
         }
@@ -659,7 +660,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             for (std::size_t i = 0UZ; i < 50000UZ; ++i) {
                 const CD   z      = CD(gaussian(engine), gaussian(engine));
                 const auto symbol = constellation.hardDecision(z);
-                constellation.softDecisions(z, 0.3, soft, SoftAlgorithm::MaxLog);
+                constellation.softDecisions(z, 0.3, soft, SoftAlgorithm::MaxLog).value();
                 for (std::size_t k = 0UZ; k < bits; ++k) {
                     const std::uint32_t bit = (static_cast<std::uint32_t>(symbol) >> (bits - 1UZ - k)) & 1U;
                     if (soft[k] == 0.0) {
@@ -702,8 +703,8 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
                     for (std::size_t b = 0UZ; b < kGrid; ++b) {
                         const double im = -kSpan + 2.0 * kSpan * static_cast<double>(b) / static_cast<double>(kGrid - 1UZ);
                         const CD     z  = CD(re, im);
-                        constellation.softDecisions(z, noisePower, maxLog, SoftAlgorithm::MaxLog);
-                        constellation.softDecisionsExhaustive(z, noisePower, exact, SoftAlgorithm::Exact);
+                        constellation.softDecisions(z, noisePower, maxLog, SoftAlgorithm::MaxLog).value();
+                        constellation.softDecisionsExhaustive(z, noisePower, exact, SoftAlgorithm::Exact).value();
                         for (std::size_t k = 0UZ; k < constellation.bitsPerSymbol(); ++k) {
                             worst = std::max(worst, std::abs(maxLog[k] - exact[k]));
                             range = std::max(range, std::abs(exact[k]));
@@ -737,8 +738,8 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
                     for (std::size_t b = 0UZ; b < kGrid; ++b) {
                         const double im = -kSpan + 2.0 * kSpan * static_cast<double>(b) / static_cast<double>(kGrid - 1UZ);
                         const CD     z  = CD(re, im);
-                        constellation.softDecisions(z, noisePower, perAxis, SoftAlgorithm::MaxLog);
-                        constellation.softDecisionsExhaustive(z, noisePower, full, SoftAlgorithm::MaxLog);
+                        constellation.softDecisions(z, noisePower, perAxis, SoftAlgorithm::MaxLog).value();
+                        constellation.softDecisionsExhaustive(z, noisePower, full, SoftAlgorithm::MaxLog).value();
                         for (std::size_t k = 0UZ; k < constellation.bitsPerSymbol(); ++k) {
                             worst = std::max(worst, std::abs(perAxis[k] - full[k]));
                         }
@@ -764,20 +765,52 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
     "the noise power is linear, positive, and scales the soft values by its inverse"_test = [] {
         const C               qam16 = C::qam(16UZ);
         std::array<double, 4> soft{};
-        expect(throws([&] { qam16.softDecisions(CD{0.3, -0.2}, 0.0, soft); })) << "zero noise power throws";
-        expect(throws([&] { qam16.softDecisions(CD{0.3, -0.2}, -1.0, soft); })) << "a negative noise power throws";
-        expect(throws([&] { qam16.softDecisions(CD{0.3, -0.2}, std::numeric_limits<double>::quiet_NaN(), soft); }));
+        const auto            zeroNoise = qam16.softDecisions(CD{0.3, -0.2}, 0.0, soft);
+        expect(!zeroNoise.has_value() && zeroNoise.error().message.contains("noise power must be positive")) << "zero noise power is an error";
+        expect(!qam16.softDecisions(CD{0.3, -0.2}, -1.0, soft).has_value()) << "a negative noise power is an error";
+        expect(!qam16.softDecisions(CD{0.3, -0.2}, std::numeric_limits<double>::quiet_NaN(), soft).has_value());
+        expect(!qam16.softDecisionsExhaustive(CD{0.3, -0.2}, 0.0, soft).has_value()) << "the exhaustive form checks the same";
 
         std::array<double, 4> half{};
-        qam16.softDecisions(CD{0.31, -0.22}, 0.4, soft);
-        qam16.softDecisions(CD{0.31, -0.22}, 0.8, half);
+        qam16.softDecisions(CD{0.31, -0.22}, 0.4, soft).value();
+        qam16.softDecisions(CD{0.31, -0.22}, 0.8, half).value();
         for (std::size_t k = 0UZ; k < 4UZ; ++k) {
             expect(lt(std::abs(half[k] * 2.0 - soft[k]), 1.0e-12)) << "doubling N0 halves every soft value";
             expect((half[k] > 0.0) == (soft[k] > 0.0)) << "and changes no sign";
         }
 
         std::array<double, 3> tooShort{};
-        expect(throws([&] { qam16.softDecisions(CD{0.3, -0.2}, 1.0, tooShort); })) << "the output span must hold bitsPerSymbol() values";
+        expect(!qam16.softDecisions(CD{0.3, -0.2}, 1.0, tooShort).has_value()) << "the output span must hold bitsPerSymbol() values";
+    };
+
+    "the span forms refuse an output span shorter than the input asks for"_test = [] {
+        const C                     qam16 = C::qam(16UZ);
+        const std::array<CD, 3>     input{CD{0.3, -0.2}, CD{-0.9, 0.1}, CD{0.2, 0.7}};
+        std::array<std::uint8_t, 2> labels{0xEEU, 0xEEU};
+        const auto                  hard = qam16.hardDecisions(input, labels);
+        expect(!hard.has_value() && hard.error().message.contains("shorter than the input")) << "two labels for three samples";
+        expect(eq(labels[0], std::uint8_t{0xEEU})) << "and nothing is written";
+
+        std::array<double, 11> soft{};
+        const auto             bulk = qam16.softDecisions(input, 1.0, soft);
+        expect(!bulk.has_value() && bulk.error().message.contains("per symbol")) << "eleven values for three 4-bit symbols";
+        expect(!qam16.softDecisions(input, 0.0, std::span<double>(soft)).has_value()) << "and a zero noise power";
+    };
+
+    "constellationFromName resolves a family and reports what it refuses"_test = [] {
+        const std::array<double, 4> pair{1.0, 0.0, -1.0, 0.0};
+        const auto                  qam = gr::digital::constellationFromName<double>("qam", 16UZ, 0.0, 0U, {}, "power");
+        expect(qam.has_value() && qam->strategy() == DecisionStrategy::SquareQam) << "qam of 16";
+        expect(gr::digital::constellationFromName<double>("custom", 0UZ, 0.0, 0U, pair, "none").has_value()) << "a two-point custom list";
+
+        const auto name = gr::digital::constellationFromName<double>("apsk", 16UZ, 0.0, 0U, {}, "power");
+        expect(!name.has_value() && name.error().message.contains("'apsk'")) << "an unknown name is quoted";
+        const auto normalization = gr::digital::constellationFromName<double>("bpsk", 2UZ, 0.0, 0U, {}, "rms");
+        expect(!normalization.has_value() && normalization.error().message.contains("'rms'")) << "an unknown normalization is quoted";
+        const auto points = gr::digital::constellationFromName<double>("custom", 0UZ, 0.0, 0U, std::span<const double>(pair).first(3UZ), "power");
+        expect(!points.has_value() && points.error().message.contains("3 values")) << "an odd number of point values";
+        const auto arity = gr::digital::constellationFromName<double>("qam", 8UZ, 0.0, 0U, {}, "power");
+        expect(!arity.has_value() && arity.error().message.contains("power of four")) << "the family's own refusal arrives as an error";
     };
 
     "the normalization is applied once, at construction"_test = [] {
@@ -801,15 +834,15 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             z = CD(gaussian(engine), gaussian(engine));
         }
         std::vector<std::uint8_t> bulk(input.size());
-        qam16.hardDecisions(input, bulk);
+        qam16.hardDecisions(input, bulk).value();
         std::vector<double> bulkSoft(input.size() * qam16.bitsPerSymbol());
-        qam16.softDecisions(input, 0.3, bulkSoft);
+        qam16.softDecisions(input, 0.3, bulkSoft).value();
 
         std::array<double, 4> one{};
         std::size_t           mismatches = 0UZ;
         for (std::size_t i = 0UZ; i < input.size(); ++i) {
             mismatches += bulk[i] != qam16.hardDecision(input[i]) ? 1UZ : 0UZ;
-            qam16.softDecisions(input[i], 0.3, one);
+            qam16.softDecisions(input[i], 0.3, one).value();
             for (std::size_t k = 0UZ; k < 4UZ; ++k) {
                 mismatches += bulkSoft[i * 4UZ + k] != one[k] ? 1UZ : 0UZ;
             }

@@ -8,14 +8,16 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <optional>
 #include <span>
-#include <stdexcept>
-#include <string>
 #include <string_view>
 #include <vector>
+
+#include <gnuradio-4.0/Message.hpp>
 
 /**
  * @brief The map between integer symbols and points in the complex plane, and the two inverses a
@@ -129,7 +131,7 @@ public:
         requirePowerOfTwo(arity, "qam");
         const std::size_t bits = bitCount(arity);
         if (bits % 2UZ != 0UZ) {
-            throw std::invalid_argument("gr::digital::Constellation::qam: arity must be a power of four, got " + std::to_string(arity));
+            throw gr::exception(std::format("gr::digital::Constellation::qam: arity must be a power of four, got {}", arity));
         }
         const std::size_t            axisBits   = bits / 2UZ;
         const std::size_t            axisLevels = 1UZ << axisBits;
@@ -191,43 +193,52 @@ public:
     /// @brief The definition: the label of the nearest point, ties to the lowest symbol.
     [[nodiscard]] std::uint8_t nearestDecision(std::complex<F> z) const noexcept { return decideNearest(z); }
 
-    void hardDecisions(std::span<const std::complex<F>> in, std::span<std::uint8_t> out) const {
+    /// @brief The label of each input sample. An output span shorter than the input is a `gr::Error`, and nothing is written.
+    [[nodiscard]] std::expected<void, gr::Error> hardDecisions(std::span<const std::complex<F>> in, std::span<std::uint8_t> out) const {
         if (out.size() < in.size()) {
-            throw std::invalid_argument("gr::digital::Constellation::hardDecisions: output span is shorter than the input");
+            return std::unexpected(gr::Error("gr::digital::Constellation::hardDecisions: output span is shorter than the input"));
         }
         switch (strategy_) {
         case DecisionStrategy::SquareQam:
             for (std::size_t i = 0UZ; i < in.size(); ++i) {
                 out[i] = decideSquareQam(in[i]);
             }
-            return;
+            return {};
         case DecisionStrategy::Psk:
             for (std::size_t i = 0UZ; i < in.size(); ++i) {
                 out[i] = decidePsk(in[i]);
             }
-            return;
+            return {};
         default:
             for (std::size_t i = 0UZ; i < in.size(); ++i) {
                 out[i] = decideNearest(in[i]);
             }
-            return;
+            return {};
         }
     }
 
     /// @brief `bitsPerSymbol()` log-likelihood ratios, MSB first, by the cheapest route the geometry allows.
-    void softDecisions(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
-        checkSoftArguments(noisePower, out.size());
+    ///
+    /// A noise power that is not positive or an output span shorter than `bitsPerSymbol()` is a `gr::Error`, and nothing is written.
+    [[nodiscard]] std::expected<void, gr::Error> softDecisions(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
+        if (auto checked = checkSoftArguments(noisePower, out.size()); !checked) {
+            return checked;
+        }
         softDecisionsUnchecked(z, noisePower, out, algorithm);
+        return {};
     }
 
-    void softDecisions(std::span<const std::complex<F>> in, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
-        checkSoftArguments(noisePower, bits_);
+    [[nodiscard]] std::expected<void, gr::Error> softDecisions(std::span<const std::complex<F>> in, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
+        if (auto checked = checkSoftArguments(noisePower, bits_); !checked) {
+            return checked;
+        }
         if (out.size() < in.size() * bits_) {
-            throw std::invalid_argument("gr::digital::Constellation::softDecisions: output span holds fewer than bitsPerSymbol() values per symbol");
+            return std::unexpected(gr::Error("gr::digital::Constellation::softDecisions: output span holds fewer than bitsPerSymbol() values per symbol"));
         }
         for (std::size_t i = 0UZ; i < in.size(); ++i) {
             softDecisionsUnchecked(in[i], noisePower, out.subspan(i * bits_, bits_), algorithm);
         }
+        return {};
     }
 
     /**
@@ -235,9 +246,12 @@ public:
      *
      * Also the only route for `Exact`, whose sums do not shorten the way the max-log minima do.
      */
-    void softDecisionsExhaustive(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
-        checkSoftArguments(noisePower, out.size());
+    [[nodiscard]] std::expected<void, gr::Error> softDecisionsExhaustive(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
+        if (auto checked = checkSoftArguments(noisePower, out.size()); !checked) {
+            return checked;
+        }
         exhaustive(z, noisePower, out, algorithm);
+        return {};
     }
 
 private:
@@ -256,7 +270,7 @@ private:
         const double rmsMagnitude  = std::sqrt(sumPower / static_cast<double>(arity_));
         const double multiplier    = mode == Normalization::Power ? 1.0 / rmsMagnitude : (mode == Normalization::Amplitude ? 1.0 / meanMagnitude : 1.0);
         if (!(multiplier > 0.0) || !std::isfinite(multiplier)) {
-            throw std::invalid_argument("gr::digital::Constellation: the point set has no positive scale to normalize by");
+            throw gr::exception("gr::digital::Constellation: the point set has no positive scale to normalize by");
         }
         normalizationScale_ = static_cast<F>(multiplier);
         for (auto& c : points_) {
@@ -277,7 +291,7 @@ private:
 
     static void requirePowerOfTwo(std::size_t arity, const char* what) {
         if (arity < 2UZ || arity > kMaxPoints || (arity & (arity - 1UZ)) != 0UZ) {
-            throw std::invalid_argument(std::string("gr::digital::Constellation::") + what + ": arity must be a power of two in [2, 256], got " + std::to_string(arity));
+            throw gr::exception(std::format("gr::digital::Constellation::{}: arity must be a power of two in [2, 256], got {}", what, arity));
         }
     }
 
@@ -457,13 +471,14 @@ private:
         return best;
     }
 
-    void checkSoftArguments(F noisePower, std::size_t outputSize) const {
+    [[nodiscard]] std::expected<void, gr::Error> checkSoftArguments(F noisePower, std::size_t outputSize) const {
         if (!(noisePower > F{0})) {
-            throw std::invalid_argument("gr::digital::Constellation::softDecisions: noise power must be positive and linear, got " + std::to_string(static_cast<double>(noisePower)));
+            return std::unexpected(gr::Error(std::format("gr::digital::Constellation::softDecisions: noise power must be positive and linear, got {}", static_cast<double>(noisePower))));
         }
         if (outputSize < bits_) {
-            throw std::invalid_argument("gr::digital::Constellation::softDecisions: output span holds fewer than bitsPerSymbol() values");
+            return std::unexpected(gr::Error("gr::digital::Constellation::softDecisions: output span holds fewer than bitsPerSymbol() values"));
         }
+        return {};
     }
 
     void softDecisionsUnchecked(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm) const {
@@ -595,37 +610,51 @@ private:
  * The parameters a caller carries as settings, resolved in one place, so that every consumer of a named constellation
  * agrees on what a name means. `arity` is read by `psk` and `qam` only, `phaseOffset` and `labelXor` by `psk` only,
  * and `interleavedPoints` by `custom` only.
+ *
+ * An unknown name, an unknown normalization, a malformed point list and an arity the family refuses are each a
+ * `gr::Error`.
  */
 template<std::floating_point F>
-[[nodiscard]] Constellation<F> constellationFromName(std::string_view name, std::size_t arity, F phaseOffset, std::uint8_t labelXor, std::span<const F> interleavedPoints, std::string_view normalizationName) {
-    const Normalization mode = normalizationName == "power" ? Normalization::Power : normalizationName == "amplitude" ? Normalization::Amplitude : normalizationName == "none" ? Normalization::None : throw std::invalid_argument("gr::digital::constellationFromName: normalization must be 'power', 'amplitude' or 'none', got '" + std::string(normalizationName) + "'");
+[[nodiscard]] std::expected<Constellation<F>, gr::Error> constellationFromName(std::string_view name, std::size_t arity, F phaseOffset, std::uint8_t labelXor, std::span<const F> interleavedPoints, std::string_view normalizationName) {
+    Normalization mode = Normalization::Power;
+    if (normalizationName == "amplitude") {
+        mode = Normalization::Amplitude;
+    } else if (normalizationName == "none") {
+        mode = Normalization::None;
+    } else if (normalizationName != "power") {
+        return std::unexpected(gr::Error(std::format("gr::digital::constellationFromName: normalization must be 'power', 'amplitude' or 'none', got '{}'", normalizationName)));
+    }
 
-    if (name == "bpsk") {
-        return Constellation<F>::bpsk(mode);
-    }
-    if (name == "qpsk") {
-        return Constellation<F>::qpsk(mode);
-    }
-    if (name == "psk8") {
-        return Constellation<F>::psk8(mode);
-    }
-    if (name == "psk") {
-        return Constellation<F>::psk(arity, phaseOffset, labelXor, mode);
-    }
-    if (name == "qam") {
-        return Constellation<F>::qam(arity, mode);
-    }
-    if (name == "custom") {
-        if (interleavedPoints.empty() || interleavedPoints.size() % 2UZ != 0UZ) {
-            throw std::invalid_argument("gr::digital::constellationFromName: 'custom' needs points as interleaved re,im pairs, got " + std::to_string(interleavedPoints.size()) + " values");
+    try {
+        if (name == "bpsk") {
+            return Constellation<F>::bpsk(mode);
         }
-        std::vector<std::complex<F>> list(interleavedPoints.size() / 2UZ);
-        for (std::size_t i = 0UZ; i < list.size(); ++i) {
-            list[i] = std::complex<F>(interleavedPoints[2UZ * i], interleavedPoints[2UZ * i + 1UZ]);
+        if (name == "qpsk") {
+            return Constellation<F>::qpsk(mode);
         }
-        return Constellation<F>::custom(std::span<const std::complex<F>>(list), mode);
+        if (name == "psk8") {
+            return Constellation<F>::psk8(mode);
+        }
+        if (name == "psk") {
+            return Constellation<F>::psk(arity, phaseOffset, labelXor, mode);
+        }
+        if (name == "qam") {
+            return Constellation<F>::qam(arity, mode);
+        }
+        if (name == "custom") {
+            if (interleavedPoints.empty() || interleavedPoints.size() % 2UZ != 0UZ) {
+                return std::unexpected(gr::Error(std::format("gr::digital::constellationFromName: 'custom' needs points as interleaved re,im pairs, got {} values", interleavedPoints.size())));
+            }
+            std::vector<std::complex<F>> list(interleavedPoints.size() / 2UZ);
+            for (std::size_t i = 0UZ; i < list.size(); ++i) {
+                list[i] = std::complex<F>(interleavedPoints[2UZ * i], interleavedPoints[2UZ * i + 1UZ]);
+            }
+            return Constellation<F>::custom(std::span<const std::complex<F>>(list), mode);
+        }
+    } catch (const gr::exception& refused) {
+        return std::unexpected(gr::Error(refused));
     }
-    throw std::invalid_argument("gr::digital::constellationFromName: name must be 'bpsk', 'qpsk', 'psk8', 'psk', 'qam' or 'custom', got '" + std::string(name) + "'");
+    return std::unexpected(gr::Error(std::format("gr::digital::constellationFromName: name must be 'bpsk', 'qpsk', 'psk8', 'psk', 'qam' or 'custom', got '{}'", name)));
 }
 
 } // namespace gr::digital
