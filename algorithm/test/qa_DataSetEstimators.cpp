@@ -30,12 +30,12 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
 
     "triangular DataSet"_test = []<typename T = double> {
         gr::DataSet<T> ds = generate::from<T>("generic DataSet", std::vector{0, 1, 1, 2, 3, 5, 8, 13}).value();
-        gr::dataset::draw(ds);
+        expect(gr::dataset::draw(ds).has_value());
     };
 
     "triangular DataSet"_test = []<typename T = double> {
         gr::DataSet<T> ds = generate::triangular<T>("triagonal", nSamples);
-        gr::dataset::draw(ds);
+        expect(gr::dataset::draw(ds).has_value());
 
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
@@ -55,7 +55,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         gr::DataSet<T>                 ds      = generate::ramp<T>("ramp", nSamples);
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-        gr::dataset::draw(ds);
+        expect(gr::dataset::draw(ds).has_value());
     };
 
     "gaussFunction DataSet"_test = []<typename T = double> {
@@ -66,7 +66,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         gr::DataSet<T>                 ds      = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation).value();
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-        gr::dataset::draw(ds);
+        expect(gr::dataset::draw(ds).has_value());
     };
 
     "ramp + gauss DataSet"_test = []<typename T = double> {
@@ -81,14 +81,14 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
 
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-        gr::dataset::draw(ds);
+        expect(gr::dataset::draw(ds).has_value());
     };
 
     "randomStepFunction DataSet"_test = []<typename T = double> {
         gr::DataSet<T>                 ds      = generate::randomStepFunction<T>("randomStepFunction", nSamples).value();
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
         expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-        gr::dataset::draw(ds);
+        expect(gr::dataset::draw(ds).has_value());
     };
 };
 
@@ -538,8 +538,8 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         auto responseCoefficients = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5)).value();
         auto filtered             = gr::dataset::filter::applyFilter(ds_step, responseCoefficients);
         if constexpr (std::is_same_v<T, float>) {
-            gr::dataset::draw(ds_step, DefaultChartConfig{});
-            gr::dataset::draw(filtered, DefaultChartConfig{.reset_view = gr::graphs::ResetChartView::RESET});
+            expect(gr::dataset::draw(ds_step, DefaultChartConfig{}).has_value());
+            expect(gr::dataset::draw(filtered, DefaultChartConfig{.reset_view = gr::graphs::ResetChartView::RESET}).has_value());
         }
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 
@@ -596,7 +596,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step).value();
 
         if constexpr (std::is_same_v<T, float>) {
-            gr::dataset::draw(ds_step, DefaultChartConfig{});
+            expect(gr::dataset::draw(ds_step, DefaultChartConfig{}).has_value());
         }
 
         "basic metrics"_test = [&] {
@@ -631,7 +631,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         auto metrics  = estimators::analyzeStepPulseResponse(ds_pulse).value();
 
         if constexpr (std::is_same_v<T, float>) {
-            gr::dataset::draw(ds_pulse, DefaultChartConfig{});
+            expect(gr::dataset::draw(ds_pulse, DefaultChartConfig{}).has_value());
         }
 
         "basic metrics"_test = [&] {
@@ -696,7 +696,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step).value();
 
         if constexpr (std::is_same_v<T, float>) {
-            gr::dataset::draw(ds_step, DefaultChartConfig{});
+            expect(gr::dataset::draw(ds_step, DefaultChartConfig{}).has_value());
         }
 
         "basic metrics"_test = [&] {

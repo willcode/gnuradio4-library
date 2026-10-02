@@ -230,17 +230,33 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
         constexpr float       kAmplitude    = 1.f;
         constexpr float       kOffset       = 0.2f;
 
-        auto sinDataSet    = generate::waveform<float>(generate::WaveType::Sine, kLength, kSamplingRate, kFrequency, kAmplitude, +kOffset);
-        auto cosDataSet    = generate::waveform<float>(generate::WaveType::Cosine, kLength, kSamplingRate, kFrequency, kAmplitude, -kOffset);
-        auto mergedDataSet = merge(sinDataSet, cosDataSet);
+        auto sinDataSet = generate::waveform<float>(generate::WaveType::Sine, kLength, kSamplingRate, kFrequency, kAmplitude, +kOffset);
+        auto cosDataSet = generate::waveform<float>(generate::WaveType::Cosine, kLength, kSamplingRate, kFrequency, kAmplitude, -kOffset);
+        auto merged     = merge(sinDataSet, cosDataSet);
+        expect(fatal(merged.has_value()));
+        const auto& mergedDataSet = *merged;
 
         expect(eq(sinDataSet.signal_values.size(), kLength));
         expect(eq(cosDataSet.signal_values.size(), kLength));
         expect(eq(mergedDataSet.signal_values.size(), 2UZ * kLength));
 
-        draw(sinDataSet);
-        draw(cosDataSet);
-        draw(mergedDataSet);
+        expect(draw(sinDataSet).has_value());
+        expect(draw(cosDataSet).has_value());
+        expect(draw(mergedDataSet).has_value());
+
+        const auto shorter = generate::waveform<float>(generate::WaveType::Sine, kLength / 2UZ, kSamplingRate, kFrequency, kAmplitude, kOffset);
+        const auto refused = merge(sinDataSet, shorter);
+        expect(fatal(!refused.has_value()));
+        expect(refused.error().message.contains("incompatible axis_values for DataSet 1")) << refused.error().message;
+
+        auto inconsistent = sinDataSet;
+        inconsistent.signal_values.pop_back();
+        const auto notDrawn = draw(inconsistent);
+        expect(fatal(!notDrawn.has_value()));
+        expect(notDrawn.error().message.contains("not consistent")) << notDrawn.error().message;
+        const auto notDrawnRange = drawMountainRange(inconsistent);
+        expect(fatal(!notDrawnRange.has_value()));
+        expect(notDrawnRange.error().message.contains("not consistent")) << notDrawnRange.error().message;
     };
 };
 

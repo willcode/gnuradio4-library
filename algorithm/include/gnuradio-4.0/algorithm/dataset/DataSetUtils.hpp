@@ -15,7 +15,7 @@ struct DefaultChartConfig {
 };
 
 template<DataSetLike TDataSet>
-[[maybe_unused]] bool draw(const TDataSet& dataSet, const DefaultChartConfig config = {}, std::size_t signalIndex = std::numeric_limits<std::size_t>::max(), std::source_location location = std::source_location::current()) {
+[[maybe_unused]] std::expected<bool, gr::Error> draw(const TDataSet& dataSet, const DefaultChartConfig config = {}, std::size_t signalIndex = std::numeric_limits<std::size_t>::max(), std::source_location location = std::source_location::current()) {
     using TValueType          = typename TDataSet::value_type;
     const bool plotAllSignals = signalIndex == std::numeric_limits<std::size_t>::max() || signalIndex >= dataSet.size();
 
@@ -28,7 +28,7 @@ template<DataSetLike TDataSet>
 
     std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataSet);
     if (!dsCheck) {
-        throw gr::exception(std::format("draw(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
+        return std::unexpected(gr::Error(std::format("draw(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location));
     }
 
     if (config.reset_view == gr::graphs::ResetChartView::RESET) {
@@ -123,10 +123,10 @@ struct MountainRangeConfig {
  * @param dataSet The DataSet to visualize
  * @param config Mountain range configuration (offsets, colors, chart size)
  * @param location Source location for error reporting
- * @return true if drawing succeeded, false otherwise
+ * @return true if drawing succeeded, false for an empty DataSet, an error for an inconsistent one
  */
 template<DataSetLike TDataSet>
-[[maybe_unused]] bool drawMountainRange(const TDataSet& dataSet, const MountainRangeConfig& config = {}, std::source_location location = std::source_location::current()) {
+[[maybe_unused]] std::expected<bool, gr::Error> drawMountainRange(const TDataSet& dataSet, const MountainRangeConfig& config = {}, std::source_location location = std::source_location::current()) {
     using TValueType = typename TDataSet::value_type;
 
     if (dataSet.signal_values.empty()                                    // check for empty data
@@ -138,7 +138,7 @@ template<DataSetLike TDataSet>
 
     std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataSet);
     if (!dsCheck) {
-        throw gr::exception(std::format("drawMountainRange(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
+        return std::unexpected(gr::Error(std::format("drawMountainRange(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location));
     }
 
     if (config.reset_view == gr::graphs::ResetChartView::RESET) {
@@ -262,7 +262,7 @@ template<DataSetLike TDataSet>
 }
 
 template<typename T, typename... TDataSets>
-DataSet<T> merge(const DataSet<T>& first, const TDataSets&... others) {
+[[nodiscard]] std::expected<DataSet<T>, gr::Error> merge(const DataSet<T>& first, const TDataSets&... others) {
     DataSet<T> mergedDataSet;
 
     mergedDataSet.timestamp   = first.timestamp;
@@ -280,12 +280,12 @@ DataSet<T> merge(const DataSet<T>& first, const TDataSets&... others) {
     mergedDataSet.timing_events.reserve(sizeof...(others) + 1UZ);
 
     // Helper lambda to add data from a single DataSet
-    auto addDataSet = [&mergedDataSet](const DataSet<T>& ds, size_t dsIndex) {
+    auto addDataSet = [&mergedDataSet](const DataSet<T>& ds, size_t dsIndex) -> std::expected<void, gr::Error> {
         if (ds.axis_values != mergedDataSet.axis_values) {
-            throw gr::exception(std::format("incompatible axis_values for DataSet {}", dsIndex));
+            return std::unexpected(gr::Error(std::format("incompatible axis_values for DataSet {}", dsIndex)));
         }
         if (ds.signal_names.size() > 1UZ || ds.signal_names.empty()) {
-            throw gr::exception(std::format("incompatible signal_name.size={} for DataSet {}", ds.signal_names.size(), dsIndex));
+            return std::unexpected(gr::Error(std::format("incompatible signal_name.size={} for DataSet {}", ds.signal_names.size(), dsIndex)));
         }
 
         // append signal values
@@ -300,12 +300,15 @@ DataSet<T> merge(const DataSet<T>& first, const TDataSets&... others) {
 
         // append timing events - N.B. index remain referenced to the original index of the sub-DataSet
         mergedDataSet.timing_events.push_back(ds.timing_events[0]);
+        return {};
     };
 
-    std::size_t dsIndex = 0UZ;
-    addDataSet(first, dsIndex++);         // add the first DataSet
-    (addDataSet(others, dsIndex++), ...); // add other DataSets
-
+    std::size_t                    dsIndex = 0UZ;
+    std::expected<void, gr::Error> added   = addDataSet(first, dsIndex++); // add the first DataSet
+    ((added = added ? addDataSet(others, dsIndex++) : added), ...);        // add the other DataSets up to the first refusal
+    if (!added) {
+        return std::unexpected(added.error());
+    }
     return mergedDataSet;
 }
 
