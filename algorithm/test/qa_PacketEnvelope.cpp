@@ -337,6 +337,27 @@ const boost::ut::suite<"packet envelope"> envelopeTests = [] {
         expect(refusalOf(bytes) == EnvelopeError::PayloadLengthField);
     };
 
+    // The bound a sender checks its size setting against. An envelope of exactly that length states every length
+    // field without loss. One byte more exceeds the 32-bit fields.
+    "the largest envelope fits every length field"_test = [] {
+        static_assert(kMaxEnvelopeBytes == std::numeric_limits<std::uint32_t>::max());
+        static_assert(kMaxEnvelopeBytes + 1U > std::numeric_limits<std::uint32_t>::max());
+        const auto     largest = static_cast<std::uint32_t>(kMaxEnvelopeBytes);
+        EnvelopeHeader header;
+        header.item_type     = kItemTypeCode<std::uint8_t>;
+        header.item_size     = 1U;
+        header.item_count    = largest;
+        header.payload_bytes = largest;
+        header.meta_bytes    = largest;
+
+        const std::expected<EnvelopeHeader, EnvelopeError> back = decodeHeader(encodeHeader(header));
+        expect(fatal(back.has_value()));
+        expect(back->item_count == largest);
+        expect(back->payload_bytes == largest);
+        expect(back->meta_bytes == largest);
+        expect(static_cast<std::uint64_t>(back->payload_bytes) == kMaxEnvelopeBytes);
+    };
+
     "round trip over every registered type"_test = [] {
         roundTripType<std::uint8_t>("uint8");
         roundTripType<std::int16_t>("int16");

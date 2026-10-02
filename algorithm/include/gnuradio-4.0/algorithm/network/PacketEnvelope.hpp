@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -60,6 +61,14 @@ inline constexpr std::uint8_t  kMetaEncodingYaml  = 1U;          ///< metadata f
 inline constexpr std::uint32_t kHeaderCrcResidue  = 0x2144DF1CU; ///< CRC-32/ISO-HDLC over all bytes of an intact header
 inline constexpr std::uint16_t kFirstItemTypeCode = 2U;          ///< `gr::pmt::Value::ValueType::Int8`
 inline constexpr std::uint16_t kLastItemTypeCode  = 13U;         ///< `gr::pmt::Value::ValueType::ComplexFloat64`
+
+/// @brief The largest envelope this layout can describe. A sender offers no envelope longer than this.
+///
+/// `item_count`, `payload_bytes` and `meta_bytes` are 32 bits wide. Each of them is at most the length of the whole
+/// envelope. A sender that refuses a size bound above this value therefore never presents a length that one of the
+/// three fields would truncate. The check belongs on the sender's size setting. It is one comparison at setup, not
+/// three for every message.
+inline constexpr std::uint64_t kMaxEnvelopeBytes = std::numeric_limits<std::uint32_t>::max();
 
 /// @brief Every reason a reader can refuse a header from the 32 bytes alone.
 ///
@@ -154,8 +163,9 @@ inline const gr::digital::Crc kHeaderCrc{32U, 0x04C11DB7ULL, 0xFFFFFFFFULL, 0xFF
 /// The specializations restate the table of `itemSizeOf` in the other direction. They do not call
 /// `gr::pmt::Value::get_value_type<T>()`, which is a private member. The mapping here also keeps the kernel free of any
 /// dependency on the interface of `pmt::Value`. The specializations must match the numbering of
-/// `gr::pmt::Value::ValueType`. A renumbering there changes this mapping. The primary template is left undefined on
-/// purpose. An item type this envelope cannot carry is a compile error and not a run-time zero.
+/// `gr::pmt::Value::ValueType`. The test suite pins the two with `static_assert`s. A renumbering there breaks the
+/// build. The primary template is left undefined on purpose. An item type this envelope cannot carry is a compile error
+/// and not a run-time zero.
 template<typename T>
 struct ItemTypeCode;
 
