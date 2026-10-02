@@ -7,13 +7,14 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <span>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/Crc.hpp>
 #include <gnuradio-4.0/algorithm/sync/MmseInterpolator.hpp>
 
@@ -83,52 +84,53 @@ struct PpmConfig {
  * the same reason — the remainder is the byte-wise CRC of the message octets XOR'd with the parity octets, which
  * is a division of the whole frame only when the split falls on an octet boundary.
  *
- * @throws std::invalid_argument naming the member and its value.
+ * @return a `gr::Error` naming the member and its value when the geometry is refused.
  */
-inline void validatePpmConfig(const PpmConfig& cfg) {
+[[nodiscard]] inline std::expected<void, gr::Error> validatePpmConfig(const PpmConfig& cfg) {
     if (cfg.pulseSlots.empty()) {
-        throw std::invalid_argument("gr::digital::validatePpmConfig: a pulse-position preamble needs at least one pulse slot, and none was given");
+        return std::unexpected(gr::Error("gr::digital::validatePpmConfig: a pulse-position preamble needs at least one pulse slot, and none was given"));
     }
     if (cfg.preambleSlots == 0UZ) {
-        throw std::invalid_argument("gr::digital::validatePpmConfig: preambleSlots is the preamble's length in slots and must be at least one, got 0");
+        return std::unexpected(gr::Error("gr::digital::validatePpmConfig: preambleSlots is the preamble's length in slots and must be at least one, got 0"));
     }
     for (const std::size_t slot : cfg.pulseSlots) {
         if (slot >= cfg.preambleSlots) {
-            throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: pulse slot {} lies outside the {} slot preamble", slot, cfg.preambleSlots));
+            return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: pulse slot {} lies outside the {} slot preamble", slot, cfg.preambleSlots)));
         }
     }
     std::vector<std::size_t> sorted(cfg.pulseSlots);
     std::ranges::sort(sorted);
     if (std::ranges::adjacent_find(sorted) != sorted.end()) {
-        throw std::invalid_argument("gr::digital::validatePpmConfig: a pulse slot is named twice, and the shape test reads each slot once");
+        return std::unexpected(gr::Error("gr::digital::validatePpmConfig: a pulse slot is named twice, and the shape test reads each slot once"));
     }
     if (sorted.size() == cfg.preambleSlots) {
-        throw std::invalid_argument("gr::digital::validatePpmConfig: every preamble slot carries a pulse, so there is no gap to measure the pulses against");
+        return std::unexpected(gr::Error("gr::digital::validatePpmConfig: every preamble slot carries a pulse, so there is no gap to measure the pulses against"));
     }
     if (cfg.formatBits < 1UZ) {
-        throw std::invalid_argument("gr::digital::validatePpmConfig: formatBits selects the length and must be at least one, got 0");
+        return std::unexpected(gr::Error("gr::digital::validatePpmConfig: formatBits selects the length and must be at least one, got 0"));
     }
     if (cfg.formatBits > 32UZ) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: the format field is read into a 32-bit word and its top bit is the length bit, so formatBits must be at most 32, got {}", cfg.formatBits));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: the format field is read into a 32-bit word and its top bit is the length bit, so formatBits must be at most 32, got {}", cfg.formatBits)));
     }
     if (cfg.shortBits > cfg.longBits) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: shortBits {} exceeds longBits {}", cfg.shortBits, cfg.longBits));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: shortBits {} exceeds longBits {}", cfg.shortBits, cfg.longBits)));
     }
     if (cfg.shortBits == 0UZ || cfg.shortBits % 8UZ != 0UZ || cfg.longBits % 8UZ != 0UZ) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: both frame lengths are emitted as octets and must be non-zero multiples of eight bits, got {} and {}", cfg.shortBits, cfg.longBits));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: both frame lengths are emitted as octets and must be non-zero multiples of eight bits, got {} and {}", cfg.shortBits, cfg.longBits)));
     }
     if (cfg.formatBits > cfg.shortBits) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: the {} bit format field does not fit in the {} bit short frame", cfg.formatBits, cfg.shortBits));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: the {} bit format field does not fit in the {} bit short frame", cfg.formatBits, cfg.shortBits)));
     }
     if (cfg.crcWidth < 3U || cfg.crcWidth > 64U) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: crcWidth must be in [3, 64], got {}", static_cast<unsigned>(cfg.crcWidth)));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: crcWidth must be in [3, 64], got {}", static_cast<unsigned>(cfg.crcWidth))));
     }
     if (cfg.crcWidth % 8U != 0U) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: the parity field is a trailing run of octets, so crcWidth must be a multiple of eight, got {}", static_cast<unsigned>(cfg.crcWidth)));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: the parity field is a trailing run of octets, so crcWidth must be a multiple of eight, got {}", static_cast<unsigned>(cfg.crcWidth))));
     }
     if (static_cast<std::size_t>(cfg.crcWidth) >= cfg.shortBits) {
-        throw std::invalid_argument(std::format("gr::digital::validatePpmConfig: a {} bit parity field leaves no message in a {} bit frame", static_cast<unsigned>(cfg.crcWidth), cfg.shortBits));
+        return std::unexpected(gr::Error(std::format("gr::digital::validatePpmConfig: a {} bit parity field leaves no message in a {} bit frame", static_cast<unsigned>(cfg.crcWidth), cfg.shortBits)));
     }
+    return {};
 }
 
 /**
@@ -149,7 +151,9 @@ inline void validatePpmConfig(const PpmConfig& cfg) {
     cfg.shortBits     = 56UZ;
     cfg.crcWidth      = 24U;
     cfg.crcPoly       = 0xFFF409ULL;
-    validatePpmConfig(cfg);
+    if (const auto valid = validatePpmConfig(cfg); !valid) {
+        throw gr::exception(valid.error().message);
+    }
     return cfg;
 }
 
@@ -288,10 +292,14 @@ struct PpmScanner {
     gr::digital::Crc _crc{3U, 0x3ULL};
 
     /// @brief Adopts an already validated framing at @p samplesPerSlot samples a slot, sizes every buffer, and clears the counters.
+    ///
+    /// Throws `gr::exception` for a framing `validatePpmConfig()` refuses and for a slot of no samples, and leaves the scanner as it was.
     void prepare(PpmConfig cfg, std::size_t samplesPerSlot) {
-        validatePpmConfig(cfg);
+        if (const auto valid = validatePpmConfig(cfg); !valid) {
+            throw gr::exception(valid.error().message);
+        }
         if (samplesPerSlot == 0UZ) {
-            throw std::invalid_argument("gr::digital::PpmScanner::prepare: a slot spans at least one sample, got 0");
+            throw gr::exception("gr::digital::PpmScanner::prepare: a slot spans at least one sample, got 0");
         }
         config = std::move(cfg);
         _slot  = samplesPerSlot;
@@ -357,9 +365,10 @@ struct PpmScanner {
      *        both invariant to positive scaling, so the amplitude is free but the quantity is not — a threshold
      *        stated on `|x|` is a different number on `|x|^2`.
      * @return how many leading samples the scanner is done with. The remainder is undecided and is presented again.
+     *         A `config` that `validatePpmConfig()` refuses is a `gr::Error`.
      */
     template<typename Sink>
-    [[nodiscard]] std::size_t consume(std::span<const float> magnitudes, Sink&& onFrame) {
+    [[nodiscard]] std::expected<std::size_t, gr::Error> consume(std::span<const float> magnitudes, Sink&& onFrame) {
         return consume(magnitudes, std::span<const std::complex<float>>{}, std::forward<Sink>(onFrame));
     }
 
@@ -372,25 +381,28 @@ struct PpmScanner {
      * @param onFrame as above; every reported frame carries the offset it was decided at as `phase`.
      * @return how many leading samples the scanner is done with, which is `guardSamples()` fewer than the positions
      *         it decided when a search ran: those samples are the next candidate's leading guard and are shown again.
-     * @throws std::invalid_argument when @p samples is shorter than @p magnitudes, which would misalign the two.
+     *         A @p samples shorter than @p magnitudes, which would misalign the two, is a `gr::Error`, and so is a
+     *         `config` that `validatePpmConfig()` refuses.
      *
      * The first `guardSamples()` positions of a stream are not decided, their interpolation reaching before its
      * first sample. Everything else is as the two-argument call: a position is decided exactly once, reads a fixed
      * window, and the result does not depend on how the input was chunked.
      */
     template<typename Sink>
-    [[nodiscard]] std::size_t consume(std::span<const float> magnitudes, std::span<const std::complex<float>> samples, Sink&& onFrame) {
+    [[nodiscard]] std::expected<std::size_t, gr::Error> consume(std::span<const float> magnitudes, std::span<const std::complex<float>> samples, Sink&& onFrame) {
         if (!configured()) {
             return 0UZ;
         }
         // `config` is a public member and may have been written since `prepare()` adopted it, so the bounds the
         // decisions below rest on -- above all `formatBits`, which the format's top bit is taken with a shift by
         // `formatBits - 1` -- are re-established here rather than taken on trust.
-        validatePpmConfig(config);
+        if (auto valid = validatePpmConfig(config); !valid) {
+            return std::unexpected(std::move(valid.error()));
+        }
         // the offsets are what `prepare()` built, so the geometry `guardSamples()` states and the one used here agree
         const bool search = !_phases.empty() && !samples.empty();
         if (search && samples.size() < magnitudes.size()) {
-            throw std::invalid_argument(std::format("gr::digital::PpmScanner::consume: samples is index-aligned with magnitudes and must be at least as long, got {} against {}", samples.size(), magnitudes.size()));
+            return std::unexpected(gr::Error(std::format("gr::digital::PpmScanner::consume: samples is index-aligned with magnitudes and must be at least as long, got {} against {}", samples.size(), magnitudes.size())));
         }
         const std::size_t window = windowSamples();
         const std::size_t guard  = search ? kInterpolatorGuard : 0UZ;

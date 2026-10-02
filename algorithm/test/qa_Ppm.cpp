@@ -14,6 +14,7 @@
 #include <tuple>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/digital/Ppm.hpp>
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
 #include <gnuradio-4.0/algorithm/sync/MmseInterpolator.hpp>
@@ -185,7 +186,7 @@ struct Scan {
         seen.ratios.push_back(frame.weak > 0.F ? frame.strong / frame.weak : std::numeric_limits<float>::max());
         seen.admitted.push_back(frame.admitted());
     };
-    seen.consumed = aligned ? scanner.consume(burst.magnitudes, burst.samples, sink) : scanner.consume(burst.magnitudes, sink);
+    seen.consumed = (aligned ? scanner.consume(burst.magnitudes, burst.samples, sink) : scanner.consume(burst.magnitudes, sink)).value();
     seen.counters = scanner.counters;
     return seen;
 }
@@ -324,10 +325,10 @@ const boost::ut::suite<"ppm"> ppmTests = [] {
         const auto refused = [](auto&& edit) {
             PpmConfig cfg = gr::digital::modeS();
             edit(cfg);
-            return throws([&cfg] { gr::digital::validatePpmConfig(cfg); });
+            return !gr::digital::validatePpmConfig(cfg).has_value();
         };
 
-        expect(nothrow([] { gr::digital::validatePpmConfig(gr::digital::modeS()); }));
+        expect(gr::digital::validatePpmConfig(gr::digital::modeS()).has_value());
         expect(refused([](PpmConfig& c) { c.pulseSlots.clear(); })) << "no pulse to measure";
         expect(refused([](PpmConfig& c) { c.pulseSlots.push_back(16UZ); })) << "a pulse slot outside the preamble";
         expect(refused([](PpmConfig& c) { c.pulseSlots.push_back(2UZ); })) << "a pulse slot named twice";
@@ -335,11 +336,12 @@ const boost::ut::suite<"ppm"> ppmTests = [] {
         expect(refused([](PpmConfig& c) { c.preambleSlots = 0UZ; }));
         expect(refused([](PpmConfig& c) { c.formatBits = 0UZ; }));
         expect(refused([](PpmConfig& c) { c.formatBits = 33UZ; })) << "a format field wider than the word that reads it, whose top bit could not be shifted out";
-        expect(nothrow([] {
-            PpmConfig cfg  = gr::digital::modeS();
-            cfg.formatBits = 32UZ;
-            gr::digital::validatePpmConfig(cfg);
-        })) << "the widest field the word still reads";
+        PpmConfig widest  = gr::digital::modeS();
+        widest.formatBits = 32UZ;
+        expect(gr::digital::validatePpmConfig(widest).has_value()) << "the widest field the word still reads";
+        widest.formatBits  = 33UZ;
+        const auto tooWide = gr::digital::validatePpmConfig(widest);
+        expect(!tooWide.has_value() && tooWide.error().message.contains("formatBits must be at most 32, got 33")) << "the error names the member and its value";
         expect(refused([](PpmConfig& c) { c.shortBits = 120UZ; })) << "the short frame is longer than the long one";
         expect(refused([](PpmConfig& c) { c.shortBits = 52UZ; })) << "a frame length that is not whole octets";
         expect(refused([](PpmConfig& c) { c.longBits = 116UZ; }));
@@ -351,7 +353,10 @@ const boost::ut::suite<"ppm"> ppmTests = [] {
         })) << "a parity field that leaves no message";
 
         PpmScanner scanner;
-        expect(throws([&scanner] { scanner.prepare(gr::digital::modeS(), 0UZ); })) << "a slot spans at least one sample";
+        expect(throws<gr::exception>([&scanner] { scanner.prepare(gr::digital::modeS(), 0UZ); })) << "a slot spans at least one sample";
+        PpmConfig noPulse = gr::digital::modeS();
+        noPulse.pulseSlots.clear();
+        expect(throws<gr::exception>([&scanner, &noPulse] { scanner.prepare(noPulse, 2UZ); })) << "a framing the validation refuses";
         expect(!scanner.configured()) << "a refused preparation leaves the scanner inert";
     };
 
@@ -522,13 +527,15 @@ const boost::ut::suite<"ppm"> ppmTests = [] {
         const auto                                 nothing = [](const PpmFrame&) {};
         const std::span<const float>               short_(burst.magnitudes.data(), aligned.phasedWindowSamples() - 1UZ);
         const std::span<const std::complex<float>> shortSamples(burst.samples.data(), aligned.phasedWindowSamples() - 1UZ);
-        expect(eq(aligned.consume(short_, shortSamples, nothing), 0UZ)) << "one sample short of a window decides nothing";
+        expect(eq(aligned.consume(short_, shortSamples, nothing).value(), 0UZ)) << "one sample short of a window decides nothing";
 
-        PpmScanner other = scannerFor(1UZ, 8UZ);
-        expect(throws([&other, &burst] {
-            const auto nothingElse = [](const PpmFrame&) {};
-            std::ignore            = other.consume(burst.magnitudes, std::span<const std::complex<float>>(burst.samples.data(), burst.samples.size() - 1UZ), nothingElse);
-        })) << "samples shorter than the magnitudes would misalign the two";
+        PpmScanner other      = scannerFor(1UZ, 8UZ);
+        const auto misaligned = other.consume(burst.magnitudes, std::span<const std::complex<float>>(burst.samples.data(), burst.samples.size() - 1UZ), nothing);
+        expect(!misaligned.has_value() && misaligned.error().message.contains("index-aligned")) << "samples shorter than the magnitudes would misalign the two";
+
+        other.config.formatBits = 0UZ;
+        const auto rewritten    = other.consume(burst.magnitudes, nothing);
+        expect(!rewritten.has_value() && rewritten.error().message.contains("formatBits")) << "a config written after prepare() is checked again";
     };
 
     "the interpolator's band is chosen on the ratio the search delivers, and the choice is measured"_test = [] {
