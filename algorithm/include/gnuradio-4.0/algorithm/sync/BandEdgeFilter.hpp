@@ -4,10 +4,13 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <expected>
 #include <numbers>
-#include <stdexcept>
+#include <source_location>
+#include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 
 /**
@@ -148,16 +151,19 @@ struct BandEdgeFilters {
  *                         prototype degenerates to the constant `4/pi`, and what is left is a
  *                         length-`N` sinc at the band edge rather than a band-edge filter
  * @param energy           receives `sum(b^2)` before normalization, the divisor
+ *
+ * Fewer than three taps, a `sps` that is not positive or a rolloff outside `[0, 1]` is an error, and @p energy
+ * is then left unwritten.
  */
-[[nodiscard]] inline std::vector<double> bandEdgePrototype(int nTaps, double samplesPerSymbol, double rolloff, double* energy = nullptr) {
+[[nodiscard]] inline std::expected<std::vector<double>, gr::Error> bandEdgePrototype(int nTaps, double samplesPerSymbol, double rolloff, double* energy = nullptr, std::source_location location = std::source_location::current()) {
     if (nTaps < 3) {
-        throw std::invalid_argument("bandEdgePrototype: nTaps must be at least 3");
+        return std::unexpected(gr::Error("bandEdgePrototype: nTaps must be at least 3", location));
     }
     if (!(samplesPerSymbol > 0.0)) {
-        throw std::invalid_argument("bandEdgePrototype: samplesPerSymbol must be positive");
+        return std::unexpected(gr::Error("bandEdgePrototype: samplesPerSymbol must be positive", location));
     }
     if (!(rolloff >= 0.0) || !(rolloff <= 1.0)) {
-        throw std::invalid_argument("bandEdgePrototype: rolloff must lie in [0, 1]");
+        return std::unexpected(gr::Error("bandEdgePrototype: rolloff must lie in [0, 1]", location));
     }
 
     const std::size_t len    = static_cast<std::size_t>(nTaps);
@@ -182,10 +188,15 @@ struct BandEdgeFilters {
     return b;
 }
 
-/// @brief The prototype and both spins. `lower` is `conj(upper)` elementwise and exactly.
-[[nodiscard]] inline BandEdgeFilters designBandEdgeFilters(int nTaps, double samplesPerSymbol, double rolloff) {
-    BandEdgeFilters           out;
-    const std::vector<double> b = bandEdgePrototype(nTaps, samplesPerSymbol, rolloff, &out.prototypeEnergy);
+/// @brief The prototype and both spins. `lower` is `conj(upper)` elementwise and exactly. The errors are those of
+/// `bandEdgePrototype`.
+[[nodiscard]] inline std::expected<BandEdgeFilters, gr::Error> designBandEdgeFilters(int nTaps, double samplesPerSymbol, double rolloff, std::source_location location = std::source_location::current()) {
+    BandEdgeFilters                                     out;
+    const std::expected<std::vector<double>, gr::Error> prototype = bandEdgePrototype(nTaps, samplesPerSymbol, rolloff, &out.prototypeEnergy, location);
+    if (!prototype) {
+        return std::unexpected(prototype.error());
+    }
+    const std::vector<double>& b = *prototype;
 
     out.center             = bandEdgeCenter(samplesPerSymbol, rolloff);
     const std::size_t len  = b.size();
@@ -236,7 +247,8 @@ public:
     /// @brief Samples between renormalizations of the recursive rotator; a fixed interval, not a magnitude test.
     static constexpr std::size_t kRenormalizeInterval = 256UZ;
 
-    BandEdgeDiscriminant(int nTaps, double samplesPerSymbol, double rolloff) : _filters(designBandEdgeFilters(nTaps, samplesPerSymbol, rolloff)), _length(_filters.prototype.size()) {
+    /// @brief The two filters `designBandEdgeFilters` returns. Its error throws `gr::exception`.
+    BandEdgeDiscriminant(int nTaps, double samplesPerSymbol, double rolloff) : _filters(designOrThrow(nTaps, samplesPerSymbol, rolloff)), _length(_filters.prototype.size()) {
         _increment = std::polar(1.0, -2.0 * std::numbers::pi * _filters.center);
         if constexpr (Form == BandEdgeForm::RealTaps) {
             // Reversed, so the dot product walks the window oldest to newest. `b` is symmetric, so the
@@ -301,6 +313,14 @@ public:
     [[nodiscard]] double                 center() const noexcept { return _filters.center; }
 
 private:
+    [[nodiscard]] static BandEdgeFilters designOrThrow(int nTaps, double samplesPerSymbol, double rolloff) {
+        std::expected<BandEdgeFilters, gr::Error> filters = designBandEdgeFilters(nTaps, samplesPerSymbol, rolloff);
+        if (!filters) {
+            throw gr::exception(filters.error().message, filters.error().sourceLocation);
+        }
+        return std::move(*filters);
+    }
+
     void push(std::vector<value_type>& window, value_type v) noexcept {
         window[_write]           = v;
         window[_write + _length] = v;

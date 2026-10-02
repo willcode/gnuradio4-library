@@ -206,7 +206,7 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
 
     "the pair lands where the derivation says it does"_test = [] {
         for (const DesignRow& row : kGeometry) {
-            const BandEdgeFilters filters  = designBandEdgeFilters(row.nTaps, row.sps, row.rolloff);
+            const BandEdgeFilters filters  = designBandEdgeFilters(row.nTaps, row.sps, row.rolloff).value();
             const Geometry        measured = geometryOf(filters.upper);
             const double          center   = bandEdgeCenter(row.sps, row.rolloff);
             const double          width    = row.rolloff / static_cast<double>(row.sps);
@@ -221,7 +221,7 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
     "the grid is centered for every length and every samples-per-symbol"_test = [] {
         for (int nTaps : {22, 23, 32, 44, 45, 64, 88, 89}) {
             for (double sps : {2.0, 4.0, 8.0}) {
-                const BandEdgeFilters filters = designBandEdgeFilters(nTaps, sps, 0.35);
+                const BandEdgeFilters filters = designBandEdgeFilters(nTaps, sps, 0.35).value();
                 const std::size_t     len     = filters.prototype.size();
 
                 float asymmetry = 0.0f;
@@ -256,7 +256,7 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
     "the prototype is divided by its energy, and the energy is the table"_test = [] {
         for (const DesignRow& row : kEnergy) {
             double                    energy = 0.0;
-            const std::vector<double> b      = bandEdgePrototype(row.nTaps, row.sps, row.rolloff, &energy);
+            const std::vector<double> b      = bandEdgePrototype(row.nTaps, row.sps, row.rolloff, &energy).value();
             expect(approx(energy, row.value, 5.0e-4)) << std::format("sps={} a={} N={}: sum(b^2) = {:.4f}", row.sps, row.rolloff, row.nTaps, energy);
 
             double normalized = 0.0;
@@ -266,7 +266,7 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
             expect(approx(normalized, 1.0 / energy, 1.0e-12)) << "dividing by the energy leaves sum(b^2) = 1/energy — not unit energy, deliberately";
         }
         double     energy    = 0.0;
-        const auto prototype = bandEdgePrototype(45, 4.0, 0.35, &energy);
+        const auto prototype = bandEdgePrototype(45, 4.0, 0.35, &energy).value();
         expect(approx(prototype[22] * energy, 4.0 / kPi, 1.0e-12)) << "the center tap is sinc(-1/2) + sinc(+1/2) = 4/pi for every alpha";
     };
 
@@ -276,7 +276,7 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
         const double  rolloff = 0.35;
 
         double                    energy = 0.0;
-        const std::vector<double> b      = bandEdgePrototype(nTaps, sps, rolloff, &energy);
+        const std::vector<double> b      = bandEdgePrototype(nTaps, sps, rolloff, &energy).value();
         const double              center = bandEdgeCenter(sps, rolloff);
         const double              middle = 0.5 * static_cast<double>(nTaps - 1);
 
@@ -515,8 +515,8 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
     "a redesign with the same parameters is bit-identical"_test = [] {
         // Two designs with the same parameters must agree bit for bit, so that recomputing a gain
         // with the value already in force cannot change the loop.
-        const BandEdgeFilters first  = designBandEdgeFilters(45, 4.0, 0.35);
-        const BandEdgeFilters second = designBandEdgeFilters(45, 4.0, 0.35);
+        const BandEdgeFilters first  = designBandEdgeFilters(45, 4.0, 0.35).value();
+        const BandEdgeFilters second = designBandEdgeFilters(45, 4.0, 0.35).value();
         expect(that % (first.prototype == second.prototype)) << "taps";
         expect(that % (first.upper == second.upper)) << "upper";
         expect(that % (first.lower == second.lower)) << "lower";
@@ -549,16 +549,24 @@ const boost::ut::suite<"band-edge filter"> bandEdgeTests = [] {
         }
     };
 
-    "degenerate parameters throw rather than designing something meaningless"_test = [] {
-        expect(throws<std::invalid_argument>([] { (void)bandEdgePrototype(2, 4.0, 0.35); }));
-        expect(throws<std::invalid_argument>([] { (void)bandEdgePrototype(45, 0.0, 0.35); }));
-        expect(throws<std::invalid_argument>([] { (void)bandEdgePrototype(45, -4.0, 0.35); }));
-        expect(throws<std::invalid_argument>([] { (void)bandEdgePrototype(45, 4.0, 1.5); }));
-        expect(throws<std::invalid_argument>([] { (void)bandEdgePrototype(45, 4.0, -0.1); }));
+    "degenerate parameters are errors rather than designing something meaningless"_test = [] {
+        const auto twoTaps = bandEdgePrototype(2, 4.0, 0.35);
+        expect(fatal(!twoTaps.has_value()));
+        expect(twoTaps.error().message.contains("at least 3")) << twoTaps.error().message;
+        expect(!bandEdgePrototype(45, 0.0, 0.35).has_value());
+        expect(!bandEdgePrototype(45, -4.0, 0.35).has_value());
+        expect(!bandEdgePrototype(45, 4.0, 1.5).has_value());
+        const auto negativeRolloff = bandEdgePrototype(45, 4.0, -0.1);
+        expect(fatal(!negativeRolloff.has_value()));
+        expect(negativeRolloff.error().message.contains("[0, 1]")) << negativeRolloff.error().message;
+        const auto filters = designBandEdgeFilters(45, 4.0, 1.5);
+        expect(fatal(!filters.has_value())) << "the filters return the prototype's error";
+        expect(filters.error().message.contains("rolloff")) << filters.error().message;
+        expect(throws<gr::exception>([] { (void)gr::sync::BandEdgeDiscriminant<>(2, 4.0, 0.35); })) << "the discriminant throws the design's error";
 
         // Even and non-dividing lengths are accepted by the centered grid.
-        expect(nothrow([] { (void)designBandEdgeFilters(44, 4.0, 0.35); }));
-        expect(nothrow([] { (void)designBandEdgeFilters(23, 2.5, 0.35); }));
+        expect(designBandEdgeFilters(44, 4.0, 0.35).has_value());
+        expect(designBandEdgeFilters(23, 2.5, 0.35).has_value());
     };
 };
 
