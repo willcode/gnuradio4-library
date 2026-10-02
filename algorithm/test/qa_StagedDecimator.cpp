@@ -28,7 +28,7 @@ using namespace gr::filter;
 
 [[nodiscard]] StagedDecimatorDesign singleStage(std::size_t decimation, double width) {
     const std::size_t ladder[] = {decimation};
-    return designDecimatorLadder(std::span<const std::size_t>(ladder), decimation, width);
+    return designDecimatorLadder(std::span<const std::size_t>(ladder), decimation, width).value();
 }
 
 /// Where a frequency lands after a decimation by @p d, in cycles per sample of the slower rate.
@@ -123,7 +123,7 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
     using namespace boost::ut;
 
     "the ladder is halvings first, then the odd factors largest first"_test = [] {
-        const auto expect_ladder = [](std::size_t d, bool factorOdd, const std::vector<std::size_t>& want) { expect(that % (stagedDecimatorLadder(d, factorOdd) == want)) << "D = " << d << (factorOdd ? " factored" : " one odd stage"); };
+        const auto expect_ladder = [](std::size_t d, bool factorOdd, const std::vector<std::size_t>& want) { expect(that % (stagedDecimatorLadder(d, factorOdd).value() == want)) << "D = " << d << (factorOdd ? " factored" : " one odd stage"); };
 
         expect_ladder(1UZ, true, {});
         expect_ladder(1UZ, false, {});
@@ -152,13 +152,13 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
 
         // An odd prime is one stage either way.
         for (const std::size_t d : {7UZ, 11UZ, 13UZ}) {
-            expect(that % (stagedDecimatorLadder(d, true) == std::vector<std::size_t>{d}));
-            expect(that % (stagedDecimatorLadder(d, false) == std::vector<std::size_t>{d}));
+            expect(that % (stagedDecimatorLadder(d, true).value() == std::vector<std::size_t>{d}));
+            expect(that % (stagedDecimatorLadder(d, false).value() == std::vector<std::size_t>{d}));
         }
     };
 
     "a decimation of one designs nothing at all"_test = [] {
-        const StagedDecimatorDesign d = designStagedDecimator(1UZ, 0.90);
+        const StagedDecimatorDesign d = designStagedDecimator(1UZ, 0.90).value();
         expect(eq(d.stages.size(), 0UZ));
         expect(eq(d.groupDelaySamples, 0ULL)) << "nothing folds at a decimation of one, so nothing is filtered";
         expect(eq(d.macsPerInput, 0.0));
@@ -166,7 +166,7 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
     };
 
     "a decimation of two is the cascade with one element"_test = [] {
-        const StagedDecimatorDesign d = designStagedDecimator(2UZ, 0.90);
+        const StagedDecimatorDesign d = designStagedDecimator(2UZ, 0.90).value();
         expect(eq(d.stages.size(), 1UZ));
         expect(d.stages[0UZ].halfband);
         expect(eq(d.stages[0UZ].decimation, 2UZ));
@@ -177,7 +177,7 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
     };
 
     "the D = 64 ladder, stage by stage"_test = [] {
-        const StagedDecimatorDesign d = designStagedDecimator(64UZ, 0.90);
+        const StagedDecimatorDesign d = designStagedDecimator(64UZ, 0.90).value();
         expect(eq(d.stages.size(), 6UZ)) << "six halvings and no odd tail";
 
         constexpr std::size_t kTaps[]     = {13UZ, 13UZ, 19UZ, 19UZ, 23UZ, 117UZ};
@@ -213,7 +213,7 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
 
     "the group delay is the stated sum over the stages"_test = [] {
         for (const std::size_t decimation : {1UZ, 2UZ, 3UZ, 8UZ, 16UZ, 25UZ, 32UZ, 64UZ}) {
-            const StagedDecimatorDesign d = designStagedDecimator(decimation, 0.90);
+            const StagedDecimatorDesign d = designStagedDecimator(decimation, 0.90).value();
 
             std::uint64_t want = 0ULL;
             for (const DecimatorStage& s : d.stages) {
@@ -221,11 +221,11 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
             }
             expect(eq(d.groupDelaySamples, want)) << "D = " << decimation;
         }
-        expect(eq(designStagedDecimator(64UZ, 0.90).groupDelaySamples, 2158ULL));
+        expect(eq(designStagedDecimator(64UZ, 0.90).value().groupDelaySamples, 2158ULL));
     };
 
     "a halving stage's even-offset taps are zeros and its live count says so"_test = [] {
-        const StagedDecimatorDesign d = designStagedDecimator(64UZ, 0.90);
+        const StagedDecimatorDesign d = designStagedDecimator(64UZ, 0.90).value();
 
         std::vector<std::vector<float>> stages;
         for (const DecimatorStage& s : d.stages) {
@@ -262,8 +262,8 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
 
     "the MAC tables, staged"_test = [] {
         const auto check = [](const Row& row, double width) {
-            const StagedDecimatorDesign one      = designStagedDecimator(row.decimation, width, 85.0, 0.05, false);
-            const StagedDecimatorDesign factored = designStagedDecimator(row.decimation, width, 85.0, 0.05, true);
+            const StagedDecimatorDesign one      = designStagedDecimator(row.decimation, width, 85.0, 0.05, false).value();
+            const StagedDecimatorDesign factored = designStagedDecimator(row.decimation, width, 85.0, 0.05, true).value();
 
             expect(approx(tabulatedMacsPerInput(one), row.oneOddStage, kTabulated)) << "D = " << row.decimation << " at " << width << ", one odd stage";
             expect(approx(tabulatedMacsPerInput(factored), row.oddFactored, kTabulated)) << "D = " << row.decimation << " at " << width << ", odd factored";
@@ -279,8 +279,8 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
 
         // At D = 25 one polyphase stage reclaims exactly nothing, because the ladder degenerates
         // to the filter it is compared with.
-        expect(approx(tabulatedMacsPerInput(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, false)), 53.88, kTabulated));
-        expect(approx(tabulatedMacsPerInput(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, true)), 17.84, kTabulated));
+        expect(approx(tabulatedMacsPerInput(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, false).value()), 53.88, kTabulated));
+        expect(approx(tabulatedMacsPerInput(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, true).value()), 17.84, kTabulated));
     };
 
     "the MAC tables, against the single-stage design"_test = [] {
@@ -290,7 +290,7 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
             expect(eq(single.stages[0UZ].taps.size(), row.singleTaps)) << "D = " << row.decimation << " at " << width << ", single-stage length";
             expect(approx(single.macsPerInput, row.single, kTabulated)) << "D = " << row.decimation << " at " << width << ", single-stage cost";
 
-            const double gain = single.macsPerInput / tabulatedMacsPerInput(designStagedDecimator(row.decimation, width, 85.0, 0.05, true));
+            const double gain = single.macsPerInput / tabulatedMacsPerInput(designStagedDecimator(row.decimation, width, 85.0, 0.05, true).value());
             expect(gain >= 0.999) << "D = " << row.decimation << ": staging never costs more than one stage";
         };
 
@@ -313,7 +313,7 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
         constexpr double kRippleDb      = 0.05;
 
         for (const std::size_t decimation : {8UZ, 16UZ, 25UZ}) {
-            const StagedDecimatorDesign ladder = designStagedDecimator(decimation, 0.90);
+            const StagedDecimatorDesign ladder = designStagedDecimator(decimation, 0.90).value();
             const StagedDecimatorDesign single = singleStage(decimation, 0.90);
 
             for (const StagedDecimatorDesign& d : {ladder, single}) {
@@ -325,26 +325,40 @@ const boost::ut::suite<"StagedDecimator planner"> _stagedDecimator = [] {
     };
 
     "degenerate parameters"_test = [] {
-        expect(throws<std::invalid_argument>([] { std::ignore = designStagedDecimator(0UZ, 0.90); }));
-        expect(throws<std::invalid_argument>([] { std::ignore = stagedDecimatorLadder(0UZ); }));
-        expect(throws<std::invalid_argument>([] { std::ignore = designStagedDecimator(8UZ, 0.0); }));
-        expect(throws<std::invalid_argument>([] { std::ignore = designStagedDecimator(8UZ, 1.0); }));
-        expect(throws<std::invalid_argument>([] { std::ignore = designStagedDecimator(8UZ, -0.5); }));
+        expect(!designStagedDecimator(0UZ, 0.90).has_value());
+        expect(!stagedDecimatorLadder(0UZ).has_value());
+        expect(!designStagedDecimator(8UZ, 0.0).has_value());
+        expect(!designStagedDecimator(8UZ, 1.0).has_value());
+        expect(!designStagedDecimator(8UZ, -0.5).has_value());
+
+        const auto noLadder = stagedDecimatorLadder(0UZ);
+        expect(fatal(!noLadder.has_value()));
+        expect(noLadder.error().message.contains("stagedDecimatorLadder")) << noLadder.error().message;
+
+        const std::vector<std::size_t> withOne{2UZ, 1UZ};
+        const auto                     shortStage = designDecimatorLadder(std::span<const std::size_t>(withOne), 2UZ, 0.9);
+        expect(fatal(!shortStage.has_value())) << "a stage of one";
+        expect(shortStage.error().message.contains("at least two")) << shortStage.error().message;
+
+        const std::vector<std::size_t> single{4UZ};
+        const auto                     wide = designDecimatorLadder(std::span<const std::size_t>(single), 4UZ, 1.5);
+        expect(fatal(!wide.has_value())) << "a passband wider than the output rate";
+        expect(wide.error().message.contains("(0, 1)")) << wide.error().message;
 
         // An odd prime above the bound is placed anyway and reported: refusing a legal decimation is
         // worse than a long last stage.
-        const StagedDecimatorDesign oversized = designStagedDecimator(29UZ, 0.90, 85.0, 0.05, true, 25UZ);
+        const StagedDecimatorDesign oversized = designStagedDecimator(29UZ, 0.90, 85.0, 0.05, true, 25UZ).value();
         expect(eq(oversized.stages.size(), 1UZ));
         expect(eq(oversized.oversizedOddFactor, 29UZ));
         expect(oversized.ok);
 
-        expect(eq(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, true, 25UZ).oversizedOddFactor, 0UZ));
-        expect(eq(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, false, 25UZ).oversizedOddFactor, 0UZ));
+        expect(eq(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, true, 25UZ).value().oversizedOddFactor, 0UZ));
+        expect(eq(designStagedDecimator(25UZ, 0.90, 85.0, 0.05, false, 25UZ).value().oversizedOddFactor, 0UZ));
     };
 
     "a ladder already built is served from the memo"_test = [] {
-        const StagedDecimatorDesign first  = designStagedDecimator(16UZ, 0.90);
-        const StagedDecimatorDesign second = designStagedDecimator(16UZ, 0.90);
+        const StagedDecimatorDesign first  = designStagedDecimator(16UZ, 0.90).value();
+        const StagedDecimatorDesign second = designStagedDecimator(16UZ, 0.90).value();
 
         expect(eq(first.stages.size(), second.stages.size()));
         for (std::size_t i = 0UZ; i < first.stages.size(); ++i) {

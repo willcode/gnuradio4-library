@@ -128,7 +128,7 @@ constexpr DesignRow kDefaults[] = {
 [[nodiscard]] std::vector<float> resampleWhole(std::size_t l, std::size_t m, const std::vector<float>& taps, const std::vector<float>& x) {
     PolyphaseResampler<float> resampler(l, m, std::span<const float>(taps));
     std::vector<float>        y(resampler.outputsFor(x.size()));
-    resampler.process(std::span<const float>(x), std::span<float>(y));
+    resampler.process(std::span<const float>(x), std::span<float>(y)).value();
     return y;
 }
 
@@ -164,7 +164,7 @@ template<typename S, typename H>
     using Out = typename PolyphaseResampler<S, H>::output_type;
     PolyphaseResampler<S, H> filter(1UZ, m, std::span<const H>(taps));
     std::vector<Out>         y(filter.outputsFor(x.size()));
-    filter.process(std::span<const S>(x), std::span<Out>(y));
+    filter.process(std::span<const S>(x), std::span<Out>(y)).value();
     return y;
 }
 
@@ -215,7 +215,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
             const double width = row.stopEdge - row.passEdge;
             expect(eq(gr::filter::fir::design::kaiserLength(60.0, width) | 1UZ, static_cast<std::size_t>(row.estimated))) << row.l << "/" << row.m << ": Kaiser's estimate";
 
-            const ResamplerDesign design = designResampler(row.l, row.m);
+            const ResamplerDesign design = designResampler(row.l, row.m).value();
             expect(that % design.ok) << row.l << "/" << row.m << ": the search met both targets";
             expect(eq(design.designLength, row.searched)) << row.l << "/" << row.m << ": searched length";
             expect(approx(design.stopbandDb, row.stopbandDb, 0.05)) << row.l << "/" << row.m << ": stopband " << design.stopbandDb;
@@ -234,23 +234,23 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
     "L/M and M/L design the same prototype"_test = [] {
         // The band edges depend on max(l, m) alone, so only the padding and the branch count differ.
-        const ResamplerDesign up   = designResampler(4UZ, 5UZ);
-        const ResamplerDesign down = designResampler(5UZ, 4UZ);
+        const ResamplerDesign up   = designResampler(4UZ, 5UZ).value();
+        const ResamplerDesign down = designResampler(5UZ, 4UZ).value();
         expect(eq(up.designLength, down.designLength));
         expect(approx(up.stopbandDb, down.stopbandDb, 1e-9));
-        expect(eq(designResampler(6UZ, 4UZ).designLength, designResampler(3UZ, 2UZ).designLength)) << "and the ratio is reduced before it is designed";
+        expect(eq(designResampler(6UZ, 4UZ).value().designLength, designResampler(3UZ, 2UZ).value().designLength)) << "and the ratio is reduced before it is designed";
     };
 
     "a rate change of one is a pass-through, not a delta"_test = [] {
-        const ResamplerDesign design = designResampler(1UZ, 1UZ);
+        const ResamplerDesign design = designResampler(1UZ, 1UZ).value();
         expect(eq(design.taps.size(), 1UZ));
         expect(eq(design.taps[0UZ], 1.0f));
-        expect(eq(designResampler(7UZ, 7UZ).taps.size(), 1UZ)) << "after reduction";
+        expect(eq(designResampler(7UZ, 7UZ).value().taps.size(), 1UZ)) << "after reduction";
 
         const std::vector<float>  x = noise(1000UZ, 11U);
         PolyphaseResampler<float> resampler(1UZ, 1UZ, std::span<const float>(design.taps));
         std::vector<float>        y(x.size());
-        expect(eq(resampler.process(std::span<const float>(x), std::span<float>(y)), x.size()));
+        expect(eq(resampler.process(std::span<const float>(x), std::span<float>(y)).value(), x.size()));
         expect(that % (y == x)) << "bit for bit";
     };
 
@@ -270,7 +270,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
                 expect(eq(resampler.phase(), (k * ratio.m) % ratio.l)) << ratio.l << "/" << ratio.m << " k=" << k << ": branch";
 
                 const std::size_t made = resampler.outputsFor(1UZ);
-                expect(eq(resampler.process(std::span<const float>(one), std::span<float>(out.data(), made)), made));
+                expect(eq(resampler.process(std::span<const float>(one), std::span<float>(out.data(), made)).value(), made));
                 ++fed;
                 for (std::size_t j = 0UZ; j < made; ++j) {
                     expect(eq(((k + j) * ratio.m) / ratio.l, fed - 1UZ)) << ratio.l << "/" << ratio.m << " k=" << (k + j) << ": input anchor";
@@ -298,7 +298,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
             const std::vector<float> x(ratio.m, 0.5f);
             std::vector<float>       y(ratio.l);
             for (std::size_t n = 1UZ; n <= 1000UZ; ++n) {
-                expect(eq(resampler.process(std::span<const float>(x), std::span<float>(y)), ratio.l)) << ratio.l << "/" << ratio.m << " at chunk " << n;
+                expect(eq(resampler.process(std::span<const float>(x), std::span<float>(y)).value(), ratio.l)) << ratio.l << "/" << ratio.m << " at chunk " << n;
             }
             expect(eq(resampler.produced(), 1000ULL * ratio.l)) << ratio.l << "/" << ratio.m << ": no drift over a thousand chunks";
             expect(eq(resampler.phase(), 0UZ)) << "and the phase closes on itself";
@@ -320,7 +320,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
                     const std::span   in(x.data() + at, take);
                     const std::size_t made = resampler.outputsFor(take);
                     y.resize(y.size() + made);
-                    resampler.process(in, std::span<float>(y.data() + y.size() - made, made));
+                    resampler.process(in, std::span<float>(y.data() + y.size() - made, made)).value();
                 }
                 expect(that % (y == whole)) << ratio.l << "/" << ratio.m << " in chunks of " << chunk;
             }
@@ -334,14 +334,14 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
                 const std::size_t take = std::min<std::size_t>(1UZ + (rng() % 1500U), x.size() - at);
                 const std::size_t made = resampler.outputsFor(take);
                 y.resize(y.size() + made);
-                resampler.process(std::span(x.data() + at, take), std::span<float>(y.data() + y.size() - made, made));
+                resampler.process(std::span(x.data() + at, take), std::span<float>(y.data() + y.size() - made, made)).value();
                 at += take;
             }
             expect(that % (y == whole)) << ratio.l << "/" << ratio.m << " in random chunks";
 
             resampler.reset();
             std::vector<float> again(whole.size());
-            resampler.process(std::span<const float>(x), std::span<float>(again));
+            resampler.process(std::span<const float>(x), std::span<float>(again)).value();
             expect(that % (again == whole)) << "reset starts a new stream";
         }
     };
@@ -370,12 +370,12 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
     "the designed filter has unit gain at DC"_test = [] {
         for (const DesignRow& row : kDefaults) {
-            const ResamplerDesign     design = designResampler(row.l, row.m);
+            const ResamplerDesign     design = designResampler(row.l, row.m).value();
             PolyphaseResampler<float> resampler(row.l, row.m, std::span<const float>(design.taps));
 
             const std::vector<float> x(4UZ * resampler.branchLength() * row.m + 4UZ * row.m, 1.0f);
             std::vector<float>       y(resampler.outputsFor(x.size()));
-            resampler.process(std::span<const float>(x), std::span<float>(y));
+            resampler.process(std::span<const float>(x), std::span<float>(y)).value();
 
             // past the rise out of the zeroed history, a constant must come out a constant of the
             // same size: this is the test that catches a dropped gain factor of l
@@ -390,7 +390,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
     "a tone survives and its image does not"_test = [] {
         for (const DesignRow& row : kDefaults) {
-            const ResamplerDesign     design = designResampler(row.l, row.m);
+            const ResamplerDesign     design = designResampler(row.l, row.m).value();
             PolyphaseResampler<float> resampler(row.l, row.m, std::span<const float>(design.taps));
 
             // an integer number of cycles per output record and per input record, so a bare DFT is
@@ -404,7 +404,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
                 x[i] = static_cast<float>(std::cos(2.0 * std::numbers::pi * static_cast<double>(bin) * static_cast<double>(i) / static_cast<double>(nIn)));
             }
             std::vector<float> y(resampler.outputsFor(x.size()));
-            resampler.process(std::span<const float>(x), std::span<float>(y));
+            resampler.process(std::span<const float>(x), std::span<float>(y)).value();
 
             // the second record only: the first carries the filter's rise out of silence
             const std::vector<float> steady(y.end() - static_cast<std::ptrdiff_t>(nOut), y.end());
@@ -486,10 +486,12 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
     "degenerate settings"_test = [] {
         const std::vector<float> unit{1.0f};
-        expect(throws<std::invalid_argument>([&] { PolyphaseResampler<float>(0UZ, 1UZ, std::span<const float>(unit)); }));
-        expect(throws<std::invalid_argument>([&] { PolyphaseResampler<float>(1UZ, 0UZ, std::span<const float>(unit)); }));
-        expect(throws<std::invalid_argument>([&] { PolyphaseResampler<float>(1UZ, 1UZ, std::span<const float>()); }));
-        expect(throws<std::invalid_argument>([&] { std::ignore = designResampler(0UZ, 4UZ); }));
+        expect(throws<gr::exception>([&] { PolyphaseResampler<float>(0UZ, 1UZ, std::span<const float>(unit)); }));
+        expect(throws<gr::exception>([&] { PolyphaseResampler<float>(1UZ, 0UZ, std::span<const float>(unit)); }));
+        expect(throws<gr::exception>([&] { PolyphaseResampler<float>(1UZ, 1UZ, std::span<const float>()); }));
+        const auto noInterpolation = designResampler(0UZ, 4UZ);
+        expect(fatal(!noInterpolation.has_value()));
+        expect(noInterpolation.error().message.contains("at least one")) << noInterpolation.error().message;
 
         // fewer taps than branches: padded, and every branch that has no tap contributes zero
         const std::vector<float>  three{0.25f, 0.5f, 0.25f};
@@ -498,14 +500,16 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
         expect(eq(resampler.branchLength(), 1UZ));
         const std::vector<float> x{1.0f, 2.0f};
         std::vector<float>       y(8UZ);
-        expect(eq(resampler.process(std::span<const float>(x), std::span<float>(y)), 8UZ));
+        expect(eq(resampler.process(std::span<const float>(x), std::span<float>(y)).value(), 8UZ));
         expect(eq(y[0UZ], 0.25f));
         expect(eq(y[3UZ], 0.0f)) << "the padded branch";
 
         // and an output span the caller sized short is refused rather than written past
         PolyphaseResampler<float> other(1UZ, 1UZ, std::span<const float>(unit));
         std::vector<float>        tooSmall(1UZ);
-        expect(throws<std::invalid_argument>([&] { std::ignore = other.process(std::span<const float>(x), std::span<float>(tooSmall)); }));
+        const auto                refused = other.process(std::span<const float>(x), std::span<float>(tooSmall));
+        expect(fatal(!refused.has_value()));
+        expect(refused.error().message.contains("shorter than outputsFor()")) << refused.error().message;
     };
 
     "complex samples take the same schedule"_test = [] {
@@ -520,7 +524,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
         PolyphaseResampler<CF> resampler(3UZ, 2UZ, std::span<const float>(taps));
         std::vector<CF>        y(resampler.outputsFor(x.size()));
-        resampler.process(std::span<const CF>(x), std::span<CF>(y));
+        resampler.process(std::span<const CF>(x), std::span<CF>(y)).value();
 
         // The two parts are the two real streams: same schedule, same branches, same taps. Not bit
         // for bit against the real kernel, though: a complex step carries four taps in eight lanes
@@ -543,7 +547,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
             const std::size_t take = std::min<std::size_t>(7UZ, x.size() - at);
             const std::size_t made = chunked.outputsFor(take);
             piecewise.resize(piecewise.size() + made);
-            chunked.process(std::span<const CF>(x.data() + at, take), std::span<CF>(piecewise.data() + piecewise.size() - made, made));
+            chunked.process(std::span<const CF>(x.data() + at, take), std::span<CF>(piecewise.data() + piecewise.size() - made, made)).value();
         }
         expect(that % (piecewise == y)) << "one call or many, bit for bit";
     };
@@ -619,7 +623,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
                         const std::size_t take = std::min(chunk, x.size() - at);
                         const std::size_t made = filter.outputsFor(take);
                         y.resize(y.size() + made);
-                        filter.process(std::span<const S>(x.data() + at, take), std::span<Out>(y.data() + y.size() - made, made));
+                        filter.process(std::span<const S>(x.data() + at, take), std::span<Out>(y.data() + y.size() - made, made)).value();
                     }
                     expect(that % (y == whole)) << decltype(c)::name() << " at M=" << m << " in chunks of " << chunk;
                 }
@@ -644,7 +648,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
             PolyphaseResampler<S, H> old(1UZ, m, std::span<const H>(before));
             std::vector<Out>         head(old.outputsFor(at));
-            old.process(std::span<const S>(xs.data(), at), std::span<Out>(head));
+            old.process(std::span<const S>(xs.data(), at), std::span<Out>(head)).value();
 
             PolyphaseResampler<S, H> primed(1UZ, m, std::span<const H>(after));
             expect(eq(primed.window().size(), primed.branchLength() - 1UZ));
@@ -656,12 +660,12 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
             const std::size_t        history = replayed.branchLength() - 1UZ;
             const std::size_t        back    = ((history + m - 1UZ) / m) * m;
             std::vector<Out>         sink(replayed.outputsFor(back));
-            replayed.process(std::span<const S>(xs.data() + at - back, back), std::span<Out>(sink));
+            replayed.process(std::span<const S>(xs.data() + at - back, back), std::span<Out>(sink)).value();
 
             std::vector<Out> a(primed.outputsFor(rest));
             std::vector<Out> b(replayed.outputsFor(rest));
-            primed.process(std::span<const S>(xs.data() + at, rest), std::span<Out>(a));
-            replayed.process(std::span<const S>(xs.data() + at, rest), std::span<Out>(b));
+            primed.process(std::span<const S>(xs.data() + at, rest), std::span<Out>(a)).value();
+            replayed.process(std::span<const S>(xs.data() + at, rest), std::span<Out>(b)).value();
             expect(that % (a == b)) << "M=" << m << ": the accessor path and the replay are the same stream";
 
             // Both are what the new taps would have produced had they run from the start, which is
@@ -682,7 +686,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
         PolyphaseResampler<S, H> shortHistory(1UZ, 1UZ, std::span<const H>(noise(31UZ, 857U)));
         std::vector<Out>         head(shortHistory.outputsFor(512UZ));
-        shortHistory.process(std::span<const S>(x.data(), 512UZ), std::span<Out>(head));
+        shortHistory.process(std::span<const S>(x.data(), 512UZ), std::span<Out>(head)).value();
 
         PolyphaseResampler<S, H> grown(1UZ, 1UZ, std::span<const H>(taps));
         grown.primeWith(shortHistory.window());
@@ -702,7 +706,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
 
         PolyphaseResampler<S, H> source(1UZ, 1UZ, std::span<const H>(taps));
         std::vector<Out>         seen(source.outputsFor(x.size()));
-        source.process(std::span<const S>(x), std::span<Out>(seen));
+        source.process(std::span<const S>(x), std::span<Out>(seen)).value();
 
         PolyphaseResampler<S, H> primed(1UZ, 1UZ, std::span<const H>(taps));
         const auto               t0 = std::chrono::steady_clock::now();
@@ -713,7 +717,7 @@ const boost::ut::suite<"polyphase resampler"> polyphaseResamplerTests = [] {
         const std::size_t        history = replayed.branchLength() - 1UZ;
         std::vector<Out>         discard(replayed.outputsFor(history));
         const auto               t2 = std::chrono::steady_clock::now();
-        replayed.process(std::span<const S>(x.data() + x.size() - history, history), std::span<Out>(discard));
+        replayed.process(std::span<const S>(x.data() + x.size() - history, history), std::span<Out>(discard)).value();
         const auto t3 = std::chrono::steady_clock::now();
 
         expect(that % std::equal(primed.window().begin(), primed.window().end(), replayed.window().begin())) << "the two reach the same state";

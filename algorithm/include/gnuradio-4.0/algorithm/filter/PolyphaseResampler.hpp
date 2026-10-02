@@ -5,16 +5,18 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <mutex>
 #include <numeric>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 
 /**
@@ -306,10 +308,12 @@ struct PolyphaseDesignKey {
  * one. At `147/160` that is a few seconds over ~5800-tap candidates, so the result is memoized by
  * `(l, m, rolloff, attenuationDb, maxRippleDb, maxTaps)`; the first design of a ratio still pays. The
  * memo holds the last eight designs and drops the oldest, so a stream sweeping its rate cannot grow it.
+ *
+ * Interpolation or decimation of zero is an error.
  */
-[[nodiscard]] inline ResamplerDesign designResampler(std::size_t interpolation, std::size_t decimation, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1, std::size_t maxTaps = 1UZ << 16) {
+[[nodiscard]] inline std::expected<ResamplerDesign, gr::Error> designResampler(std::size_t interpolation, std::size_t decimation, double rolloff = 0.2, double attenuationDb = 60.0, double maxRippleDb = 0.1, std::size_t maxTaps = 1UZ << 16, std::source_location location = std::source_location::current()) {
     if (interpolation == 0UZ || decimation == 0UZ) {
-        throw std::invalid_argument("designResampler: interpolation and decimation must both be at least one");
+        return std::unexpected(gr::Error("designResampler: interpolation and decimation must both be at least one", location));
     }
 
     const std::size_t                g   = std::gcd(interpolation, decimation);
@@ -369,10 +373,12 @@ struct PolyphaseDesignKey {
  *
  * Arithmetic only: no design runs here, so a caller can assert the ladder without paying for a tap
  * search.
+ *
+ * A decimation of zero is an error.
  */
-[[nodiscard]] inline std::vector<std::size_t> stagedDecimatorLadder(std::size_t decimation, bool factorOdd = true) {
+[[nodiscard]] inline std::expected<std::vector<std::size_t>, gr::Error> stagedDecimatorLadder(std::size_t decimation, bool factorOdd = true, std::source_location location = std::source_location::current()) {
     if (decimation == 0UZ) {
-        throw std::invalid_argument("stagedDecimatorLadder: the decimation must be at least one");
+        return std::unexpected(gr::Error("stagedDecimatorLadder: the decimation must be at least one", location));
     }
 
     std::vector<std::size_t> out;
@@ -556,13 +562,16 @@ struct DecimatorLadderKey {
  * @param passbandWidth the fraction of the output rate the passband occupies, in `(0, 1)`; not of
  *                      the input rate, and not a frequency: every edge in the law is a ratio, and a
  *                      caller thinking in hertz divides once at the call site where the rate is known
+ *
+ * A decimation of zero, a passband width outside (0, 1), a stage below two or a passband wider than a stage
+ * leaves room for is an error.
  */
-[[nodiscard]] inline StagedDecimatorDesign designDecimatorLadder(std::span<const std::size_t> ladder, std::size_t decimation, double passbandWidth = 0.8, double attenuationDb = 85.0, double rippleDb = 0.05, std::size_t maxTaps = 1UZ << 16) {
+[[nodiscard]] inline std::expected<StagedDecimatorDesign, gr::Error> designDecimatorLadder(std::span<const std::size_t> ladder, std::size_t decimation, double passbandWidth = 0.8, double attenuationDb = 85.0, double rippleDb = 0.05, std::size_t maxTaps = 1UZ << 16, std::source_location location = std::source_location::current()) {
     if (decimation == 0UZ) {
-        throw std::invalid_argument("designDecimatorLadder: the decimation must be at least one");
+        return std::unexpected(gr::Error("designDecimatorLadder: the decimation must be at least one", location));
     }
     if (!(passbandWidth > 0.0) || !(passbandWidth < 1.0)) {
-        throw std::invalid_argument("designDecimatorLadder: the passband width is a fraction of the output rate and must lie in (0, 1)");
+        return std::unexpected(gr::Error("designDecimatorLadder: the passband width is a fraction of the output rate and must lie in (0, 1)", location));
     }
 
     const detail::DecimatorLadderKey key = {std::vector<std::size_t>(ladder.begin(), ladder.end()), decimation, passbandWidth, attenuationDb, rippleDb, maxTaps};
@@ -588,7 +597,7 @@ struct DecimatorLadderKey {
     std::size_t stride = 1UZ;
     for (const std::size_t d : ladder) {
         if (d < 2UZ) {
-            throw std::invalid_argument("designDecimatorLadder: a stage decimation must be at least two");
+            return std::unexpected(gr::Error("designDecimatorLadder: a stage decimation must be at least two", location));
         }
 
         DecimatorStage stage;
@@ -600,7 +609,7 @@ struct DecimatorLadderKey {
         stage.passEdge    = (width / 2.0) / rate;
         stage.stopEdge    = (rate / static_cast<double>(d) - width / 2.0) / rate;
         if (!(stage.stopEdge > stage.passEdge)) {
-            throw std::invalid_argument("designDecimatorLadder: the passband is wider than a stage's own output rate leaves room for");
+            return std::unexpected(gr::Error("designDecimatorLadder: the passband is wider than a stage's own output rate leaves room for", location));
         }
 
         const double      cutoff = stage.halfband ? 0.25 : 0.5 * (stage.passEdge + stage.stopEdge);
@@ -635,14 +644,22 @@ struct DecimatorLadderKey {
  * @p maxOddFactor bounds the closing stage's length. An odd factor above it is placed anyway and
  * reported in `oversizedOddFactor` rather than refused: an odd prime `D` cannot be factored, and
  * refusing a legal decimation is worse than a long last stage.
+ *
+ * A decimation of zero or a passband width outside (0, 1) is an error.
  */
-[[nodiscard]] inline StagedDecimatorDesign designStagedDecimator(std::size_t decimation, double passbandWidth = 0.8, double attenuationDb = 85.0, double rippleDb = 0.05, bool factorOdd = true, std::size_t maxOddFactor = 25UZ, std::size_t maxTaps = 1UZ << 16) {
-    const std::vector<std::size_t> ladder = stagedDecimatorLadder(decimation, factorOdd);
+[[nodiscard]] inline std::expected<StagedDecimatorDesign, gr::Error> designStagedDecimator(std::size_t decimation, double passbandWidth = 0.8, double attenuationDb = 85.0, double rippleDb = 0.05, bool factorOdd = true, std::size_t maxOddFactor = 25UZ, std::size_t maxTaps = 1UZ << 16, std::source_location location = std::source_location::current()) {
+    const std::expected<std::vector<std::size_t>, gr::Error> ladder = stagedDecimatorLadder(decimation, factorOdd, location);
+    if (!ladder) {
+        return std::unexpected(ladder.error());
+    }
 
-    StagedDecimatorDesign out = designDecimatorLadder(std::span<const std::size_t>(ladder), decimation, passbandWidth, attenuationDb, rippleDb, maxTaps);
-    for (const std::size_t d : ladder) {
+    std::expected<StagedDecimatorDesign, gr::Error> out = designDecimatorLadder(std::span<const std::size_t>(*ladder), decimation, passbandWidth, attenuationDb, rippleDb, maxTaps, location);
+    if (!out) {
+        return out;
+    }
+    for (const std::size_t d : *ladder) {
         if (d > 2UZ && d > maxOddFactor) {
-            out.oversizedOddFactor = std::max(out.oversizedOddFactor, d);
+            out->oversizedOddFactor = std::max(out->oversizedOddFactor, d);
         }
     }
     return out;
@@ -688,13 +705,15 @@ public:
      * Appending changes nothing about the response, a zero tap contributing no term to `H(z)`; it
      * only makes the stored vector asymmetric, which affects a naive group-delay formula alone. The
      * zero taps do cost multiplies, and a length already a multiple of `L` costs none.
+     *
+     * Interpolation or decimation of zero, or no taps, throws `gr::exception`.
      */
     PolyphaseResampler(std::size_t interpolation, std::size_t decimation, std::span<const TTap> taps) : _interpolation(interpolation), _decimation(decimation) {
         if (interpolation == 0UZ || decimation == 0UZ) {
-            throw std::invalid_argument("PolyphaseResampler: interpolation and decimation must both be at least one");
+            throw gr::exception("PolyphaseResampler: interpolation and decimation must both be at least one");
         }
         if (taps.empty()) {
-            throw std::invalid_argument("PolyphaseResampler: no taps — the pass-through's own prototype is a single unit tap");
+            throw gr::exception("PolyphaseResampler: no taps; the pass-through's own prototype is a single unit tap");
         }
 
         _branchLength = (taps.size() + interpolation - 1UZ) / interpolation;
@@ -782,13 +801,13 @@ public:
      * @brief Consume all of @p in and write `outputsFor(in.size())` samples to @p out.
      *
      * The stream produced is the one a single call over the whole input would have produced, to the
-     * bit. @p out is sized by the caller through `outputsFor`; this never truncates, and throws once
-     * per call rather than risking a write past the end.
+     * bit. @p out is sized by the caller through `outputsFor`. An @p out shorter than that is an error, and nothing is
+     * consumed or written.
      */
-    std::size_t process(std::span<const TSample> in, std::span<output_type> out) {
+    [[nodiscard]] std::expected<std::size_t, gr::Error> process(std::span<const TSample> in, std::span<output_type> out, std::source_location location = std::source_location::current()) {
         const std::size_t made = outputsFor(in.size());
         if (out.size() < made) {
-            throw std::invalid_argument("PolyphaseResampler: the output span is shorter than outputsFor() reports");
+            return std::unexpected(gr::Error("PolyphaseResampler: the output span is shorter than outputsFor() reports", location));
         }
 
         const std::size_t history = _branchLength - 1UZ;
