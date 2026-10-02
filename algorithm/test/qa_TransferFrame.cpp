@@ -76,15 +76,13 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
             header.segment_length_id    = static_cast<std::uint8_t>(next() % 4U);
             header.first_header_pointer = static_cast<std::uint16_t>(next() % 2048U);
 
-            std::array<std::uint8_t, kTmPrimaryHeaderSize> octets{};
-            expect(writeTmPrimaryHeader(header, octets) == WriteStatus::ok);
-            TmPrimaryHeader   back{};
-            const ParseStatus status = parseTmPrimaryHeader(octets, back);
-            expect(status == ParseStatus::ok || status == ParseStatus::reserved_violation);
-            expect(back == header);
+            const auto octets = writeTmPrimaryHeader(header);
+            expect(fatal(octets.has_value()));
+            const auto back = parseTmPrimaryHeader(*octets);
+            expect(fatal(back.has_value()));
+            expect(back->header == header);
 
-            std::array<std::uint8_t, kTmPrimaryHeaderSize> again{};
-            expect(writeTmPrimaryHeader(back, again) == WriteStatus::ok);
+            const auto again = writeTmPrimaryHeader(back->header);
             expect(again == octets);
         }
 
@@ -96,19 +94,19 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         maxima.first_header_pointer = 2047U;
         maxima.master_frame_count   = 255U;
         maxima.vc_frame_count       = 255U;
-        std::array<std::uint8_t, kTmPrimaryHeaderSize> at{};
-        expect(writeTmPrimaryHeader(maxima, at) == WriteStatus::ok);
-        TmPrimaryHeader back{};
-        expect(parseTmPrimaryHeader(at, back) != ParseStatus::bad_version);
-        expect(back == maxima) << "a field at its maximum must not disturb its neighbors";
+        const auto at               = writeTmPrimaryHeader(maxima);
+        expect(fatal(at.has_value()));
+        const auto back = parseTmPrimaryHeader(*at);
+        expect(fatal(back.has_value()));
+        expect(back->header == maxima) << "a field at its maximum must not disturb its neighbors";
 
         for (const TmPrimaryHeader& over : {TmPrimaryHeader{.spacecraft_id = 1024U}, TmPrimaryHeader{.virtual_channel = 8U}, TmPrimaryHeader{.segment_length_id = 4U}, TmPrimaryHeader{.first_header_pointer = 2048U}, TmPrimaryHeader{.version = 4U}}) {
-            std::array<std::uint8_t, kTmPrimaryHeaderSize> octets{};
-            expect(writeTmPrimaryHeader(over, octets) == WriteStatus::field_out_of_range);
+            const auto refused = writeTmPrimaryHeader(over);
+            expect(!refused.has_value() && refused.error() == WriteStatus::field_out_of_range);
         }
         std::array<std::uint8_t, kTmPrimaryHeaderSize - 1UZ> shortSpan{};
-        expect(writeTmPrimaryHeader(maxima, shortSpan) == WriteStatus::short_span);
-        expect(parseTmPrimaryHeader(shortSpan, back) == ParseStatus::short_span);
+        const auto                                           shortParse = parseTmPrimaryHeader(shortSpan);
+        expect(!shortParse.has_value() && shortParse.error() == ParseStatus::short_span);
     };
 
     "1b. the AOS primary header round trips, with and without the frame header error control"_test = [] {
@@ -123,12 +121,13 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
             header.has_fhec                   = (next() & 1U) != 0U;
             header.frame_header_error_control = header.has_fhec ? static_cast<std::uint16_t>(next() % 65536U) : std::uint16_t{0U};
 
-            std::array<std::uint8_t, kAosPrimaryHeaderFhecSize> octets{};
-            const std::size_t                                   size = aosPrimaryHeaderOctets(header.has_fhec);
-            expect(writeAosPrimaryHeader(header, std::span{octets}.first(size)) == WriteStatus::ok);
-            AosPrimaryHeader back{};
-            expect(parseAosPrimaryHeader(std::span<const std::uint8_t>{octets}.first(size), header.has_fhec, back) == ParseStatus::ok);
-            expect(back == header);
+            const auto        octets = writeAosPrimaryHeader(header);
+            const std::size_t size   = aosPrimaryHeaderOctets(header.has_fhec);
+            expect(fatal(octets.has_value()));
+            const auto back = parseAosPrimaryHeader(std::span<const std::uint8_t>{*octets}.first(size), header.has_fhec);
+            expect(fatal(back.has_value()));
+            expect(!back->reserved_violation);
+            expect(back->header == header);
         }
 
         AosPrimaryHeader maxima{};
@@ -137,17 +136,21 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         maxima.vc_frame_count      = (1U << 24U) - 1U;
         maxima.vc_count_cycle_used = true;
         maxima.vc_count_cycle      = 15U;
-        std::array<std::uint8_t, kAosPrimaryHeaderFhecSize> buf{};
-        expect(writeAosPrimaryHeader(maxima, buf) == WriteStatus::ok);
-        AosPrimaryHeader back{};
-        expect(parseAosPrimaryHeader(std::span<const std::uint8_t>{buf}.first(kAosPrimaryHeaderSize), false, back) == ParseStatus::ok);
-        expect(eq(back.vc_frame_count, maxima.vc_frame_count));
-        expect(eq(static_cast<unsigned>(back.virtual_channel), 63U));
+        const auto buf             = writeAosPrimaryHeader(maxima);
+        expect(fatal(buf.has_value()));
+        const auto back = parseAosPrimaryHeader(std::span<const std::uint8_t>{*buf}.first(kAosPrimaryHeaderSize), false);
+        expect(fatal(back.has_value()));
+        expect(eq(back->header.vc_frame_count, maxima.vc_frame_count));
+        expect(eq(static_cast<unsigned>(back->header.virtual_channel), 63U));
+        expect(eq(static_cast<unsigned>((*buf)[6]), 0U) && eq(static_cast<unsigned>((*buf)[7]), 0U)) << "no FHEC leaves the last two octets zero";
 
         for (const AosPrimaryHeader& over : {AosPrimaryHeader{.version = 4U}, AosPrimaryHeader{.virtual_channel = 64U}, AosPrimaryHeader{.vc_frame_count = 1U << 24U}, AosPrimaryHeader{.reserved = 4U}, AosPrimaryHeader{.vc_count_cycle = 16U}}) {
-            std::array<std::uint8_t, kAosPrimaryHeaderFhecSize> octets{};
-            expect(writeAosPrimaryHeader(over, octets) == WriteStatus::field_out_of_range);
+            const auto refused = writeAosPrimaryHeader(over);
+            expect(!refused.has_value() && refused.error() == WriteStatus::field_out_of_range);
         }
+        std::array<std::uint8_t, kAosPrimaryHeaderFhecSize - 1UZ> shortSpan{};
+        const auto                                                shortParse = parseAosPrimaryHeader(shortSpan, true);
+        expect(!shortParse.has_value() && shortParse.error() == ParseStatus::short_span) << "seven octets for a header with its FHEC";
     };
 
     "1c. the TC primary header, the CLCW and the M_PDU header round trip"_test = [] {
@@ -160,11 +163,12 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
             header.frame_length    = static_cast<std::uint16_t>(next() % 1024U);
             header.sequence_number = static_cast<std::uint8_t>(next() % 256U);
 
-            std::array<std::uint8_t, kTcPrimaryHeaderSize> octets{};
-            expect(writeTcPrimaryHeader(header, octets) == WriteStatus::ok);
-            TcPrimaryHeader back{};
-            expect(parseTcPrimaryHeader(octets, back) == ParseStatus::ok);
-            expect(back == header);
+            const auto octets = writeTcPrimaryHeader(header);
+            expect(fatal(octets.has_value()));
+            const auto back = parseTcPrimaryHeader(*octets);
+            expect(fatal(back.has_value()));
+            expect(!back->reserved_violation);
+            expect(back->header == header);
 
             Clcw clcw{};
             clcw.status          = static_cast<std::uint8_t>(next() % 8U);
@@ -179,28 +183,35 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
             clcw.farm_b_counter  = static_cast<std::uint8_t>(next() % 4U);
             clcw.report_value    = static_cast<std::uint8_t>(next() % 256U);
 
-            std::array<std::uint8_t, kClcwSize> clcwOctets{};
-            expect(writeClcw(clcw, clcwOctets) == WriteStatus::ok);
-            Clcw clcwBack{};
-            expect(parseClcw(clcwOctets, clcwBack) == ParseStatus::ok);
-            expect(clcwBack == clcw);
-            expect(ocfReportType(clcwOctets) == OcfReportType::type_1_clcw);
+            const auto clcwOctets = writeClcw(clcw);
+            expect(fatal(clcwOctets.has_value()));
+            const auto clcwBack = parseClcw(*clcwOctets);
+            expect(fatal(clcwBack.has_value()));
+            expect(!clcwBack->reserved_violation);
+            expect(clcwBack->header == clcw);
+            expect(ocfReportType(*clcwOctets) == OcfReportType::type_1_clcw);
 
             MpduHeader mpdu{};
             mpdu.first_header_pointer = static_cast<std::uint16_t>(next() % 2048U);
-            std::array<std::uint8_t, kMpduHeaderSize> mpduOctets{};
-            expect(writeMpduHeader(mpdu, mpduOctets) == WriteStatus::ok);
-            MpduHeader mpduBack{};
-            expect(parseMpduHeader(mpduOctets, mpduBack) == ParseStatus::ok);
-            expect(mpduBack == mpdu);
+            const auto mpduOctets     = writeMpduHeader(mpdu);
+            expect(fatal(mpduOctets.has_value()));
+            const auto mpduBack = parseMpduHeader(*mpduOctets);
+            expect(fatal(mpduBack.has_value()));
+            expect(!mpduBack->reserved_violation);
+            expect(mpduBack->header == mpdu);
         }
 
-        std::array<std::uint8_t, kTcPrimaryHeaderSize> tcBuf{};
-        expect(writeTcPrimaryHeader(TcPrimaryHeader{.frame_length = 1024U}, tcBuf) == WriteStatus::field_out_of_range);
-        expect(writeTcPrimaryHeader(TcPrimaryHeader{.spacecraft_id = 1024U}, tcBuf) == WriteStatus::field_out_of_range);
-        std::array<std::uint8_t, kMpduHeaderSize> mpduBuf{};
-        expect(writeMpduHeader(MpduHeader{.first_header_pointer = 2048U}, mpduBuf) == WriteStatus::field_out_of_range);
-        expect(writeMpduHeader(MpduHeader{.reserved = 32U}, mpduBuf) == WriteStatus::field_out_of_range);
+        expect(writeTcPrimaryHeader(TcPrimaryHeader{.frame_length = 1024U}).error() == WriteStatus::field_out_of_range);
+        expect(writeTcPrimaryHeader(TcPrimaryHeader{.spacecraft_id = 1024U}).error() == WriteStatus::field_out_of_range);
+        expect(writeMpduHeader(MpduHeader{.first_header_pointer = 2048U}).error() == WriteStatus::field_out_of_range);
+        expect(writeMpduHeader(MpduHeader{.reserved = 32U}).error() == WriteStatus::field_out_of_range);
+        expect(writeClcw(Clcw{.virtual_channel = 64U}).error() == WriteStatus::field_out_of_range);
+        expect(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.length = 64U}).error() == WriteStatus::field_out_of_range);
+        std::array<std::uint8_t, kTcPrimaryHeaderSize - 1UZ> shortTc{};
+        expect(parseTcPrimaryHeader(shortTc).error() == ParseStatus::short_span);
+        expect(parseMpduHeader(std::span<const std::uint8_t>{}).error() == ParseStatus::short_span);
+        expect(parseClcw(std::span<const std::uint8_t>{}).error() == ParseStatus::short_span);
+        expect(parseTmSecondaryHeaderId(std::span<const std::uint8_t>{}).error() == ParseStatus::short_span);
     };
 
     "2. the octet literals, assembled by hand from the standards' bit positions"_test = [] {
@@ -213,17 +224,14 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         tm.master_frame_count = 200U;
         tm.vc_frame_count     = 17U;
         tm.segment_length_id  = 3U;
-        std::array<std::uint8_t, kTmPrimaryHeaderSize> tmOctets{};
-        expect(writeTmPrimaryHeader(tm, tmOctets) == WriteStatus::ok);
+        const auto tmOctets   = writeTmPrimaryHeader(tm);
         expect(tmOctets == std::array<std::uint8_t, 6UZ>{0x02U, 0xA3U, 0xC8U, 0x11U, 0x18U, 0x00U});
 
         tm.first_header_pointer = kFhpNoPacketStart;
-        expect(writeTmPrimaryHeader(tm, tmOctets) == WriteStatus::ok);
-        expect(tmOctets == std::array<std::uint8_t, 6UZ>{0x02U, 0xA3U, 0xC8U, 0x11U, 0x1FU, 0xFFU});
+        expect(writeTmPrimaryHeader(tm) == std::array<std::uint8_t, 6UZ>{0x02U, 0xA3U, 0xC8U, 0x11U, 0x1FU, 0xFFU});
 
         tm.first_header_pointer = kFhpOnlyIdleData;
-        expect(writeTmPrimaryHeader(tm, tmOctets) == WriteStatus::ok);
-        expect(tmOctets == std::array<std::uint8_t, 6UZ>{0x02U, 0xA3U, 0xC8U, 0x11U, 0x1FU, 0xFEU});
+        expect(writeTmPrimaryHeader(tm) == std::array<std::uint8_t, 6UZ>{0x02U, 0xA3U, 0xC8U, 0x11U, 0x1FU, 0xFEU});
 
         // AOS: TFVN 01, SCID 42, VCID 63, VC count 0xFFFFFF, replay set, cycle use set, cycle 15.
         AosPrimaryHeader aos{};
@@ -233,16 +241,14 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         aos.replay              = true;
         aos.vc_count_cycle_used = true;
         aos.vc_count_cycle      = 15U;
-        std::array<std::uint8_t, kAosPrimaryHeaderSize> aosOctets{};
-        expect(writeAosPrimaryHeader(aos, aosOctets) == WriteStatus::ok);
-        expect(aosOctets == std::array<std::uint8_t, 6UZ>{0x4AU, 0xBFU, 0xFFU, 0xFFU, 0xFFU, 0xCFU});
-        expect(eq(static_cast<unsigned>(tmOctets[0]), 0x02U)) << "the same spacecraft identifier of 42";
-        expect(eq(static_cast<unsigned>(aosOctets[0]), 0x4AU)) << "one octet is the mistake a shared parser makes";
+        const auto aosOctets    = writeAosPrimaryHeader(aos);
+        expect(fatal(tmOctets.has_value() && aosOctets.has_value()));
+        expect(std::ranges::equal(std::span{*aosOctets}.first(kAosPrimaryHeaderSize), std::array<std::uint8_t, 6UZ>{0x4AU, 0xBFU, 0xFFU, 0xFFU, 0xFFU, 0xCFU}));
+        expect(eq(static_cast<unsigned>((*tmOctets)[0]), 0x02U)) << "the same spacecraft identifier of 42";
+        expect(eq(static_cast<unsigned>((*aosOctets)[0]), 0x4AU)) << "one octet is the mistake a shared parser makes";
 
         // M_PDU header with FHP 2047. The five reserved bits are above the pointer.
-        std::array<std::uint8_t, kMpduHeaderSize> mpduOctets{};
-        expect(writeMpduHeader(MpduHeader{.first_header_pointer = kFhpNoPacketStart}, mpduOctets) == WriteStatus::ok);
-        expect(mpduOctets == std::array<std::uint8_t, 2UZ>{0x07U, 0xFFU});
+        expect(writeMpduHeader(MpduHeader{.first_header_pointer = kFhpNoPacketStart}) == std::array<std::uint8_t, 2UZ>{0x07U, 0xFFU});
 
         // TC with SCID 42, VCID 1, frame length field 999 and sequence number 7, a 1000-octet frame.
         TcPrimaryHeader tc{};
@@ -250,15 +256,11 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         tc.virtual_channel = 1U;
         tc.frame_length    = 999U;
         tc.sequence_number = 7U;
-        std::array<std::uint8_t, kTcPrimaryHeaderSize> tcOctets{};
-        expect(writeTcPrimaryHeader(tc, tcOctets) == WriteStatus::ok);
-        expect(tcOctets == std::array<std::uint8_t, 5UZ>{0x00U, 0x2AU, 0x07U, 0xE7U, 0x07U});
+        expect(writeTcPrimaryHeader(tc) == std::array<std::uint8_t, 5UZ>{0x00U, 0x2AU, 0x07U, 0xE7U, 0x07U});
         expect(eq(totalTcFrameOctets(tc), 1000UZ));
 
         // A TM secondary header identification octet with version '00' and length field 63.
-        std::array<std::uint8_t, kTmSecondaryHeaderIdSize> tfshOctets{};
-        expect(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.length = 63U}, tfshOctets) == WriteStatus::ok);
-        expect(eq(static_cast<unsigned>(tfshOctets[0]), 0x3FU));
+        expect(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.length = 63U}) == std::array<std::uint8_t, 1UZ>{0x3FU});
 
         // A CLCW with COP in effect 1, VCID 1, every flag set, FARM-B 3 and report value 255.
         Clcw clcw{};
@@ -271,9 +273,7 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         clcw.retransmit      = true;
         clcw.farm_b_counter  = 3U;
         clcw.report_value    = 255U;
-        std::array<std::uint8_t, kClcwSize> clcwOctets{};
-        expect(writeClcw(clcw, clcwOctets) == WriteStatus::ok);
-        expect(clcwOctets == std::array<std::uint8_t, 4UZ>{0x01U, 0x04U, 0xFEU, 0xFFU});
+        expect(writeClcw(clcw) == std::array<std::uint8_t, 4UZ>{0x01U, 0x04U, 0xFEU, 0xFFU});
     };
 
     "4a. the two minus-one fields this header carries"_test = [] {
@@ -378,44 +378,58 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
 
     "14a. the refusals a decoder is built from, each named"_test = [] {
         // A wrong version number is fatal and is the pair a shared parser confuses.
-        std::array<std::uint8_t, kTmPrimaryHeaderSize> octets{};
-        AosPrimaryHeader                               aos{};
-        aos.spacecraft_id = 42U;
-        expect(writeAosPrimaryHeader(aos, octets) == WriteStatus::ok);
-        TmPrimaryHeader tm{};
-        expect(parseTmPrimaryHeader(octets, tm) == ParseStatus::bad_version) << "AOS octets given to the TM parser";
+        AosPrimaryHeader aos{};
+        aos.spacecraft_id    = 42U;
+        const auto aosOctets = writeAosPrimaryHeader(aos);
+        expect(fatal(aosOctets.has_value()));
+        const auto asTm = parseTmPrimaryHeader(*aosOctets);
+        expect(!asTm.has_value() && asTm.error() == ParseStatus::bad_version) << "AOS octets given to the TM parser";
 
         TmPrimaryHeader tmSource{};
         tmSource.spacecraft_id = 42U;
         tmSource.sync_flag     = true;
-        expect(writeTmPrimaryHeader(tmSource, octets) == WriteStatus::ok);
-        AosPrimaryHeader aosBack{};
-        expect(parseAosPrimaryHeader(octets, false, aosBack) == ParseStatus::bad_version) << "and TM octets given to the AOS parser";
+        const auto tmOctets    = writeTmPrimaryHeader(tmSource);
+        expect(fatal(tmOctets.has_value()));
+        const auto asAos = parseAosPrimaryHeader(*tmOctets, false);
+        expect(!asAos.has_value() && asAos.error() == ParseStatus::bad_version) << "and TM octets given to the AOS parser";
 
-        // A reserved spare set wrong reports nothing and refuses nothing. The rest of the header is still complete.
+        // A reserved spare set wrong is flagged and refuses nothing. The rest of the header is still complete.
         TmPrimaryHeader reserved{};
         reserved.segment_length_id = 1U; // not '11' under a zero synchronization flag
-        expect(writeTmPrimaryHeader(reserved, octets) == WriteStatus::ok);
-        TmPrimaryHeader back{};
-        expect(parseTmPrimaryHeader(octets, back) == ParseStatus::reserved_violation);
-        expect(back == reserved) << "the parsed header is usable beside the violation";
+        const auto reservedOctets  = writeTmPrimaryHeader(reserved);
+        expect(fatal(reservedOctets.has_value()));
+        const auto back = parseTmPrimaryHeader(*reservedOctets);
+        expect(fatal(back.has_value()));
+        expect(back->reserved_violation);
+        expect(back->header == reserved) << "the parsed header is usable beside the violation";
 
         MpduHeader mpduReserved{};
         mpduReserved.reserved             = 1U;
         mpduReserved.first_header_pointer = 5U;
-        std::array<std::uint8_t, kMpduHeaderSize> mpduOctets{};
-        expect(writeMpduHeader(mpduReserved, mpduOctets) == WriteStatus::ok);
-        MpduHeader mpduBack{};
-        expect(parseMpduHeader(mpduOctets, mpduBack) == ParseStatus::reserved_violation);
-        expect(eq(static_cast<unsigned>(mpduBack.first_header_pointer), 5U));
+        const auto mpduOctets             = writeMpduHeader(mpduReserved);
+        expect(fatal(mpduOctets.has_value()));
+        const auto mpduBack = parseMpduHeader(*mpduOctets);
+        expect(fatal(mpduBack.has_value()));
+        expect(mpduBack->reserved_violation);
+        expect(eq(static_cast<unsigned>(mpduBack->header.first_header_pointer), 5U));
+
+        AosPrimaryHeader aosReserved{};
+        aosReserved.vc_count_cycle   = 3U; // a cycle value with the use flag clear
+        const auto aosReservedOctets = writeAosPrimaryHeader(aosReserved);
+        expect(fatal(aosReservedOctets.has_value()));
+        const auto aosReservedBack = parseAosPrimaryHeader(*aosReservedOctets, false);
+        expect(fatal(aosReservedBack.has_value()));
+        expect(aosReservedBack->reserved_violation);
 
         // A Type-2 report is not a CLCW, and the type flag says so before anything else is read.
         std::array<std::uint8_t, kClcwSize> type2{0x80U, 0x00U, 0x00U, 0x00U};
         expect(ocfReportType(type2) == OcfReportType::type_2_project);
         std::array<std::uint8_t, kClcwSize> sdls{0xC0U, 0x00U, 0x00U, 0x00U};
         expect(ocfReportType(sdls) == OcfReportType::type_2_sdls);
-        Clcw clcw{};
-        expect(parseClcw(type2, clcw) == ParseStatus::bad_version);
+        const auto asClcw = parseClcw(type2);
+        expect(!asClcw.has_value() && asClcw.error() == ParseStatus::bad_version);
+        std::array<std::uint8_t, kTmSecondaryHeaderIdSize> badId{0x40U};
+        expect(parseTmSecondaryHeaderId(badId).error() == ParseStatus::bad_version);
     };
 
     "the TC frame type is reported, and the reserved combination is not refused"_test = [] {
@@ -424,11 +438,12 @@ const boost::ut::suite<"ccsds transfer frames"> transferFrameTests = [] {
         expect(tcFrameType(TcPrimaryHeader{.bypass = true}) == TcFrameType::type_bd);
         expect(tcFrameType(TcPrimaryHeader{.bypass = true, .control_command = true}) == TcFrameType::type_bc);
 
-        std::array<std::uint8_t, kTcPrimaryHeaderSize> octets{};
-        expect(writeTcPrimaryHeader(TcPrimaryHeader{.control_command = true, .frame_length = 9U}, octets) == WriteStatus::ok);
-        TcPrimaryHeader back{};
-        expect(parseTcPrimaryHeader(octets, back) == ParseStatus::ok) << "an unknown combination is still a frame";
-        expect(tcFrameType(back) == TcFrameType::reserved);
+        const auto octets = writeTcPrimaryHeader(TcPrimaryHeader{.control_command = true, .frame_length = 9U});
+        expect(fatal(octets.has_value()));
+        const auto back = parseTcPrimaryHeader(*octets);
+        expect(fatal(back.has_value())) << "an unknown combination is still a frame";
+        expect(!back->reserved_violation);
+        expect(tcFrameType(back->header) == TcFrameType::reserved);
     };
 };
 

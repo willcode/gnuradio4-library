@@ -1,8 +1,10 @@
 #ifndef GNURADIO_ALGORITHM_CCSDS_TRANSFER_FRAME_HPP
 #define GNURADIO_ALGORITHM_CCSDS_TRANSFER_FRAME_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <span>
 
 /**
@@ -28,21 +30,31 @@
  * Bit 0 is the first bit transmitted and the most significant bit of the field it starts. Every
  * multi-bit field is big-endian in this sense. No field is bit-reflected.
  *
- * Two conventions govern the status values. `bad_version` is fatal, because the version identifies the
- * frame. `reserved_violation` is not fatal. It reports a reserved or spare field that holds a value
- * other than the mandated one. The parsed header is complete and usable. A caller counts the status
- * and continues. A wrong reserved bit is the transmitter's fault. Refusing the frame would discard data
- * over a bit that carries no meaning.
+ * A parse returns the header in a `Parsed` value or a `ParseStatus` as the error. A build returns the
+ * header's octets or a `WriteStatus` as the error. Two conventions govern a parse. `bad_version` is an
+ * error, because the version identifies the frame. A reserved or spare field that holds a value other
+ * than the mandated one is not an error. The parse sets `Parsed::reserved_violation` and returns the
+ * complete header. A caller counts the flag and continues. A wrong reserved bit is the transmitter's
+ * fault. Refusing the frame would discard data over a bit that carries no meaning.
  *
  * No function here allocates or throws. No parse indexes a span before its length is checked.
  */
 namespace gr::ccsds {
 
-/// @brief What a header parse reports. `reserved_violation` is informational. `bad_version` is fatal.
+/// @brief What a header parse reports. A transfer-frame parse returns `short_span` and `bad_version` as its errors.
 enum class ParseStatus { ok, short_span, bad_version, reserved_violation };
 
-/// @brief What a header build reports.
+/// @brief What a header build reports. A transfer-frame build returns `field_out_of_range` as its error.
 enum class WriteStatus { ok, short_span, field_out_of_range };
+
+/// @brief A parsed header and whether a reserved or spare field in it held a value other than the mandated one.
+template<typename Header>
+struct Parsed {
+    Header header{};
+    bool   reserved_violation = false;
+
+    [[nodiscard]] bool operator==(const Parsed&) const noexcept = default;
+};
 
 inline constexpr std::size_t kTmPrimaryHeaderSize      = 6UZ; //!< 132.0-B-3 4.1.2.1
 inline constexpr std::size_t kTmSecondaryHeaderIdSize  = 1UZ; //!< 132.0-B-3 4.1.3.1.2, the identification octet
@@ -126,38 +138,38 @@ struct TmPrimaryHeader {
  * any other value is a `reserved_violation` and no more. Under a set synchronization flag the field
  * is undefined (NOTE 2) and is not tested.
  */
-[[nodiscard]] inline constexpr ParseStatus parseTmPrimaryHeader(std::span<const std::uint8_t> octets, TmPrimaryHeader& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<Parsed<TmPrimaryHeader>, ParseStatus> parseTmPrimaryHeader(std::span<const std::uint8_t> octets) noexcept {
     if (octets.size() < kTmPrimaryHeaderSize) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
-    out.version              = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
-    out.spacecraft_id        = static_cast<std::uint16_t>(detail::readField(octets, 2UZ, 10UZ));
-    out.virtual_channel      = static_cast<std::uint8_t>(detail::readField(octets, 12UZ, 3UZ));
-    out.ocf_present          = detail::readField(octets, 15UZ, 1UZ) != 0U;
-    out.master_frame_count   = static_cast<std::uint8_t>(detail::readField(octets, 16UZ, 8UZ));
-    out.vc_frame_count       = static_cast<std::uint8_t>(detail::readField(octets, 24UZ, 8UZ));
-    out.secondary_header     = detail::readField(octets, 32UZ, 1UZ) != 0U;
-    out.sync_flag            = detail::readField(octets, 33UZ, 1UZ) != 0U;
-    out.packet_order         = detail::readField(octets, 34UZ, 1UZ) != 0U;
-    out.segment_length_id    = static_cast<std::uint8_t>(detail::readField(octets, 35UZ, 2UZ));
-    out.first_header_pointer = static_cast<std::uint16_t>(detail::readField(octets, 37UZ, 11UZ));
+    Parsed<TmPrimaryHeader> parsed;
+    TmPrimaryHeader&        out = parsed.header;
+    out.version                 = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
+    out.spacecraft_id           = static_cast<std::uint16_t>(detail::readField(octets, 2UZ, 10UZ));
+    out.virtual_channel         = static_cast<std::uint8_t>(detail::readField(octets, 12UZ, 3UZ));
+    out.ocf_present             = detail::readField(octets, 15UZ, 1UZ) != 0U;
+    out.master_frame_count      = static_cast<std::uint8_t>(detail::readField(octets, 16UZ, 8UZ));
+    out.vc_frame_count          = static_cast<std::uint8_t>(detail::readField(octets, 24UZ, 8UZ));
+    out.secondary_header        = detail::readField(octets, 32UZ, 1UZ) != 0U;
+    out.sync_flag               = detail::readField(octets, 33UZ, 1UZ) != 0U;
+    out.packet_order            = detail::readField(octets, 34UZ, 1UZ) != 0U;
+    out.segment_length_id       = static_cast<std::uint8_t>(detail::readField(octets, 35UZ, 2UZ));
+    out.first_header_pointer    = static_cast<std::uint16_t>(detail::readField(octets, 37UZ, 11UZ));
 
     if (out.version != 0U) {
-        return ParseStatus::bad_version;
+        return std::unexpected(ParseStatus::bad_version);
     }
     if (!out.sync_flag && (out.segment_length_id != 3U || out.packet_order)) {
-        return ParseStatus::reserved_violation;
+        parsed.reserved_violation = true;
     }
-    return ParseStatus::ok;
+    return parsed;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeTmPrimaryHeader(const TmPrimaryHeader& header, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < kTmPrimaryHeaderSize) {
-        return WriteStatus::short_span;
-    }
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kTmPrimaryHeaderSize>, WriteStatus> writeTmPrimaryHeader(const TmPrimaryHeader& header) noexcept {
     if (!detail::fits(header.version, 2UZ) || !detail::fits(header.spacecraft_id, 10UZ) || !detail::fits(header.virtual_channel, 3UZ) || !detail::fits(header.segment_length_id, 2UZ) || !detail::fits(header.first_header_pointer, 11UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kTmPrimaryHeaderSize> octets{};
     detail::writeField(octets, 0UZ, 2UZ, header.version);
     detail::writeField(octets, 2UZ, 10UZ, header.spacecraft_id);
     detail::writeField(octets, 12UZ, 3UZ, header.virtual_channel);
@@ -169,7 +181,7 @@ struct TmPrimaryHeader {
     detail::writeField(octets, 34UZ, 1UZ, header.packet_order ? 1U : 0U);
     detail::writeField(octets, 35UZ, 2UZ, header.segment_length_id);
     detail::writeField(octets, 37UZ, 11UZ, header.first_header_pointer);
-    return WriteStatus::ok;
+    return octets;
 }
 
 /// @brief The TM transfer frame secondary header identification octet, 132.0-B-3 4.1.3.2.
@@ -199,25 +211,28 @@ struct TmSecondaryHeaderId {
  */
 [[nodiscard]] inline constexpr bool tmSecondaryHeaderUsable(const TmSecondaryHeaderId& header) noexcept { return header.length != 0U; }
 
-[[nodiscard]] inline constexpr ParseStatus parseTmSecondaryHeaderId(std::span<const std::uint8_t> octets, TmSecondaryHeaderId& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<Parsed<TmSecondaryHeaderId>, ParseStatus> parseTmSecondaryHeaderId(std::span<const std::uint8_t> octets) noexcept {
     if (octets.size() < kTmSecondaryHeaderIdSize) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
-    out.version = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
-    out.length  = static_cast<std::uint8_t>(detail::readField(octets, 2UZ, 6UZ));
-    return out.version != 0U ? ParseStatus::bad_version : ParseStatus::ok;
+    Parsed<TmSecondaryHeaderId> parsed;
+    TmSecondaryHeaderId&        out = parsed.header;
+    out.version                     = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
+    out.length                      = static_cast<std::uint8_t>(detail::readField(octets, 2UZ, 6UZ));
+    if (out.version != 0U) {
+        return std::unexpected(ParseStatus::bad_version);
+    }
+    return parsed;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeTmSecondaryHeaderId(const TmSecondaryHeaderId& header, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < kTmSecondaryHeaderIdSize) {
-        return WriteStatus::short_span;
-    }
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kTmSecondaryHeaderIdSize>, WriteStatus> writeTmSecondaryHeaderId(const TmSecondaryHeaderId& header) noexcept {
     if (!detail::fits(header.version, 2UZ) || !detail::fits(header.length, 6UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kTmSecondaryHeaderIdSize> octets{};
     detail::writeField(octets, 0UZ, 2UZ, header.version);
     detail::writeField(octets, 2UZ, 6UZ, header.length);
-    return WriteStatus::ok;
+    return octets;
 }
 
 /// @brief The AOS transfer frame primary header, 732.0-B-4 4.1.2.1, six octets or eight with the FHEC.
@@ -251,10 +266,12 @@ struct AosPrimaryHeader {
 /// @brief The modulus of the widened count, the modulus to pass to `frameGap`.
 [[nodiscard]] inline constexpr std::uint32_t aosCountModulus(const AosPrimaryHeader& header) noexcept { return header.vc_count_cycle_used ? kAosCycleCountModulus : kAosCountModulus; }
 
-[[nodiscard]] inline constexpr ParseStatus parseAosPrimaryHeader(std::span<const std::uint8_t> octets, bool hasFhec, AosPrimaryHeader& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<Parsed<AosPrimaryHeader>, ParseStatus> parseAosPrimaryHeader(std::span<const std::uint8_t> octets, bool hasFhec) noexcept {
     if (octets.size() < aosPrimaryHeaderOctets(hasFhec)) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
+    Parsed<AosPrimaryHeader> parsed;
+    AosPrimaryHeader&        out   = parsed.header;
     out.version                    = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
     out.spacecraft_id              = static_cast<std::uint8_t>(detail::readField(octets, 2UZ, 8UZ));
     out.virtual_channel            = static_cast<std::uint8_t>(detail::readField(octets, 10UZ, 6UZ));
@@ -267,21 +284,20 @@ struct AosPrimaryHeader {
     out.frame_header_error_control = hasFhec ? static_cast<std::uint16_t>(detail::readField(octets, 48UZ, 16UZ)) : std::uint16_t{0U};
 
     if (out.version != 1U) {
-        return ParseStatus::bad_version;
+        return std::unexpected(ParseStatus::bad_version);
     }
     if (out.reserved != 0U || (!out.vc_count_cycle_used && out.vc_count_cycle != 0U)) {
-        return ParseStatus::reserved_violation;
+        parsed.reserved_violation = true;
     }
-    return ParseStatus::ok;
+    return parsed;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeAosPrimaryHeader(const AosPrimaryHeader& header, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < aosPrimaryHeaderOctets(header.has_fhec)) {
-        return WriteStatus::short_span;
-    }
+/// @brief Build an AOS primary header. The first `aosPrimaryHeaderOctets(header.has_fhec)` octets are the header.
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kAosPrimaryHeaderFhecSize>, WriteStatus> writeAosPrimaryHeader(const AosPrimaryHeader& header) noexcept {
     if (!detail::fits(header.version, 2UZ) || !detail::fits(header.virtual_channel, 6UZ) || !detail::fits(header.vc_frame_count, 24UZ) || !detail::fits(header.reserved, 2UZ) || !detail::fits(header.vc_count_cycle, 4UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kAosPrimaryHeaderFhecSize> octets{};
     detail::writeField(octets, 0UZ, 2UZ, header.version);
     detail::writeField(octets, 2UZ, 8UZ, header.spacecraft_id);
     detail::writeField(octets, 10UZ, 6UZ, header.virtual_channel);
@@ -293,7 +309,7 @@ struct AosPrimaryHeader {
     if (header.has_fhec) {
         detail::writeField(octets, 48UZ, 16UZ, header.frame_header_error_control);
     }
-    return WriteStatus::ok;
+    return octets;
 }
 
 /// @brief The M_PDU header that heads a packet-carrying AOS data field, 732.0-B-4 4.1.4.2.1.4.
@@ -312,25 +328,26 @@ struct MpduHeader {
  * zone is the data field less this two-octet header. AOS extraction differs from TM extraction by
  * that offset of two. `PacketExtractor` therefore takes a zone and a pointer in place of a frame.
  */
-[[nodiscard]] inline constexpr ParseStatus parseMpduHeader(std::span<const std::uint8_t> octets, MpduHeader& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<Parsed<MpduHeader>, ParseStatus> parseMpduHeader(std::span<const std::uint8_t> octets) noexcept {
     if (octets.size() < kMpduHeaderSize) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
-    out.reserved             = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 5UZ));
-    out.first_header_pointer = static_cast<std::uint16_t>(detail::readField(octets, 5UZ, 11UZ));
-    return out.reserved != 0U ? ParseStatus::reserved_violation : ParseStatus::ok;
+    Parsed<MpduHeader> parsed;
+    MpduHeader&        out    = parsed.header;
+    out.reserved              = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 5UZ));
+    out.first_header_pointer  = static_cast<std::uint16_t>(detail::readField(octets, 5UZ, 11UZ));
+    parsed.reserved_violation = out.reserved != 0U;
+    return parsed;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeMpduHeader(const MpduHeader& header, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < kMpduHeaderSize) {
-        return WriteStatus::short_span;
-    }
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kMpduHeaderSize>, WriteStatus> writeMpduHeader(const MpduHeader& header) noexcept {
     if (!detail::fits(header.reserved, 5UZ) || !detail::fits(header.first_header_pointer, 11UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kMpduHeaderSize> octets{};
     detail::writeField(octets, 0UZ, 5UZ, header.reserved);
     detail::writeField(octets, 5UZ, 11UZ, header.first_header_pointer);
-    return WriteStatus::ok;
+    return octets;
 }
 
 /// @brief The four combined states of TC's bypass and control command flags, 232.0-B-4 table 4-1.
@@ -374,32 +391,33 @@ struct TcPrimaryHeader {
     return header.control_command ? TcFrameType::type_bc : TcFrameType::type_bd;
 }
 
-[[nodiscard]] inline constexpr ParseStatus parseTcPrimaryHeader(std::span<const std::uint8_t> octets, TcPrimaryHeader& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<Parsed<TcPrimaryHeader>, ParseStatus> parseTcPrimaryHeader(std::span<const std::uint8_t> octets) noexcept {
     if (octets.size() < kTcPrimaryHeaderSize) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
-    out.version         = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
-    out.bypass          = detail::readField(octets, 2UZ, 1UZ) != 0U;
-    out.control_command = detail::readField(octets, 3UZ, 1UZ) != 0U;
-    out.reserved        = static_cast<std::uint8_t>(detail::readField(octets, 4UZ, 2UZ));
-    out.spacecraft_id   = static_cast<std::uint16_t>(detail::readField(octets, 6UZ, 10UZ));
-    out.virtual_channel = static_cast<std::uint8_t>(detail::readField(octets, 16UZ, 6UZ));
-    out.frame_length    = static_cast<std::uint16_t>(detail::readField(octets, 22UZ, 10UZ));
-    out.sequence_number = static_cast<std::uint8_t>(detail::readField(octets, 32UZ, 8UZ));
+    Parsed<TcPrimaryHeader> parsed;
+    TcPrimaryHeader&        out = parsed.header;
+    out.version                 = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 2UZ));
+    out.bypass                  = detail::readField(octets, 2UZ, 1UZ) != 0U;
+    out.control_command         = detail::readField(octets, 3UZ, 1UZ) != 0U;
+    out.reserved                = static_cast<std::uint8_t>(detail::readField(octets, 4UZ, 2UZ));
+    out.spacecraft_id           = static_cast<std::uint16_t>(detail::readField(octets, 6UZ, 10UZ));
+    out.virtual_channel         = static_cast<std::uint8_t>(detail::readField(octets, 16UZ, 6UZ));
+    out.frame_length            = static_cast<std::uint16_t>(detail::readField(octets, 22UZ, 10UZ));
+    out.sequence_number         = static_cast<std::uint8_t>(detail::readField(octets, 32UZ, 8UZ));
 
     if (out.version != 0U) {
-        return ParseStatus::bad_version;
+        return std::unexpected(ParseStatus::bad_version);
     }
-    return out.reserved != 0U ? ParseStatus::reserved_violation : ParseStatus::ok;
+    parsed.reserved_violation = out.reserved != 0U;
+    return parsed;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeTcPrimaryHeader(const TcPrimaryHeader& header, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < kTcPrimaryHeaderSize) {
-        return WriteStatus::short_span;
-    }
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kTcPrimaryHeaderSize>, WriteStatus> writeTcPrimaryHeader(const TcPrimaryHeader& header) noexcept {
     if (!detail::fits(header.version, 2UZ) || !detail::fits(header.reserved, 2UZ) || !detail::fits(header.spacecraft_id, 10UZ) || !detail::fits(header.virtual_channel, 6UZ) || !detail::fits(header.frame_length, 10UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kTcPrimaryHeaderSize> octets{};
     detail::writeField(octets, 0UZ, 2UZ, header.version);
     detail::writeField(octets, 2UZ, 1UZ, header.bypass ? 1U : 0U);
     detail::writeField(octets, 3UZ, 1UZ, header.control_command ? 1U : 0U);
@@ -408,7 +426,7 @@ struct TcPrimaryHeader {
     detail::writeField(octets, 16UZ, 6UZ, header.virtual_channel);
     detail::writeField(octets, 22UZ, 10UZ, header.frame_length);
     detail::writeField(octets, 32UZ, 8UZ, header.sequence_number);
-    return WriteStatus::ok;
+    return octets;
 }
 
 /// @brief What the operational control field's first two bits say it holds, 132.0-B-3 4.1.5.4 and 4.1.5.5.
@@ -456,10 +474,12 @@ struct Clcw {
  * is a Type-2 report or a control word of another kind. Both cases return `bad_version`, the fatal
  * status. A caller reads `ocfReportType` first to tell the two apart.
  */
-[[nodiscard]] inline constexpr ParseStatus parseClcw(std::span<const std::uint8_t> octets, Clcw& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<Parsed<Clcw>, ParseStatus> parseClcw(std::span<const std::uint8_t> octets) noexcept {
     if (octets.size() < kClcwSize) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
+    Parsed<Clcw> parsed;
+    Clcw&        out      = parsed.header;
     out.control_word_type = detail::readField(octets, 0UZ, 1UZ) != 0U;
     out.version           = static_cast<std::uint8_t>(detail::readField(octets, 1UZ, 2UZ));
     out.status            = static_cast<std::uint8_t>(detail::readField(octets, 3UZ, 3UZ));
@@ -476,18 +496,17 @@ struct Clcw {
     out.report_value      = static_cast<std::uint8_t>(detail::readField(octets, 24UZ, 8UZ));
 
     if (out.control_word_type || out.version != 0U) {
-        return ParseStatus::bad_version;
+        return std::unexpected(ParseStatus::bad_version);
     }
-    return out.reserved_bit != 0U ? ParseStatus::reserved_violation : ParseStatus::ok;
+    parsed.reserved_violation = out.reserved_bit != 0U;
+    return parsed;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeClcw(const Clcw& clcw, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < kClcwSize) {
-        return WriteStatus::short_span;
-    }
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kClcwSize>, WriteStatus> writeClcw(const Clcw& clcw) noexcept {
     if (!detail::fits(clcw.version, 2UZ) || !detail::fits(clcw.status, 3UZ) || !detail::fits(clcw.cop_in_effect, 2UZ) || !detail::fits(clcw.virtual_channel, 6UZ) || !detail::fits(clcw.reserved, 2UZ) || !detail::fits(clcw.farm_b_counter, 2UZ) || !detail::fits(clcw.reserved_bit, 1UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kClcwSize> octets{};
     detail::writeField(octets, 0UZ, 1UZ, clcw.control_word_type ? 1U : 0U);
     detail::writeField(octets, 1UZ, 2UZ, clcw.version);
     detail::writeField(octets, 3UZ, 3UZ, clcw.status);
@@ -502,7 +521,7 @@ struct Clcw {
     detail::writeField(octets, 21UZ, 2UZ, clcw.farm_b_counter);
     detail::writeField(octets, 23UZ, 1UZ, clcw.reserved_bit);
     detail::writeField(octets, 24UZ, 8UZ, clcw.report_value);
-    return WriteStatus::ok;
+    return octets;
 }
 
 /// @brief What one step of a frame count says about the frames between it and the last one.
