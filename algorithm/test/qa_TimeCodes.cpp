@@ -1,11 +1,13 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -44,6 +46,33 @@ std::uint64_t next() {
     return rng >> 11U;
 }
 
+/// The comparand for a conversion that succeeds.
+constexpr std::optional<TimeStatus> kSucceeded = std::nullopt;
+
+/// Stores a conversion's value in `out` and returns its error, or `kSucceeded`. An encoded field is copied to the front of `out`.
+template<typename T, typename Out>
+std::optional<TimeStatus> into(const std::expected<T, TimeStatus>& result, Out& out) {
+    if (!result) {
+        return result.error();
+    }
+    if constexpr (std::is_same_v<T, TField>) {
+        std::ranges::copy(result->view(), std::ranges::begin(out));
+    } else {
+        out = *result;
+    }
+    return std::nullopt;
+}
+
+/// The P-field form: the octets go to the front of `out` and their count to `written`.
+std::optional<TimeStatus> into(const std::expected<PField, TimeStatus>& result, std::span<std::uint8_t> out, std::size_t& written) {
+    if (!result) {
+        return result.error();
+    }
+    std::ranges::copy(result->view(), out.begin());
+    written = result->size;
+    return std::nullopt;
+}
+
 Layout cucLayout(std::uint8_t coarse, std::uint8_t fine) {
     Layout layout{};
     layout.kind          = TimeCodeKind::cuc;
@@ -75,7 +104,7 @@ std::int64_t fractionNs(std::uint8_t fine, std::uint64_t fraction, std::uint32_t
     std::vector<std::uint8_t> tfield(1UZ + fine, 0U);
     gr::ccsds::detail::writeBigEndian(tfield, 1UZ, fine, fraction);
     Instant instant{};
-    boost::ut::expect(decode(tfield, cucLayout(1U, fine), 0, 0, instant) == TimeStatus::ok);
+    boost::ut::expect(into(decode(tfield, cucLayout(1U, fine), 0, 0), instant) == kSucceeded);
     subNsPs = instant.sub_ns_ps;
     return instant.ns + kEpoch1958Ns;
 }
@@ -85,18 +114,17 @@ std::uint64_t roundTripFraction(std::uint8_t fine, std::uint64_t fraction) {
     std::vector<std::uint8_t> tfield(1UZ + fine, 0U);
     gr::ccsds::detail::writeBigEndian(tfield, 1UZ, fine, fraction);
     Instant instant{};
-    boost::ut::expect(decode(tfield, cucLayout(1U, fine), 0, 0, instant) == TimeStatus::ok);
+    boost::ut::expect(into(decode(tfield, cucLayout(1U, fine), 0, 0), instant) == kSucceeded);
 
     std::vector<std::uint8_t> again(1UZ + fine, 0U);
-    boost::ut::expect(encode(instant, cucLayout(1U, fine), 0, 0, again) == TimeStatus::ok);
+    boost::ut::expect(into(encode(instant, cucLayout(1U, fine), 0, 0), again) == kSucceeded);
     return gr::ccsds::detail::readBigEndian(again, 1UZ, fine);
 }
 
 std::string asciiOf(const Instant& instant, TimeCodeKind kind, std::uint8_t digits, bool terminator) {
-    std::array<char, 40UZ> buffer{};
-    std::size_t            written = 0UZ;
-    boost::ut::expect(encodeAscii(instant, kind, digits, terminator, buffer, written) == TimeStatus::ok);
-    return std::string{buffer.data(), written};
+    const auto code = encodeAscii(instant, kind, digits, terminator);
+    boost::ut::expect(code.has_value());
+    return code ? std::string{code->view().begin(), code->view().end()} : std::string{};
 }
 
 } // namespace
@@ -132,12 +160,12 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         constexpr std::int64_t        kEpoch1950Ns = -631'152'000LL * 1'000'000'000LL;
         std::array<std::uint8_t, 6UZ> tfield{};
         Instant                       instant{};
-        expect(decode(tfield, cdsLayout(2U, 0U, true), kEpoch1950Ns, 0, instant) == TimeStatus::ok);
+        expect(into(decode(tfield, cdsLayout(2U, 0U, true), kEpoch1950Ns, 0), instant) == kSucceeded);
         expect(eq(instant.ns, kEpoch1950Ns)) << "day 0 of a 1950-epoch CDS code is 1950-01-01T00:00:00Z";
 
         // The same day count against the Level-1 epoch gives 1958. The epoch is therefore read from
         // the layout and not assumed.
-        expect(decode(tfield, cdsLayout(2U, 0U, false), kEpoch1950Ns, 0, instant) == TimeStatus::ok);
+        expect(into(decode(tfield, cdsLayout(2U, 0U, false), kEpoch1950Ns, 0), instant) == kSucceeded);
         expect(eq(instant.ns, -kEpoch1958Ns));
     };
 
@@ -145,7 +173,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         for (unsigned octet = 0U; octet < 256U; ++octet) {
             const std::array<std::uint8_t, 1UZ> pfield{static_cast<std::uint8_t>(octet)};
             Layout                              layout{};
-            const TimeStatus                    status = parsePField(pfield, layout);
+            const std::optional<TimeStatus>     status = into(parsePField(pfield), layout);
             const unsigned                      code   = (octet >> 4U) & 0x07U;
             const bool                          extend = (octet & 0x80U) != 0U;
 
@@ -155,7 +183,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
             }
             if (code == 6U) {
                 expect(status == TimeStatus::no_epoch_defined);
-                expect(eq(layout.t_field_octets, std::size_t{(octet & 0x0FU) + 1U})) << "3.6.2's octets minus one, still returned so a caller can skip the field";
+                expect(eq(agencyTimeFieldOctets(pfield[0]), std::size_t{(octet & 0x0FU) + 1U})) << "3.6.2's octets minus one, read so a caller can skip the field";
                 continue;
             }
             if (code == 1U || code == 2U) {
@@ -163,7 +191,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
                     expect(status == TimeStatus::short_field) << "the extension flag declares a second octet";
                     continue;
                 }
-                expect(status == TimeStatus::ok);
+                expect(status == kSucceeded);
                 expect(eq(static_cast<unsigned>(layout.coarse_octets), ((octet >> 2U) & 0x03U) + 1U));
                 expect(eq(static_cast<unsigned>(layout.fine_octets), octet & 0x03U));
                 expect(eq(layout.t_field_octets, std::size_t{layout.coarse_octets} + std::size_t{layout.fine_octets}));
@@ -179,7 +207,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
                     expect(status == TimeStatus::reserved_resolution);
                     continue;
                 }
-                expect(status == TimeStatus::ok);
+                expect(status == kSucceeded);
                 expect(eq(static_cast<unsigned>(layout.day_octets), (octet & 0x04U) != 0U ? 3U : 2U));
                 expect(layout.t_field_octets == 6UZ || layout.t_field_octets == 7UZ || layout.t_field_octets == 8UZ || layout.t_field_octets == 9UZ || layout.t_field_octets == 10UZ || layout.t_field_octets == 11UZ);
                 continue;
@@ -188,7 +216,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
                 expect(status == TimeStatus::reserved_resolution);
                 continue;
             }
-            expect(status == TimeStatus::ok);
+            expect(status == kSucceeded);
             expect(eq(layout.t_field_octets, 7UZ + std::size_t{layout.subsecond_octets})) << "both CCS variations have the same seven-octet base";
             expect(ge(layout.t_field_octets, 7UZ));
             expect(le(layout.t_field_octets, 13UZ));
@@ -200,7 +228,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
             for (unsigned second = 0U; second < 128U; ++second) {
                 const std::array<std::uint8_t, 2UZ> pfield{static_cast<std::uint8_t>(first), static_cast<std::uint8_t>(second)};
                 Layout                              layout{};
-                expect(parsePField(pfield, layout) == TimeStatus::ok);
+                expect(into(parsePField(pfield), layout) == kSucceeded);
                 const unsigned coarse = ((first >> 2U) & 0x03U) + 1U + ((second >> 5U) & 0x03U);
                 const unsigned fine   = (first & 0x03U) + ((second >> 2U) & 0x07U);
                 expect(eq(static_cast<unsigned>(layout.coarse_octets), coarse));
@@ -214,21 +242,21 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         // A second octet that sets its own extension flag declares a third, which 3.2.2 does not define.
         const std::array<std::uint8_t, 2UZ> extended{0x9CU, 0x80U};
         Layout                              layout{};
-        expect(parsePField(extended, layout) == TimeStatus::bad_p_field);
+        expect(into(parsePField(extended), layout) == TimeStatus::bad_p_field);
     };
 
     "4. the minus-one that is only in one of two adjacent fields"_test = [] {
         // Bits 4-5 '00' and bits 6-7 '00' declare one coarse octet and zero fractional ones.
         const std::array<std::uint8_t, 1UZ> minimal{0x10U};
         Layout                              layout{};
-        expect(parsePField(minimal, layout) == TimeStatus::ok);
+        expect(into(parsePField(minimal), layout) == kSucceeded);
         expect(eq(static_cast<unsigned>(layout.coarse_octets), 1U));
         expect(eq(static_cast<unsigned>(layout.fine_octets), 0U));
         expect(eq(layout.t_field_octets, 1UZ));
 
         // Bits 4-5 '11' and bits 6-7 '11' declare four and three, which is a seven-octet T-field.
         const std::array<std::uint8_t, 1UZ> maximal{0x1FU};
-        expect(parsePField(maximal, layout) == TimeStatus::ok);
+        expect(into(parsePField(maximal), layout) == kSucceeded);
         expect(eq(static_cast<unsigned>(layout.coarse_octets), 4U));
         expect(eq(static_cast<unsigned>(layout.fine_octets), 3U));
         expect(eq(layout.t_field_octets, 7UZ)) << "reading the fractional count as a minus-one too gives four";
@@ -236,15 +264,15 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         // And back out again, so the two directions agree on the asymmetry.
         std::array<std::uint8_t, 2UZ> out{};
         std::size_t                   written = 0UZ;
-        expect(writePField(cucLayout(4U, 3U), out, written) == TimeStatus::ok);
+        expect(into(writePField(cucLayout(4U, 3U)), out, written) == kSucceeded);
         expect(eq(written, 1UZ));
         expect(eq(static_cast<unsigned>(out[0]), 0x1FU));
-        expect(writePField(cucLayout(1U, 0U), out, written) == TimeStatus::ok);
+        expect(into(writePField(cucLayout(1U, 0U)), out, written) == kSucceeded);
         expect(eq(static_cast<unsigned>(out[0]), 0x10U));
-        expect(writePField(cucLayout(7U, 10U), out, written) == TimeStatus::ok);
+        expect(into(writePField(cucLayout(7U, 10U)), out, written) == kSucceeded);
         expect(eq(written, 2UZ));
         Layout back{};
-        expect(parsePField(std::span<const std::uint8_t>{out}.first(written), back) == TimeStatus::ok);
+        expect(into(parsePField(std::span<const std::uint8_t>{out}.first(written)), back) == kSucceeded);
         expect(eq(static_cast<unsigned>(back.coarse_octets), 7U));
         expect(eq(static_cast<unsigned>(back.fine_octets), 10U));
     };
@@ -310,9 +338,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         std::vector<std::uint8_t> tfield(timeFieldOctets(layout));
         Instant                   source{};
         source.ns = kPast2To53;
-        expect(encode(source, layout, 0, 0, tfield) == TimeStatus::ok);
+        expect(into(encode(source, layout, 0, 0), tfield) == kSucceeded);
         Instant back{};
-        expect(decode(tfield, layout, 0, 0, back) == TimeStatus::ok);
+        expect(into(decode(tfield, layout, 0, 0), back) == kSucceeded);
         expect(eq(back.ns, kPast2To53)) << "carried exactly, in integers, both ways";
     };
 
@@ -321,39 +349,39 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         std::array<std::uint8_t, 8UZ> tfield{};
         gr::ccsds::detail::writeBigEndian(tfield, 6UZ, 2UZ, 456ULL);
         Instant instant{};
-        expect(decode(tfield, cdsLayout(2U, 2U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(tfield, cdsLayout(2U, 2U), 0, 0), instant) == kSucceeded);
         expect(eq(instant.ns + kEpoch1958Ns, std::int64_t{456'000}));
         expect(eq(instant.sub_ns_ps, 0U)) << "a microsecond is a thousand nanoseconds and nothing is lost";
 
         gr::ccsds::detail::writeBigEndian(tfield, 6UZ, 2UZ, 1000ULL);
-        expect(decode(tfield, cdsLayout(2U, 2U), 0, 0, instant) == TimeStatus::segment_out_of_range) << "0 to 999, not 0 to 65 535";
+        expect(into(decode(tfield, cdsLayout(2U, 2U), 0, 0), instant) == TimeStatus::segment_out_of_range) << "0 to 999, not 0 to 65 535";
 
         // A 32-bit segment counts picoseconds of millisecond, 0 to 999 999 999.
         std::array<std::uint8_t, 10UZ> wide{};
         gr::ccsds::detail::writeBigEndian(wide, 6UZ, 4UZ, 456'789'012ULL);
-        expect(decode(wide, cdsLayout(2U, 4U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(wide, cdsLayout(2U, 4U), 0, 0), instant) == kSucceeded);
         expect(eq(instant.ns + kEpoch1958Ns, std::int64_t{456'789}));
         expect(eq(instant.sub_ns_ps, 12U)) << "the residue below a nanosecond, returned rather than discarded";
 
         gr::ccsds::detail::writeBigEndian(wide, 6UZ, 4UZ, 1'000'000'000ULL);
-        expect(decode(wide, cdsLayout(2U, 4U), 0, 0, instant) == TimeStatus::segment_out_of_range);
+        expect(into(decode(wide, cdsLayout(2U, 4U), 0, 0), instant) == TimeStatus::segment_out_of_range);
         expect(lt(999'999'999ULL, 1ULL << 32U)) << "the reading under which the unit and the width agree";
 
         // The reserved resolution names no width, so the T-field's length cannot be computed.
         const std::array<std::uint8_t, 1UZ> reserved{0x43U};
         Layout                              layout{};
-        expect(parsePField(reserved, layout) == TimeStatus::reserved_resolution);
+        expect(into(parsePField(reserved), layout) == TimeStatus::reserved_resolution);
 
         // The leap millisecond is converted by the same expression, counted and flagged.
         std::array<std::uint8_t, 6UZ> leapField{};
         gr::ccsds::detail::writeBigEndian(leapField, 2UZ, 4UZ, 86'400'123ULL);
-        expect(decode(leapField, cdsLayout(2U, 0U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(leapField, cdsLayout(2U, 0U), 0, 0), instant) == kSucceeded);
         expect(instant.leap) << "23:59:60 has no representation on a POSIX axis, so it is flagged";
         expect(eq(instant.ns + kEpoch1958Ns, std::int64_t{86'400'123} * 1'000'000LL));
         gr::ccsds::detail::writeBigEndian(leapField, 2UZ, 4UZ, 86'401'000ULL);
-        expect(decode(leapField, cdsLayout(2U, 0U), 0, 0, instant) == TimeStatus::segment_out_of_range) << "past Annex A's widest range";
+        expect(into(decode(leapField, cdsLayout(2U, 0U), 0, 0), instant) == TimeStatus::segment_out_of_range) << "past Annex A's widest range";
         gr::ccsds::detail::writeBigEndian(leapField, 2UZ, 4UZ, 86'400'999ULL);
-        expect(decode(leapField, cdsLayout(2U, 0U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(leapField, cdsLayout(2U, 0U), 0, 0), instant) == kSucceeded);
     };
 
     "8. the worked instant, in four codes and one number"_test = [] {
@@ -365,9 +393,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
 
         // ASCII A and B, 301.0-B-4 3.5.1.1's and 3.5.1.2's own examples.
         Instant instant{};
-        expect(decodeAscii("1988-01-18T17:20:43.123456Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18T17:20:43.123456Z", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, kWorkedNs));
-        expect(decodeAscii("1988-018T17:20:43.123456Z", TimeCodeKind::ascii_b, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-018T17:20:43.123456Z", TimeCodeKind::ascii_b), instant) == kSucceeded);
         expect(eq(instant.ns, kWorkedNs));
 
         // CDS. Day 10974 from the 1958 epoch, 62 443 123 ms of day and 456 us of millisecond.
@@ -376,17 +404,17 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         gr::ccsds::detail::writeBigEndian(cds, 0UZ, 2UZ, 10974ULL);
         gr::ccsds::detail::writeBigEndian(cds, 2UZ, 4UZ, 62'443'123ULL);
         gr::ccsds::detail::writeBigEndian(cds, 6UZ, 2UZ, 456ULL);
-        expect(decode(cds, cdsLayout(2U, 2U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(cds, cdsLayout(2U, 2U), 0, 0), instant) == kSucceeded);
         expect(eq(instant.ns, kWorkedNs));
 
         // CCS with three subsecond octets has six decimal places. The subsecond value is 123456 in units of 10^-6 s.
         std::array<std::uint8_t, 10UZ> ccs{0x19U, 0x88U, 0x01U, 0x18U, 0x17U, 0x20U, 0x43U, 0x12U, 0x34U, 0x56U};
-        expect(decode(ccs, ccsLayout(3U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(ccs, ccsLayout(3U), 0, 0), instant) == kSucceeded);
         expect(eq(instant.ns, kWorkedNs));
 
         // And the day-of-year variation of the same calendar code: 1988-018.
         std::array<std::uint8_t, 10UZ> ccsDoy{0x19U, 0x88U, 0x00U, 0x18U, 0x17U, 0x20U, 0x43U, 0x12U, 0x34U, 0x56U};
-        expect(decode(ccsDoy, ccsLayout(3U, true), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(ccsDoy, ccsLayout(3U, true), 0, 0), instant) == kSucceeded);
         expect(eq(instant.ns, kWorkedNs));
 
         // CUC. A coarse count of 948 216 043 s from the 1958 epoch, on the TAI scale. The TAI-to-UTC relation is
@@ -396,7 +424,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         gr::ccsds::detail::writeBigEndian(cuc, 0UZ, 4UZ, 948'216'043ULL);
         gr::ccsds::detail::writeBigEndian(cuc, 4UZ, 2UZ, 8'091ULL); // 123 456 us to the nearest 2^-16 s
         for (const std::int32_t k : {0, 1, 10, 27, 37, -5}) {
-            expect(decode(cuc, cucLayout(4U, 2U), 0, k, instant) == TimeStatus::ok);
+            expect(into(decode(cuc, cucLayout(4U, 2U), 0, k), instant) == kSucceeded);
             expect(eq(instant.ns, 569'524'843'000'000'000LL - std::int64_t{k} * 1'000'000'000LL + 123'458'862LL)) << "offset " << k;
             expect(instant.tai == (k == 0)) << "the scale is named, never assumed";
         }
@@ -408,11 +436,11 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(eq(asciiOf(instant, TimeCodeKind::ascii_b, 6U, true), std::string{"1988-018T17:20:43.123456Z"}));
 
         std::array<std::uint8_t, 8UZ> cdsBack{};
-        expect(encode(instant, cdsLayout(2U, 2U), 0, 0, cdsBack) == TimeStatus::ok);
+        expect(into(encode(instant, cdsLayout(2U, 2U), 0, 0), cdsBack) == kSucceeded);
         expect(cdsBack == cds);
 
         std::array<std::uint8_t, 10UZ> ccsBack{};
-        expect(encode(instant, ccsLayout(3U), 0, 0, ccsBack) == TimeStatus::ok);
+        expect(into(encode(instant, ccsLayout(3U), 0, 0), ccsBack) == kSucceeded);
         expect(ccsBack == ccs);
     };
 
@@ -424,9 +452,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
             Instant                   source{};
             source.ns        = kWorkedNs;
             source.sub_ns_ps = 789U;
-            expect(encode(source, layout, 0, 0, tfield) == TimeStatus::ok);
+            expect(into(encode(source, layout, 0, 0), tfield) == kSucceeded);
             Instant back{};
-            expect(decode(tfield, layout, 0, 0, back) == TimeStatus::ok);
+            expect(into(decode(tfield, layout, 0, 0), back) == kSucceeded);
 
             const std::int64_t resolution = k <= 4U ? gr::ccsds::detail::powerOfTen(9U - 2U * k) : 1;
             expect(eq(back.ns, (kWorkedNs / resolution) * resolution)) << "k " << static_cast<unsigned>(k);
@@ -443,11 +471,11 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         const Layout                   layout = ccsLayout(6U);
         std::array<std::uint8_t, 13UZ> base{0x19U, 0x88U, 0x01U, 0x18U, 0x17U, 0x20U, 0x43U, 0x12U, 0x34U, 0x56U, 0x00U, 0x00U, 0x00U};
         Instant                        instant{};
-        expect(decode(base, layout, 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(base, layout, 0, 0), instant) == kSucceeded);
         for (std::size_t i = 0UZ; i < base.size(); ++i) {
             std::array<std::uint8_t, 13UZ> bad = base;
             bad[i]                             = static_cast<std::uint8_t>(bad[i] | 0x0AU);
-            expect(decode(bad, layout, 0, 0, instant) == TimeStatus::bad_bcd) << "position " << i;
+            expect(into(decode(bad, layout, 0, 0), instant) == TimeStatus::bad_bcd) << "position " << i;
         }
 
         // Annex A's ranges, each at its boundary and one past it.
@@ -473,8 +501,8 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
             Row{{0x19U, 0x88U, 0x01U, 0x01U, 0x00U, 0x00U, 0x61U}, false, "second 61"},              //
         };
         for (const Row& row : rows) {
-            const TimeStatus status = decode(row.field, ccsLayout(0U), 0, 0, instant);
-            expect((status == TimeStatus::ok) == row.admitted) << row.what;
+            const std::optional<TimeStatus> status = into(decode(row.field, ccsLayout(0U), 0, 0), instant);
+            expect((status == kSucceeded) == row.admitted) << row.what;
         }
         // The century rule, both ways, is the standard library's and not a hand-written one.
         expect(year{2000}.is_leap());
@@ -482,13 +510,13 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
 
         // The day-of-year variation's ranges.
         const std::array<std::uint8_t, 7UZ> leapDoy{0x19U, 0x88U, 0x03U, 0x66U, 0x00U, 0x00U, 0x00U};
-        expect(decode(leapDoy, ccsLayout(0U, true), 0, 0, instant) == TimeStatus::ok) << "day 366 of a leap year";
+        expect(into(decode(leapDoy, ccsLayout(0U, true), 0, 0), instant) == kSucceeded) << "day 366 of a leap year";
         const std::array<std::uint8_t, 7UZ> pastLeapDoy{0x19U, 0x88U, 0x03U, 0x67U, 0x00U, 0x00U, 0x00U};
-        expect(decode(pastLeapDoy, ccsLayout(0U, true), 0, 0, instant) == TimeStatus::segment_out_of_range);
+        expect(into(decode(pastLeapDoy, ccsLayout(0U, true), 0, 0), instant) == TimeStatus::segment_out_of_range);
         const std::array<std::uint8_t, 7UZ> commonDoy{0x19U, 0x89U, 0x03U, 0x65U, 0x00U, 0x00U, 0x00U};
-        expect(decode(commonDoy, ccsLayout(0U, true), 0, 0, instant) == TimeStatus::ok) << "day 365 of a common year";
+        expect(into(decode(commonDoy, ccsLayout(0U, true), 0, 0), instant) == kSucceeded) << "day 365 of a common year";
         const std::array<std::uint8_t, 7UZ> pastCommonDoy{0x19U, 0x89U, 0x03U, 0x66U, 0x00U, 0x00U, 0x00U};
-        expect(decode(pastCommonDoy, ccsLayout(0U, true), 0, 0, instant) == TimeStatus::segment_out_of_range);
+        expect(into(decode(pastCommonDoy, ccsLayout(0U, true), 0, 0), instant) == TimeStatus::segment_out_of_range);
     };
 
     "10. the ASCII grammar, its subsets, and its fraction"_test = [] {
@@ -496,40 +524,40 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(eq(std::string_view{"1988-018T17:20:43"}.size(), 17UZ)) << "form B's";
 
         Instant instant{};
-        expect(decodeAscii("1988-01-18T17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::ok) << "the terminator is optional";
+        expect(into(decodeAscii("1988-01-18T17:20:43", TimeCodeKind::ascii_a), instant) == kSucceeded) << "the terminator is optional";
         expect(eq(instant.ns, 569'524'843'000'000'000LL));
-        expect(decodeAscii("1988-01-18T17:20:43Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18T17:20:43Z", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, 569'524'843'000'000'000LL));
 
         // Right truncation. The omitted subfields take their zero values.
-        expect(decodeAscii("1988-01-18", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, 6591LL * 86400LL * 1'000'000'000LL)) << "that day's midnight";
-        expect(decodeAscii("1988-01-18T17:20", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18T17:20", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, (6591LL * 86400LL + 17 * 3600 + 20 * 60) * 1'000'000'000LL));
 
         // Left truncation and a time-only subset name no instant at all.
-        expect(decodeAscii("17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::incomplete_calendar);
-        expect(decodeAscii("-01-18T17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::incomplete_calendar);
-        expect(decodeAscii("Z", TimeCodeKind::ascii_a, instant) == TimeStatus::incomplete_calendar);
+        expect(into(decodeAscii("17:20:43", TimeCodeKind::ascii_a), instant) == TimeStatus::incomplete_calendar);
+        expect(into(decodeAscii("-01-18T17:20:43", TimeCodeKind::ascii_a), instant) == TimeStatus::incomplete_calendar);
+        expect(into(decodeAscii("Z", TimeCodeKind::ascii_a), instant) == TimeStatus::incomplete_calendar);
 
         // Rule (d): a subset may not be a partial subfield.
-        expect(decodeAscii("1988-1-18T17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);
-        expect(decodeAscii("1988-01-18X17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);
+        expect(into(decodeAscii("1988-1-18T17:20:43", TimeCodeKind::ascii_a), instant) == TimeStatus::bad_character);
+        expect(into(decodeAscii("1988-01-18X17:20:43", TimeCodeKind::ascii_a), instant) == TimeStatus::bad_character);
 
         // The fraction is an integer parse. Of fifteen digits it keeps nine, then three, and counts the rest.
-        expect(decodeAscii("1988-01-18T17:20:43.123456789012345", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18T17:20:43.123456789012345", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, 569'524'843'123'456'789LL));
         expect(eq(instant.sub_ns_ps, 12U));
         expect(eq(static_cast<unsigned>(instant.precision_discarded_digits), 3U));
 
-        expect(decodeAscii("1988-01-18T17:20:43.999999999999", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18T17:20:43.999999999999", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, 569'524'843'999'999'999LL)) << "which a double path does not reliably produce";
         expect(eq(instant.sub_ns_ps, 999U));
 
         // A short fraction pads on the right, as a decimal fraction requires.
-        expect(decodeAscii("1988-01-18T17:20:43.5", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1988-01-18T17:20:43.5", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, 569'524'843'500'000'000LL));
-        expect(decodeAscii("1988-01-18T17:20:43.", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);
+        expect(into(decodeAscii("1988-01-18T17:20:43.", TimeCodeKind::ascii_a), instant) == TimeStatus::bad_character);
 
         // Both full forms round trip through the encoder over a seeded sweep.
         for (std::size_t trial = 0UZ; trial < 300UZ; ++trial) {
@@ -538,7 +566,7 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
             for (const TimeCodeKind kind : {TimeCodeKind::ascii_a, TimeCodeKind::ascii_b}) {
                 const std::string text = asciiOf(source, kind, 9U, true);
                 Instant           back{};
-                expect(decodeAscii(text, kind, back) == TimeStatus::ok) << text;
+                expect(into(decodeAscii(text, kind), back) == kSucceeded) << text;
                 expect(eq(back.ns, source.ns)) << text;
             }
         }
@@ -550,47 +578,47 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
 
         // short_field, both directions.
         const std::array<std::uint8_t, 3UZ> truncated{};
-        expect(decode(truncated, cucLayout(4U, 2U), 0, 0, instant) == TimeStatus::short_field);
-        expect(parsePField(std::span<const std::uint8_t>{}, layout) == TimeStatus::short_field);
+        expect(into(decode(truncated, cucLayout(4U, 2U), 0, 0), instant) == TimeStatus::short_field);
+        expect(into(parsePField(std::span<const std::uint8_t>{}), layout) == TimeStatus::short_field);
 
         // bad_p_field: a second octet that declares a third.
         const std::array<std::uint8_t, 2UZ> thirdOctet{0x9FU, 0x80U};
-        expect(parsePField(thirdOctet, layout) == TimeStatus::bad_p_field);
+        expect(into(parsePField(thirdOctet), layout) == TimeStatus::bad_p_field);
 
-        // reserved_code, and no_epoch_defined with its length still returned.
+        // reserved_code, and no_epoch_defined with its declared length read beside it.
         for (const unsigned code : {0U, 3U, 7U}) {
             const std::array<std::uint8_t, 1UZ> pfield{static_cast<std::uint8_t>(code << 4U)};
-            expect(parsePField(pfield, layout) == TimeStatus::reserved_code) << "identification " << code;
+            expect(into(parsePField(pfield), layout) == TimeStatus::reserved_code) << "identification " << code;
         }
         const std::array<std::uint8_t, 1UZ> agency{0x6FU};
-        expect(parsePField(agency, layout) == TimeStatus::no_epoch_defined);
-        expect(eq(layout.t_field_octets, 16UZ)) << "so a caller can skip the field and keep its place";
+        expect(into(parsePField(agency), layout) == TimeStatus::no_epoch_defined);
+        expect(eq(agencyTimeFieldOctets(agency[0]), 16UZ)) << "so a caller can skip the field and keep its place";
 
         // reserved_resolution, both codes.
         const std::array<std::uint8_t, 1UZ> cdsReserved{0x43U};
-        expect(parsePField(cdsReserved, layout) == TimeStatus::reserved_resolution);
+        expect(into(parsePField(cdsReserved), layout) == TimeStatus::reserved_resolution);
         const std::array<std::uint8_t, 1UZ> ccsReserved{0x57U};
-        expect(parsePField(ccsReserved, layout) == TimeStatus::reserved_resolution);
+        expect(into(parsePField(ccsReserved), layout) == TimeStatus::reserved_resolution);
 
         // bad_bcd, bad_character, incomplete_calendar.
         const std::array<std::uint8_t, 7UZ> badNibble{0x1AU, 0x88U, 0x01U, 0x18U, 0x00U, 0x00U, 0x00U};
-        expect(decode(badNibble, ccsLayout(0U), 0, 0, instant) == TimeStatus::bad_bcd);
-        expect(decodeAscii("1988/01/18T17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::bad_character);
-        expect(decodeAscii("01-18T17:20:43", TimeCodeKind::ascii_a, instant) == TimeStatus::incomplete_calendar) << "a form with no year names no instant";
+        expect(into(decode(badNibble, ccsLayout(0U), 0, 0), instant) == TimeStatus::bad_bcd);
+        expect(into(decodeAscii("1988/01/18T17:20:43", TimeCodeKind::ascii_a), instant) == TimeStatus::bad_character);
+        expect(into(decodeAscii("01-18T17:20:43", TimeCodeKind::ascii_a), instant) == TimeStatus::incomplete_calendar) << "a form with no year names no instant";
 
         // segment_out_of_range.
         const std::array<std::uint8_t, 7UZ> month13{0x19U, 0x88U, 0x13U, 0x01U, 0x00U, 0x00U, 0x00U};
-        expect(decode(month13, ccsLayout(0U), 0, 0, instant) == TimeStatus::segment_out_of_range);
+        expect(into(decode(month13, ccsLayout(0U), 0, 0), instant) == TimeStatus::segment_out_of_range);
 
         // axis_overflow: the CUC bound, at the threshold and one past it.
         expect(eq(maxCoarseSeconds(-kEpoch1958Ns), 9'602'063'236ULL)) << "(2^63 - 1)/10^9 + 378 691 200";
         std::array<std::uint8_t, 5UZ> coarse{};
         gr::ccsds::detail::writeBigEndian(coarse, 0UZ, 5UZ, 9'602'063'236ULL);
-        expect(decode(coarse, cucLayout(5U, 0U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(coarse, cucLayout(5U, 0U), 0, 0), instant) == kSucceeded);
         gr::ccsds::detail::writeBigEndian(coarse, 0UZ, 5UZ, 9'602'063'237ULL);
-        expect(decode(coarse, cucLayout(5U, 0U), 0, 0, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(coarse, cucLayout(5U, 0U), 0, 0), instant) == TimeStatus::axis_overflow);
         gr::ccsds::detail::writeBigEndian(coarse, 0UZ, 5UZ, (1ULL << 40U) - 1ULL);
-        expect(decode(coarse, cucLayout(5U, 0U), 0, 0, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(coarse, cucLayout(5U, 0U), 0, 0), instant) == TimeStatus::axis_overflow);
         // A four-octet coarse count cannot fail the test. The check exists at five octets for that reason.
         expect(lt(std::uint64_t{0xFFFFFFFFULL}, maxCoarseSeconds(-kEpoch1958Ns)));
 
@@ -598,9 +626,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         expect(eq(maxDayCount(-kEpoch1958Ns), 111'134ULL)) << "106 751 + 4383";
         std::array<std::uint8_t, 7UZ> day{};
         gr::ccsds::detail::writeBigEndian(day, 0UZ, 3UZ, 111'134ULL);
-        expect(decode(day, cdsLayout(3U, 0U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(day, cdsLayout(3U, 0U), 0, 0), instant) == kSucceeded);
         gr::ccsds::detail::writeBigEndian(day, 0UZ, 3UZ, 111'135ULL);
-        expect(decode(day, cdsLayout(3U, 0U), 0, 0, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(day, cdsLayout(3U, 0U), 0, 0), instant) == TimeStatus::axis_overflow);
         expect(eq(kMaxAxisSeconds / 86400, std::int64_t{106'751}));
     };
 
@@ -610,33 +638,33 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         // wrapped sum then returns a negative instant.
         Instant instant{};
         expect(eq(106'751LL * 86400LL + 23 * 3600 + 47 * 60 + 16, kMaxAxisSeconds));
-        expect(decodeAscii("2262-04-11T23:47:16Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("2262-04-11T23:47:16Z", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, std::int64_t{9'223'372'036'000'000'000}));
-        expect(decodeAscii("2262-04-11T23:47:17Z", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow);
-        expect(decodeAscii("2262-04-11T23:59:59Z", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow) << "the same day, past the end, and never a negative result";
+        expect(into(decodeAscii("2262-04-11T23:47:17Z", TimeCodeKind::ascii_a), instant) == TimeStatus::axis_overflow);
+        expect(into(decodeAscii("2262-04-11T23:59:59Z", TimeCodeKind::ascii_a), instant) == TimeStatus::axis_overflow) << "the same day, past the end, and never a negative result";
 
         // The fraction is part of the same sum, so the threshold is a nanosecond and not a second.
-        expect(decodeAscii("2262-04-11T23:47:16.854775807", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("2262-04-11T23:47:16.854775807", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, std::numeric_limits<std::int64_t>::max()));
-        expect(decodeAscii("2262-04-11T23:47:16.854775808", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow);
+        expect(into(decodeAscii("2262-04-11T23:47:16.854775808", TimeCodeKind::ascii_a), instant) == TimeStatus::axis_overflow);
 
         // The other end is bounded at the whole second. The axis's floor falls 763 s into 1677-09-21. The second that
         // contains it is refused whole, not admitted in part.
-        expect(decodeAscii("1677-09-21T00:12:44Z", TimeCodeKind::ascii_a, instant) == TimeStatus::ok);
+        expect(into(decodeAscii("1677-09-21T00:12:44Z", TimeCodeKind::ascii_a), instant) == kSucceeded);
         expect(eq(instant.ns, std::int64_t{-9'223'372'036'000'000'000}));
-        expect(decodeAscii("1677-09-21T00:12:43Z", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow);
+        expect(into(decodeAscii("1677-09-21T00:12:43Z", TimeCodeKind::ascii_a), instant) == TimeStatus::axis_overflow);
 
         // The calendar code takes the same path, so the same two instants land the same way.
         const std::array<std::uint8_t, 7UZ> ccsInside{0x22U, 0x62U, 0x04U, 0x11U, 0x23U, 0x47U, 0x16U};
-        expect(decode(ccsInside, ccsLayout(0U), 0, 0, instant) == TimeStatus::ok);
+        expect(into(decode(ccsInside, ccsLayout(0U), 0, 0), instant) == kSucceeded);
         expect(eq(instant.ns, std::int64_t{9'223'372'036'000'000'000}));
         const std::array<std::uint8_t, 7UZ> ccsPast{0x22U, 0x62U, 0x04U, 0x11U, 0x23U, 0x59U, 0x59U};
-        expect(decode(ccsPast, ccsLayout(0U), 0, 0, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(ccsPast, ccsLayout(0U), 0, 0), instant) == TimeStatus::axis_overflow);
 
         // Year 9999 is four thousand years past the axis and is refused, not wrapped.
         const std::array<std::uint8_t, 7UZ> ccsFar{0x99U, 0x99U, 0x12U, 0x31U, 0x00U, 0x00U, 0x00U};
-        expect(decode(ccsFar, ccsLayout(0U), 0, 0, instant) == TimeStatus::axis_overflow);
-        expect(decodeAscii("0001-01-01T00:00:00Z", TimeCodeKind::ascii_a, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(ccsFar, ccsLayout(0U), 0, 0), instant) == TimeStatus::axis_overflow);
+        expect(into(decodeAscii("0001-01-01T00:00:00Z", TimeCodeKind::ascii_a), instant) == TimeStatus::axis_overflow);
     };
 
     "a CUC fraction field wider than the conversion carries"_test = [] {
@@ -647,13 +675,13 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         for (const std::uint8_t fine : {std::uint8_t{4U}, std::uint8_t{5U}, std::uint8_t{9U}, std::uint8_t{10U}}) {
             const Layout              layout = cucLayout(1U, fine);
             std::vector<std::uint8_t> tfield(timeFieldOctets(layout));
-            expect(encode(source, layout, 0, 0, tfield) == TimeStatus::ok) << "fine " << static_cast<unsigned>(fine);
+            expect(into(encode(source, layout, 0, 0), tfield) == kSucceeded) << "fine " << static_cast<unsigned>(fine);
             expect(gt(gr::ccsds::detail::readBigEndian(tfield, 1UZ, 4UZ), 0ULL)) << "the value is in the top four octets";
             for (std::size_t i = 5UZ; i < tfield.size(); ++i) {
                 expect(eq(static_cast<unsigned>(tfield[i]), 0U)) << "fine " << static_cast<unsigned>(fine) << " octet " << i;
             }
             Instant back{};
-            expect(decode(tfield, layout, 0, 0, back) == TimeStatus::ok);
+            expect(into(decode(tfield, layout, 0, 0), back) == kSucceeded);
             const std::int64_t difference = back.ns > source.ns ? back.ns - source.ns : source.ns - back.ns;
             expect(le(difference, std::int64_t{1})) << "fine " << static_cast<unsigned>(fine) << " difference " << difference;
         }
@@ -664,18 +692,18 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         Instant                       instant{};
         std::array<std::uint8_t, 5UZ> coarse{};
         gr::ccsds::detail::writeBigEndian(coarse, 0UZ, 5UZ, 9'602'063'236ULL);
-        expect(decode(coarse, cucLayout(5U, 0U), 0, 0, instant) == TimeStatus::ok);
-        expect(decode(coarse, cucLayout(5U, 0U), 0, -32, instant) == TimeStatus::axis_overflow) << "a negative offset adds, and there is no room above";
-        expect(decode(coarse, cucLayout(5U, 0U), 0, 37, instant) == TimeStatus::ok);
+        expect(into(decode(coarse, cucLayout(5U, 0U), 0, 0), instant) == kSucceeded);
+        expect(into(decode(coarse, cucLayout(5U, 0U), 0, -32), instant) == TimeStatus::axis_overflow) << "a negative offset adds, and there is no room above";
+        expect(into(decode(coarse, cucLayout(5U, 0U), 0, 37), instant) == kSucceeded);
         expect(eq(instant.ns, std::int64_t{9'223'372'036'000'000'000} - 37'000'000'000LL));
 
         // The same relation on the encoder's side.
         Instant far{};
         far.ns = std::numeric_limits<std::int64_t>::max() - 1;
         std::array<std::uint8_t, 5UZ> out{};
-        expect(encode(far, cucLayout(5U, 0U), 0, 32, out) == TimeStatus::axis_overflow);
+        expect(into(encode(far, cucLayout(5U, 0U), 0, 32), out) == TimeStatus::axis_overflow);
         far.ns = std::numeric_limits<std::int64_t>::min() + 1;
-        expect(encode(far, cucLayout(5U, 0U), 0, -32, out) == TimeStatus::axis_overflow);
+        expect(into(encode(far, cucLayout(5U, 0U), 0, -32), out) == TimeStatus::axis_overflow);
     };
 
     "an epoch far below the axis leaves more room than a count can carry"_test = [] {
@@ -694,10 +722,10 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         Layout                        farLayout = cucLayout(7U, 0U);
         farLayout.custom_epoch                  = true;
         gr::ccsds::detail::writeBigEndian(wide, 0UZ, 7UZ, 18'446'744'072ULL);
-        expect(decode(wide, farLayout, kFarBelow, 0, instant) == TimeStatus::ok);
+        expect(into(decode(wide, farLayout, kFarBelow, 0), instant) == kSucceeded);
         expect(eq(instant.ns, std::int64_t{9'223'372'035'145'224'192})) << "the sum is carried unsigned and converted once, never wrapped";
         gr::ccsds::detail::writeBigEndian(wide, 0UZ, 7UZ, 18'446'744'073ULL);
-        expect(decode(wide, farLayout, kFarBelow, 0, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(wide, farLayout, kFarBelow, 0), instant) == TimeStatus::axis_overflow);
 
         Layout farDays{};
         farDays.kind            = TimeCodeKind::cds;
@@ -707,9 +735,9 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
         std::array<std::uint8_t, 7UZ> dayField{};
         gr::ccsds::detail::writeBigEndian(dayField, 0UZ, 3UZ, 213'501ULL);
         gr::ccsds::detail::writeBigEndian(dayField, 3UZ, 4UZ, 86'400'999ULL);
-        expect(decode(dayField, farDays, kFarBelow, 0, instant) == TimeStatus::ok) << "the widest day and the widest millisecond of day together still fit";
+        expect(into(decode(dayField, farDays, kFarBelow, 0), instant) == kSucceeded) << "the widest day and the widest millisecond of day together still fit";
         gr::ccsds::detail::writeBigEndian(dayField, 0UZ, 3UZ, 213'502ULL);
-        expect(decode(dayField, farDays, kFarBelow, 0, instant) == TimeStatus::axis_overflow);
+        expect(into(decode(dayField, farDays, kFarBelow, 0), instant) == TimeStatus::axis_overflow);
     };
 
     "a seeded round trip through every binary layout"_test = [] {
@@ -722,12 +750,11 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
                     Instant      source{};
                     source.ns = ns;
                     std::vector<std::uint8_t> tfield(timeFieldOctets(layout));
-                    const TimeStatus          written = encode(source, layout, 0, 0, tfield);
-                    if (written != TimeStatus::ok) {
+                    if (into(encode(source, layout, 0, 0), tfield) != kSucceeded) {
                         continue; // a two-octet day count cannot reach every instant, and the encoder reports it
                     }
                     Instant back{};
-                    expect(decode(tfield, layout, 0, 0, back) == TimeStatus::ok);
+                    expect(into(decode(tfield, layout, 0, 0), back) == kSucceeded);
                     const std::int64_t resolution = submilli == 0U ? 1'000'000LL : (submilli == 2U ? 1'000LL : 1LL);
                     expect(eq(back.ns, (ns / resolution) * resolution)) << "submilli " << static_cast<unsigned>(submilli) << " days " << static_cast<unsigned>(days) << " ns " << ns;
                 }
@@ -738,16 +765,50 @@ const boost::ut::suite<"ccsds time codes"> timeCodeTests = [] {
                 Instant      source{};
                 source.ns = ns;
                 std::vector<std::uint8_t> tfield(timeFieldOctets(layout));
-                if (encode(source, layout, 0, 0, tfield) != TimeStatus::ok) {
+                if (into(encode(source, layout, 0, 0), tfield) != kSucceeded) {
                     continue;
                 }
                 Instant back{};
-                expect(decode(tfield, layout, 0, 0, back) == TimeStatus::ok);
+                expect(into(decode(tfield, layout, 0, 0), back) == kSucceeded);
                 const std::int64_t difference = back.ns > ns ? back.ns - ns : ns - back.ns;
                 const std::int64_t lsbNs      = fine == 0U ? 1'000'000'000LL : (1'000'000'000LL >> (8U * fine));
                 expect(le(difference, lsbNs)) << "fine octets " << static_cast<unsigned>(fine) << " difference " << difference;
             }
         }
+    };
+
+    "each conversion returns its error in the std::expected"_test = [] {
+        const auto pfield = parsePField(std::span<const std::uint8_t>{});
+        expect(fatal(!pfield.has_value()));
+        expect(pfield.error() == TimeStatus::short_field);
+
+        const auto asciiPField = writePField(Layout{.kind = TimeCodeKind::ascii_a});
+        expect(fatal(!asciiPField.has_value()));
+        expect(asciiPField.error() == TimeStatus::bad_p_field) << "the ASCII codes have no P-field";
+
+        const std::array<std::uint8_t, 3UZ> threeOctets{};
+        const auto                          shortField = decode(threeOctets, cucLayout(4U, 0U), 0, 0);
+        expect(fatal(!shortField.has_value()));
+        expect(shortField.error() == TimeStatus::short_field);
+
+        const auto noYear = decodeAscii("17:20:43", TimeCodeKind::ascii_a);
+        expect(fatal(!noYear.has_value()));
+        expect(noYear.error() == TimeStatus::incomplete_calendar);
+
+        const auto asciiTField = encode(Instant{}, Layout{.kind = TimeCodeKind::ascii_b}, 0, 0);
+        expect(fatal(!asciiTField.has_value()));
+        expect(asciiTField.error() == TimeStatus::bad_p_field);
+
+        const auto tooManyDigits = encodeAscii(Instant{}, TimeCodeKind::ascii_a, 10U, true);
+        expect(fatal(!tooManyDigits.has_value()));
+        expect(tooManyDigits.error() == TimeStatus::segment_out_of_range);
+
+        const auto widest = encodeAscii(Instant{.ns = kWorkedNs}, TimeCodeKind::ascii_a, 9U, true);
+        expect(fatal(widest.has_value()));
+        expect(eq(widest->size, kMaxAsciiCharacters)) << "form A with nine digits and the terminator fills the field";
+        const auto widestT = encode(Instant{.ns = -kEpoch1958Ns}, cucLayout(7U, 10U), 0, 0);
+        expect(fatal(widestT.has_value()));
+        expect(eq(widestT->size, kMaxTFieldOctets));
     };
 };
 

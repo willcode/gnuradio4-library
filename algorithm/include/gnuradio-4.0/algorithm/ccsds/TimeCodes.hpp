@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -49,8 +50,8 @@
  * other seconds, reads no table and applies no policy.
  *
  * **Every length is checked before it is used as an index.** Every function is `noexcept`, and
- * nothing throws. A malformed received code cannot stop the caller. Each malformed input yields its
- * own status value.
+ * nothing throws. A malformed received code cannot stop the caller. Each conversion returns its value
+ * in a `std::expected`, and each malformed input yields its own `TimeStatus` as the error.
  */
 namespace gr::ccsds {
 
@@ -73,9 +74,8 @@ inline constexpr std::int64_t kMaxAxisSeconds = 9'223'372'036;
 /// @brief The four families, plus the two ASCII variations 301.0-B-4 3.5.1 defines.
 enum class TimeCodeKind { cuc, cds, ccs, ascii_a, ascii_b };
 
-/// @brief What a conversion reports. Every value is produced by a distinct, stated input.
+/// @brief The reason a conversion failed. Every value is produced by a distinct, stated input.
 enum class TimeStatus {
-    ok,
     short_field,          //!< fewer octets or characters than the declared layout needs
     bad_p_field,          //!< an undefined extension octet, or a P-field where none is allowed (3.1.1)
     reserved_code,        //!< identification 000, 011 or 111 (3.1.1)
@@ -114,6 +114,29 @@ struct Instant {
 
     [[nodiscard]] bool operator==(const Instant&) const noexcept = default;
 };
+
+/// @brief The longest P-field, a CUC code with its extension octet (3.2.2).
+inline constexpr std::size_t kMaxPFieldOctets = 2UZ;
+
+/// @brief The longest T-field, a CUC code of seven coarse and ten fine octets (3.2.2).
+inline constexpr std::size_t kMaxTFieldOctets = 17UZ;
+
+/// @brief The longest ASCII code, form A with nine fraction digits and the terminator (3.5.1).
+inline constexpr std::size_t kMaxAsciiCharacters = 30UZ;
+
+/// @brief An encoded field held by value. The first `size` elements of `data` are the field.
+template<typename Element, std::size_t Capacity>
+struct EncodedField {
+    std::array<Element, Capacity> data{};
+    std::size_t                   size = 0UZ;
+
+    [[nodiscard]] constexpr std::span<const Element> view() const noexcept { return {data.data(), size}; }
+    [[nodiscard]] bool                               operator==(const EncodedField&) const noexcept = default;
+};
+
+using PField    = EncodedField<std::uint8_t, kMaxPFieldOctets>;
+using TField    = EncodedField<std::uint8_t, kMaxTFieldOctets>;
+using AsciiCode = EncodedField<char, kMaxAsciiCharacters>;
 
 namespace detail {
 
@@ -194,12 +217,11 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * itself can exceed the largest signed 64-bit value. The addition is therefore done in unsigned
  * arithmetic and converted back once. Both steps are modular, and neither overflows.
  */
-[[nodiscard]] inline constexpr TimeStatus addToEpoch(std::int64_t epochNs, std::uint64_t elapsedNs, std::int64_t& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<std::int64_t, TimeStatus> addToEpoch(std::int64_t epochNs, std::uint64_t elapsedNs) noexcept {
     if (elapsedNs > roomAbove(epochNs)) {
-        return TimeStatus::axis_overflow;
+        return std::unexpected(TimeStatus::axis_overflow);
     }
-    out = static_cast<std::int64_t>(static_cast<std::uint64_t>(epochNs) + elapsedNs);
-    return TimeStatus::ok;
+    return static_cast<std::int64_t>(static_cast<std::uint64_t>(epochNs) + elapsedNs);
 }
 
 /**
@@ -214,16 +236,15 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * past the top, and the room above it is checked only then. Subtracting a negative `whole`
  * from the top of the axis would itself leave the axis.
  */
-[[nodiscard]] inline constexpr TimeStatus nsFromSeconds(std::int64_t seconds, std::int64_t subNs, std::int64_t& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<std::int64_t, TimeStatus> nsFromSeconds(std::int64_t seconds, std::int64_t subNs) noexcept {
     if (seconds > kMaxAxisSeconds || seconds < -kMaxAxisSeconds) {
-        return TimeStatus::axis_overflow;
+        return std::unexpected(TimeStatus::axis_overflow);
     }
     const std::int64_t whole = seconds * kNsPerSecond;
     if (whole >= 0 && subNs > std::numeric_limits<std::int64_t>::max() - whole) {
-        return TimeStatus::axis_overflow;
+        return std::unexpected(TimeStatus::axis_overflow);
     }
-    out = whole + subNs;
-    return TimeStatus::ok;
+    return whole + subNs;
 }
 
 /// @brief Whether `value - shift` overflows (`subtractOverflows`) and whether `value + shift` overflows
@@ -271,31 +292,29 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * format. They are `000`, `011` and `111`, all reserved. A fourth, `110`, is a Level 3 or 4
  * agency-defined code. Its T-field is a binary number with no stated unit and no stated epoch (3.6.1).
  * It holds no instant that can be placed on an axis. The function refuses it as `no_epoch_defined`.
- * **Its declared T-field length is still returned.** A caller can skip the field and keep its place in
- * the payload.
+ * `agencyTimeFieldOctets` reads its declared T-field length. A caller can skip the field and keep its
+ * place in the payload.
  *
  * The ASCII codes have no P-field (3.1.1, repeated at 3.5.2). This function does not yield an ASCII
  * kind.
  */
-[[nodiscard]] inline TimeStatus parsePField(std::span<const std::uint8_t> pfield, Layout& out) noexcept {
+[[nodiscard]] inline std::expected<Layout, TimeStatus> parsePField(std::span<const std::uint8_t> pfield) noexcept {
     if (pfield.empty()) {
-        return TimeStatus::short_field;
+        return std::unexpected(TimeStatus::short_field);
     }
     const std::uint8_t first     = pfield[0];
     const bool         extension = (first & 0x80U) != 0U;
     const unsigned     code      = (first >> 4U) & 0x07U;
     const unsigned     detail4   = first & 0x0FU;
 
-    out                = Layout{};
+    Layout out{};
     out.p_field_octets = 1UZ;
 
     if (code == 0U || code == 3U || code == 7U) {
-        return TimeStatus::reserved_code;
+        return std::unexpected(TimeStatus::reserved_code);
     }
     if (code == 6U) {
-        // 3.6.2 puts the T-field length in bits 4-7 as octets minus one. A value of 0 to 15 means 1 to 16.
-        out.t_field_octets = detail4 + 1UZ;
-        return TimeStatus::no_epoch_defined;
+        return std::unexpected(TimeStatus::no_epoch_defined);
     }
 
     if (code == 1U || code == 2U) {
@@ -308,11 +327,11 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         unsigned fine   = detail4 & 0x03U;
         if (extension) {
             if (pfield.size() < 2UZ) {
-                return TimeStatus::short_field;
+                return std::unexpected(TimeStatus::short_field);
             }
             const std::uint8_t second = pfield[1];
             if ((second & 0x80U) != 0U) {
-                return TimeStatus::bad_p_field; // a third octet, which 3.2.2 does not define
+                return std::unexpected(TimeStatus::bad_p_field); // a third octet, which 3.2.2 does not define
             }
             coarse += (second >> 5U) & 0x03U;
             fine += (second >> 2U) & 0x07U;
@@ -321,11 +340,11 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         out.coarse_octets  = static_cast<std::uint8_t>(coarse);
         out.fine_octets    = static_cast<std::uint8_t>(fine);
         out.t_field_octets = coarse + fine;
-        return TimeStatus::ok;
+        return out;
     }
 
     if (extension) {
-        return TimeStatus::bad_p_field; // neither 3.3.2 nor 3.4.2 defines a second octet
+        return std::unexpected(TimeStatus::bad_p_field); // neither 3.3.2 nor 3.4.2 defines a second octet
     }
 
     if (code == 4U) {
@@ -336,79 +355,77 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         case 0U: out.submilli_octets = 0U; break;
         case 1U: out.submilli_octets = 2U; break;
         case 2U: out.submilli_octets = 4U; break;
-        default: return TimeStatus::reserved_resolution;
+        default: return std::unexpected(TimeStatus::reserved_resolution);
         }
         out.t_field_octets = std::size_t{out.day_octets} + 4UZ + std::size_t{out.submilli_octets};
-        return TimeStatus::ok;
+        return out;
     }
 
     out.kind                  = TimeCodeKind::ccs;
     out.day_of_year           = (detail4 & 0x08U) != 0U;
     const unsigned resolution = detail4 & 0x07U;
     if (resolution == 7U) {
-        return TimeStatus::reserved_resolution;
+        return std::unexpected(TimeStatus::reserved_resolution);
     }
     out.subsecond_octets = static_cast<std::uint8_t>(resolution);
     // 3.4.1.1 is 16 + 8 + 8 + 8 + 8 + 8 bits and 3.4.1.2 is 16 + 16 + 8 + 8 + 8. Both are seven octets.
     out.t_field_octets = 7UZ + std::size_t{out.subsecond_octets};
-    return TimeStatus::ok;
+    return out;
 }
 
+/**
+ * @brief The T-field length a Level 3 or 4 agency-defined P-field declares, 301.0-B-4 3.6.2.
+ *
+ * Bits 4-7 hold the length in octets minus one. A value of 0 to 15 means 1 to 16 octets.
+ */
+[[nodiscard]] inline constexpr std::size_t agencyTimeFieldOctets(std::uint8_t firstOctet) noexcept { return std::size_t{firstOctet & 0x0FU} + 1UZ; }
+
 /// @brief Write a P-field for a layout. One octet, or two where CUC needs the extension.
-[[nodiscard]] inline TimeStatus writePField(const Layout& layout, std::span<std::uint8_t> out, std::size_t& written) noexcept {
-    written = 0UZ;
+[[nodiscard]] inline std::expected<PField, TimeStatus> writePField(const Layout& layout) noexcept {
+    PField                  field{};
+    std::span<std::uint8_t> out{field.data};
     switch (layout.kind) {
     case TimeCodeKind::cuc: {
         if (layout.coarse_octets < 1U || layout.coarse_octets > 7U || layout.fine_octets > 10U) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
-        const unsigned    baseCoarse  = layout.coarse_octets > 4U ? 4U : layout.coarse_octets;
-        const unsigned    baseFine    = layout.fine_octets > 3U ? 3U : layout.fine_octets;
-        const unsigned    extraCoarse = layout.coarse_octets - baseCoarse;
-        const unsigned    extraFine   = layout.fine_octets - baseFine;
-        const bool        extension   = extraCoarse != 0U || extraFine != 0U;
-        const std::size_t needed      = extension ? 2UZ : 1UZ;
-        if (out.size() < needed) {
-            return TimeStatus::short_field;
-        }
-        out[0] = static_cast<std::uint8_t>((extension ? 0x80U : 0x00U) | ((layout.custom_epoch ? 2U : 1U) << 4U) | ((baseCoarse - 1U) << 2U) | baseFine);
+        const unsigned baseCoarse  = layout.coarse_octets > 4U ? 4U : layout.coarse_octets;
+        const unsigned baseFine    = layout.fine_octets > 3U ? 3U : layout.fine_octets;
+        const unsigned extraCoarse = layout.coarse_octets - baseCoarse;
+        const unsigned extraFine   = layout.fine_octets - baseFine;
+        const bool     extension   = extraCoarse != 0U || extraFine != 0U;
+        out[0]                     = static_cast<std::uint8_t>((extension ? 0x80U : 0x00U) | ((layout.custom_epoch ? 2U : 1U) << 4U) | ((baseCoarse - 1U) << 2U) | baseFine);
         if (extension) {
             out[1] = static_cast<std::uint8_t>((extraCoarse << 5U) | (extraFine << 2U));
         }
-        written = needed;
-        return TimeStatus::ok;
+        field.size = extension ? 2UZ : 1UZ;
+        return field;
     }
     case TimeCodeKind::cds: {
-        if (out.empty()) {
-            return TimeStatus::short_field;
-        }
         unsigned resolution = 0U;
         if (layout.submilli_octets == 2U) {
             resolution = 1U;
         } else if (layout.submilli_octets == 4U) {
             resolution = 2U;
         } else if (layout.submilli_octets != 0U) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         if (layout.day_octets != 2U && layout.day_octets != 3U) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
-        out[0]  = static_cast<std::uint8_t>((4U << 4U) | (layout.custom_epoch ? 0x08U : 0x00U) | (layout.day_octets == 3U ? 0x04U : 0x00U) | resolution);
-        written = 1UZ;
-        return TimeStatus::ok;
+        out[0]     = static_cast<std::uint8_t>((4U << 4U) | (layout.custom_epoch ? 0x08U : 0x00U) | (layout.day_octets == 3U ? 0x04U : 0x00U) | resolution);
+        field.size = 1UZ;
+        return field;
     }
     case TimeCodeKind::ccs: {
-        if (out.empty()) {
-            return TimeStatus::short_field;
-        }
         if (layout.subsecond_octets > 6U) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
-        out[0]  = static_cast<std::uint8_t>((5U << 4U) | (layout.day_of_year ? 0x08U : 0x00U) | layout.subsecond_octets);
-        written = 1UZ;
-        return TimeStatus::ok;
+        out[0]     = static_cast<std::uint8_t>((5U << 4U) | (layout.day_of_year ? 0x08U : 0x00U) | layout.subsecond_octets);
+        field.size = 1UZ;
+        return field;
     }
-    default: return TimeStatus::bad_p_field; // the ASCII codes have no P-field (3.5.2)
+    default: return std::unexpected(TimeStatus::bad_p_field); // the ASCII codes have no P-field (3.5.2)
     }
 }
 
@@ -452,24 +469,24 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * exact on the axis. Five octets give `10^-10` s and truncate. The CCS limit is `k <= 4`. It differs
  * from the CUC limit `m <= 3`, and for a different reason.
  */
-[[nodiscard]] inline TimeStatus decode(std::span<const std::uint8_t> tfield, const Layout& layout, std::int64_t epochNs, std::int32_t taiUtcOffsetSeconds, Instant& out) noexcept {
-    out                      = Instant{};
+[[nodiscard]] inline std::expected<Instant, TimeStatus> decode(std::span<const std::uint8_t> tfield, const Layout& layout, std::int64_t epochNs, std::int32_t taiUtcOffsetSeconds) noexcept {
+    Instant           out{};
     const std::size_t needed = timeFieldOctets(layout);
     if (needed == 0UZ) {
-        return TimeStatus::bad_p_field; // an ASCII kind has no T-field here, `decodeAscii` decodes it
+        return std::unexpected(TimeStatus::bad_p_field); // an ASCII kind has no T-field here, `decodeAscii` decodes it
     }
     if (tfield.size() < needed) {
-        return TimeStatus::short_field;
+        return std::unexpected(TimeStatus::short_field);
     }
     const std::int64_t epoch = timeCodeEpochNs(layout, epochNs);
 
     if (layout.kind == TimeCodeKind::cuc) {
         if (layout.coarse_octets < 1U || layout.coarse_octets > 7U || layout.fine_octets > 10U) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         const std::uint64_t coarse = detail::readBigEndian(tfield, 0UZ, layout.coarse_octets);
         if (coarse > maxCoarseSeconds(epoch)) {
-            return TimeStatus::axis_overflow; // checked before the multiply
+            return std::unexpected(TimeStatus::axis_overflow); // checked before the multiply
         }
 
         const std::size_t   used     = layout.fine_octets > 4U ? 4UZ : std::size_t{layout.fine_octets};
@@ -483,37 +500,37 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
             out.sub_ns_ps              = static_cast<std::uint32_t>((rest * 1000ULL) >> shift);
         }
 
-        std::int64_t     value  = 0;
-        const TimeStatus status = detail::addToEpoch(epoch, coarse * static_cast<std::uint64_t>(kNsPerSecond) + fracNs, value);
-        if (status != TimeStatus::ok) {
-            return status;
+        const auto sum = detail::addToEpoch(epoch, coarse * static_cast<std::uint64_t>(kNsPerSecond) + fracNs);
+        if (!sum) {
+            return std::unexpected(sum.error());
         }
+        std::int64_t value = *sum;
         // The code is TAI-based and the axis is UTC-based (3.2.1). The caller's offset relates the two.
         // No table is read. A 32-bit offset in seconds is at most 2.15e18 ns and fits the axis by
         // itself. The difference can leave the axis. The code tests for that before forming it.
         if (taiUtcOffsetSeconds != 0) {
             const std::int64_t offsetNs = std::int64_t{taiUtcOffsetSeconds} * kNsPerSecond;
             if (detail::subtractOverflows(value, offsetNs)) {
-                return TimeStatus::axis_overflow;
+                return std::unexpected(TimeStatus::axis_overflow);
             }
             value -= offsetNs;
         }
         out.ns  = value;
         out.tai = taiUtcOffsetSeconds == 0;
-        return TimeStatus::ok;
+        return out;
     }
 
     if (layout.kind == TimeCodeKind::cds) {
         if ((layout.day_octets != 2U && layout.day_octets != 3U) || (layout.submilli_octets != 0U && layout.submilli_octets != 2U && layout.submilli_octets != 4U)) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         const std::uint64_t day = detail::readBigEndian(tfield, 0UZ, layout.day_octets);
         if (day > maxDayCount(epoch)) {
-            return TimeStatus::axis_overflow;
+            return std::unexpected(TimeStatus::axis_overflow);
         }
         const std::uint64_t milliseconds = detail::readBigEndian(tfield, layout.day_octets, 4UZ);
         if (milliseconds >= 86'401'000ULL) {
-            return TimeStatus::segment_out_of_range; // past Annex A's widest range, 86 400 999
+            return std::unexpected(TimeStatus::segment_out_of_range); // past Annex A's widest range, 86 400 999
         }
         const bool leap = milliseconds >= 86'400'000ULL;
 
@@ -521,36 +538,35 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         if (layout.submilli_octets == 2U) {
             const std::uint64_t microseconds = detail::readBigEndian(tfield, std::size_t{layout.day_octets} + 4UZ, 2UZ);
             if (microseconds >= 1000ULL) {
-                return TimeStatus::segment_out_of_range; // microsecond of millisecond, 0 to 999 (Annex A)
+                return std::unexpected(TimeStatus::segment_out_of_range); // microsecond of millisecond, 0 to 999 (Annex A)
             }
             subNs = microseconds * 1000ULL;
         } else if (layout.submilli_octets == 4U) {
             const std::uint64_t picoseconds = detail::readBigEndian(tfield, std::size_t{layout.day_octets} + 4UZ, 4UZ);
             if (picoseconds >= 1'000'000'000ULL) {
-                return TimeStatus::segment_out_of_range; // picosecond-of-millisecond, 0 to 999 999 999
+                return std::unexpected(TimeStatus::segment_out_of_range); // picosecond-of-millisecond, 0 to 999 999 999
             }
             subNs         = picoseconds / 1000ULL;
             out.sub_ns_ps = static_cast<std::uint32_t>(picoseconds % 1000ULL);
         }
 
-        std::int64_t     value  = 0;
-        const TimeStatus status = detail::addToEpoch(epoch, day * static_cast<std::uint64_t>(kNsPerDay) + milliseconds * static_cast<std::uint64_t>(kNsPerMillisecond) + subNs, value);
-        if (status != TimeStatus::ok) {
-            return status;
+        const auto sum = detail::addToEpoch(epoch, day * static_cast<std::uint64_t>(kNsPerDay) + milliseconds * static_cast<std::uint64_t>(kNsPerMillisecond) + subNs);
+        if (!sum) {
+            return std::unexpected(sum.error());
         }
-        out.ns   = value;
+        out.ns   = *sum;
         out.leap = leap;
-        return TimeStatus::ok;
+        return out;
     }
 
     // CCS. Every nibble is a digit or the code is refused.
     if (layout.subsecond_octets > 6U) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
     std::array<unsigned, 13UZ> pairs{};
     for (std::size_t i = 0UZ; i < needed; ++i) {
         if (!detail::bcdOctet(tfield[i], pairs[i])) {
-            return TimeStatus::bad_bcd;
+            return std::unexpected(TimeStatus::bad_bcd);
         }
     }
     int         year  = static_cast<int>(pairs[0] * 100U + pairs[1]);
@@ -558,28 +574,28 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     unsigned    day   = 1U;
     std::size_t next  = 4UZ;
     if (year < 1 || year > 9999) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
     if (layout.day_of_year) {
         // 3.4.1.2 gives sixteen bits. The four most significant bits are unused and set to zero.
         const unsigned dayOfYear = pairs[2] * 100U + pairs[3];
         const unsigned yearDays  = std::chrono::year{year}.is_leap() ? 366U : 365U;
         if (dayOfYear < 1U || dayOfYear > yearDays) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         detail::civilFromDays(detail::daysFromCivil(year, 1U, 1U) + static_cast<std::int64_t>(dayOfYear) - 1, year, month, day);
     } else {
         month = pairs[2];
         day   = pairs[3];
         if (month < 1U || month > 12U || day < 1U || day > detail::daysInMonth(year, month)) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
     }
     const unsigned hour   = pairs[next];
     const unsigned minute = pairs[next + 1UZ];
     const unsigned second = pairs[next + 2UZ];
     if (hour > 23U || minute > 59U || second > 60U) {
-        return TimeStatus::segment_out_of_range; // Annex A admits the leap second's 60
+        return std::unexpected(TimeStatus::segment_out_of_range); // Annex A admits the leap second's 60
     }
 
     std::int64_t   subsecondNs = 0;
@@ -605,13 +621,13 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     // admit that case.
     const std::int64_t days         = detail::daysFromCivil(year, month, day);
     const std::int64_t withinSecond = static_cast<std::int64_t>(hour) * 3600 + static_cast<std::int64_t>(minute) * 60 + static_cast<std::int64_t>(second);
-    std::int64_t       value        = 0;
-    if (const TimeStatus status = detail::nsFromSeconds(days * 86400 + withinSecond, subsecondNs, value); status != TimeStatus::ok) {
-        return status;
+    const auto         value        = detail::nsFromSeconds(days * 86400 + withinSecond, subsecondNs);
+    if (!value) {
+        return std::unexpected(value.error());
     }
-    out.ns   = value;
+    out.ns   = *value;
     out.leap = second == 60U;
-    return TimeStatus::ok;
+    return out;
 }
 
 /**
@@ -632,17 +648,17 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * past the twelfth are counted in `precision_discarded_digits`. A producer that sends fifteen digits
  * sends more precision than the axis holds. The count reports that to the caller.
  */
-[[nodiscard]] inline TimeStatus decodeAscii(std::string_view text, TimeCodeKind kind, Instant& out) noexcept {
-    out = Instant{};
+[[nodiscard]] inline std::expected<Instant, TimeStatus> decodeAscii(std::string_view text, TimeCodeKind kind) noexcept {
+    Instant out{};
     if (kind != TimeCodeKind::ascii_a && kind != TimeCodeKind::ascii_b) {
-        return TimeStatus::bad_character;
+        return std::unexpected(TimeStatus::bad_character);
     }
     std::string_view body = text;
     if (!body.empty() && body.back() == 'Z') {
         body.remove_suffix(1UZ);
     }
     if (body.empty()) {
-        return TimeStatus::incomplete_calendar;
+        return std::unexpected(TimeStatus::incomplete_calendar);
     }
 
     std::size_t pos      = 0UZ;
@@ -663,11 +679,11 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
 
     // A left-truncated form has no year, and a time-only subset names no date. Neither names an instant.
     if (body.size() >= 3UZ && body[2] == ':') {
-        return TimeStatus::incomplete_calendar;
+        return std::unexpected(TimeStatus::incomplete_calendar);
     }
     unsigned year = 0U;
     if (!digitsAt(0UZ, 4UZ, year)) {
-        return body.find(':') != std::string_view::npos ? TimeStatus::incomplete_calendar : TimeStatus::bad_character;
+        return std::unexpected(body.find(':') != std::string_view::npos ? TimeStatus::incomplete_calendar : TimeStatus::bad_character);
     }
     pos = 4UZ;
 
@@ -682,27 +698,27 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
 
     if (pos < body.size()) {
         if (!peek('-')) {
-            return TimeStatus::bad_character;
+            return std::unexpected(TimeStatus::bad_character);
         }
         ++pos;
         if (kind == TimeCodeKind::ascii_a) {
             if (!digitsAt(pos, 2UZ, month)) {
-                return TimeStatus::bad_character;
+                return std::unexpected(TimeStatus::bad_character);
             }
             pos += 2UZ;
             if (pos < body.size()) {
                 if (!peek('-')) {
-                    return TimeStatus::bad_character;
+                    return std::unexpected(TimeStatus::bad_character);
                 }
                 ++pos;
                 if (!digitsAt(pos, 2UZ, day)) {
-                    return TimeStatus::bad_character;
+                    return std::unexpected(TimeStatus::bad_character);
                 }
                 pos += 2UZ;
             }
         } else {
             if (!digitsAt(pos, 3UZ, dayOfYear)) {
-                return TimeStatus::bad_character;
+                return std::unexpected(TimeStatus::bad_character);
             }
             pos += 3UZ;
         }
@@ -711,34 +727,34 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     std::int64_t subsecondNs = 0;
     if (pos < body.size()) {
         if (!peek('T')) {
-            return TimeStatus::bad_character;
+            return std::unexpected(TimeStatus::bad_character);
         }
         ++pos;
         if (!digitsAt(pos, 2UZ, hour)) {
-            return TimeStatus::bad_character;
+            return std::unexpected(TimeStatus::bad_character);
         }
         pos += 2UZ;
         if (pos < body.size()) {
             if (!peek(':')) {
-                return TimeStatus::bad_character;
+                return std::unexpected(TimeStatus::bad_character);
             }
             ++pos;
             if (!digitsAt(pos, 2UZ, minute)) {
-                return TimeStatus::bad_character;
+                return std::unexpected(TimeStatus::bad_character);
             }
             pos += 2UZ;
         }
         if (pos < body.size() && body[pos] == ':') {
             ++pos;
             if (!digitsAt(pos, 2UZ, second)) {
-                return TimeStatus::bad_character;
+                return std::unexpected(TimeStatus::bad_character);
             }
             pos += 2UZ;
         }
         if (pos < body.size() && body[pos] == '.') {
             ++pos;
             if (pos >= body.size()) {
-                return TimeStatus::bad_character; // a fraction is one to n characters (3.5.1)
+                return std::unexpected(TimeStatus::bad_character); // a fraction is one to n characters (3.5.1)
             }
             std::size_t   nanoDigits = 0UZ;
             std::size_t   picoDigits = 0UZ;
@@ -746,7 +762,7 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
             while (pos < body.size()) {
                 const char c = body[pos];
                 if (c < '0' || c > '9') {
-                    return TimeStatus::bad_character;
+                    return std::unexpected(TimeStatus::bad_character);
                 }
                 const unsigned digit = static_cast<unsigned>(c - '0');
                 if (nanoDigits < 9UZ) {
@@ -770,23 +786,23 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         }
     }
     if (pos != body.size()) {
-        return TimeStatus::bad_character;
+        return std::unexpected(TimeStatus::bad_character);
     }
 
     if (year < 1U || year > 9999U) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
     const int signedYear = static_cast<int>(year);
     if (kind == TimeCodeKind::ascii_b) {
         const unsigned yearDays = std::chrono::year{signedYear}.is_leap() ? 366U : 365U;
         if (dayOfYear < 1U || dayOfYear > yearDays) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
     } else if (month < 1U || month > 12U || day < 1U || day > detail::daysInMonth(signedYear, month)) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
     if (hour > 23U || minute > 59U || second > 60U) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
 
     // As in the calendar code above, the day count and the seconds of the day are summed in whole
@@ -794,13 +810,13 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     // of its last day. A bound on the day count alone would admit an instant past its end.
     const std::int64_t days         = kind == TimeCodeKind::ascii_b ? detail::daysFromCivil(signedYear, 1U, 1U) + static_cast<std::int64_t>(dayOfYear) - 1 : detail::daysFromCivil(signedYear, month, day);
     const std::int64_t withinSecond = static_cast<std::int64_t>(hour) * 3600 + static_cast<std::int64_t>(minute) * 60 + static_cast<std::int64_t>(second);
-    std::int64_t       value        = 0;
-    if (const TimeStatus status = detail::nsFromSeconds(days * 86400 + withinSecond, subsecondNs, value); status != TimeStatus::ok) {
-        return status;
+    const auto         value        = detail::nsFromSeconds(days * 86400 + withinSecond, subsecondNs);
+    if (!value) {
+        return std::unexpected(value.error());
     }
-    out.ns   = value;
+    out.ns   = *value;
     out.leap = second == 60U;
-    return TimeStatus::ok;
+    return out;
 }
 
 /**
@@ -812,31 +828,33 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * distinct nanosecond values. That needs `2^(-8m) >= 10^-9`, or `8m <= log2(10^9) = 29.897`, or
  * `m <= 3`. At `m = 4` four distinct `F` share a nanosecond, and no inverse can separate them.
  */
-[[nodiscard]] inline TimeStatus encode(const Instant& instant, const Layout& layout, std::int64_t epochNs, std::int32_t taiUtcOffsetSeconds, std::span<std::uint8_t> out) noexcept {
+[[nodiscard]] inline std::expected<TField, TimeStatus> encode(const Instant& instant, const Layout& layout, std::int64_t epochNs, std::int32_t taiUtcOffsetSeconds) noexcept {
     const std::size_t needed = timeFieldOctets(layout);
     if (needed == 0UZ) {
-        return TimeStatus::bad_p_field;
+        return std::unexpected(TimeStatus::bad_p_field);
     }
-    if (out.size() < needed) {
-        return TimeStatus::short_field;
+    if (needed > kMaxTFieldOctets) {
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
-    const std::int64_t epoch = timeCodeEpochNs(layout, epochNs);
+    TField                  field{.data = {}, .size = needed};
+    std::span<std::uint8_t> out{field.data.data(), needed};
+    const std::int64_t      epoch = timeCodeEpochNs(layout, epochNs);
 
     if (layout.kind == TimeCodeKind::cuc) {
         if (layout.coarse_octets < 1U || layout.coarse_octets > 7U || layout.fine_octets > 10U) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         std::int64_t value = instant.ns;
         if (taiUtcOffsetSeconds != 0) {
             // The decoder's relation in the other direction. The range is tested before the sum is formed.
             const std::int64_t offsetNs = std::int64_t{taiUtcOffsetSeconds} * kNsPerSecond;
             if (detail::addOverflows(value, offsetNs)) {
-                return TimeStatus::axis_overflow;
+                return std::unexpected(TimeStatus::axis_overflow);
             }
             value += offsetNs;
         }
         if (value < epoch) {
-            return TimeStatus::segment_out_of_range; // the code counts forward from its epoch only
+            return std::unexpected(TimeStatus::segment_out_of_range); // the code counts forward from its epoch only
         }
         const std::uint64_t elapsed = static_cast<std::uint64_t>(value - epoch);
         std::uint64_t       coarse  = elapsed / static_cast<std::uint64_t>(kNsPerSecond);
@@ -853,7 +871,7 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
             }
         }
         if ((coarse >> (8U * layout.coarse_octets)) != 0ULL) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         detail::writeBigEndian(out, 0UZ, layout.coarse_octets, coarse);
         if (layout.fine_octets != 0U) {
@@ -866,21 +884,21 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
                 out[std::size_t{layout.coarse_octets} + i] = std::uint8_t{0U};
             }
         }
-        return TimeStatus::ok;
+        return field;
     }
 
     if (layout.kind == TimeCodeKind::cds) {
         if ((layout.day_octets != 2U && layout.day_octets != 3U) || (layout.submilli_octets != 0U && layout.submilli_octets != 2U && layout.submilli_octets != 4U)) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         if (instant.ns < epoch) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         const std::uint64_t elapsed = static_cast<std::uint64_t>(instant.ns - epoch);
         const std::uint64_t day     = elapsed / static_cast<std::uint64_t>(kNsPerDay);
         const std::uint64_t within  = elapsed % static_cast<std::uint64_t>(kNsPerDay);
         if (day >> (8U * layout.day_octets) != 0ULL) {
-            return TimeStatus::segment_out_of_range;
+            return std::unexpected(TimeStatus::segment_out_of_range);
         }
         const std::uint64_t milliseconds = within / static_cast<std::uint64_t>(kNsPerMillisecond);
         const std::uint64_t subNs        = within % static_cast<std::uint64_t>(kNsPerMillisecond);
@@ -892,11 +910,11 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
         } else if (layout.submilli_octets == 4U) {
             detail::writeBigEndian(out, std::size_t{layout.day_octets} + 4UZ, 4UZ, subNs * 1000ULL + instant.sub_ns_ps);
         }
-        return TimeStatus::ok;
+        return field;
     }
 
     if (layout.subsecond_octets > 6U) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
     // CCS. The day is floored. A negative instant falls on the calendar day that contains it.
     std::int64_t days   = instant.ns / kNsPerDay;
@@ -910,7 +928,7 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     unsigned day   = 0U;
     detail::civilFromDays(days, year, month, day);
     if (year < 1 || year > 9999) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
     const std::int64_t seconds = within / kNsPerSecond;
     const std::int64_t restNs  = within % kNsPerSecond;
@@ -944,7 +962,7 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
             fraction /= 100;
         }
     }
-    return TimeStatus::ok;
+    return field;
 }
 
 /**
@@ -953,19 +971,15 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
  * A subset would need a policy on which fields to keep. Its receiver would also need to be told what
  * it means. 3.5.1.3 permits subsets on the receive side. This encoder does not emit them.
  */
-[[nodiscard]] inline TimeStatus encodeAscii(const Instant& instant, TimeCodeKind kind, std::uint8_t fractionDigits, bool terminator, std::span<char> out, std::size_t& written) noexcept {
-    written = 0UZ;
+[[nodiscard]] inline std::expected<AsciiCode, TimeStatus> encodeAscii(const Instant& instant, TimeCodeKind kind, std::uint8_t fractionDigits, bool terminator) noexcept {
     if (kind != TimeCodeKind::ascii_a && kind != TimeCodeKind::ascii_b) {
-        return TimeStatus::bad_character;
+        return std::unexpected(TimeStatus::bad_character);
     }
     if (fractionDigits > 9U) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
-    const std::size_t base   = kind == TimeCodeKind::ascii_a ? 19UZ : 17UZ;
-    const std::size_t needed = base + (fractionDigits != 0U ? 1UZ + fractionDigits : 0UZ) + (terminator ? 1UZ : 0UZ);
-    if (out.size() < needed) {
-        return TimeStatus::short_field;
-    }
+    AsciiCode       code{};
+    std::span<char> out{code.data};
 
     std::int64_t days   = instant.ns / kNsPerDay;
     std::int64_t within = instant.ns % kNsPerDay;
@@ -978,7 +992,7 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     unsigned day   = 0U;
     detail::civilFromDays(days, year, month, day);
     if (year < 1 || year > 9999) {
-        return TimeStatus::segment_out_of_range;
+        return std::unexpected(TimeStatus::segment_out_of_range);
     }
 
     const auto put = [&out](std::size_t at, unsigned value, std::size_t width) noexcept {
@@ -1019,8 +1033,8 @@ inline void civilFromDays(std::int64_t days, int& year, unsigned& month, unsigne
     if (terminator) {
         out[at++] = 'Z';
     }
-    written = at;
-    return TimeStatus::ok;
+    code.size = at;
+    return code;
 }
 
 } // namespace gr::ccsds
