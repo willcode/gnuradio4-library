@@ -45,13 +45,11 @@ void benchmarkSize(std::size_t n) {
     for (auto& v : b) {
         v = T{normal(rng), normal(rng)};
     }
-    gr::Tensor<RealT> values;
-    gr::Tensor<T>     vectors;
     expect(gr::math::solveHermitian(A, b).has_value()) << fatal;
-    expect(gr::math::eigh(values, vectors, A) == gr::math::eig::Status::Success) << fatal;
+    expect(gr::math::eigh(A).has_value()) << fatal;
 
     ::benchmark::benchmark<NRepetitions>(std::format("solveHermitian {:22} N={}", type_name<T>(), n)) = [&] { std::ignore = gr::math::solveHermitian(A, b); };
-    ::benchmark::benchmark<NRepetitions>(std::format("eigh           {:22} N={}", type_name<T>(), n)) = [&] { std::ignore = gr::math::eigh(values, vectors, A); };
+    ::benchmark::benchmark<NRepetitions>(std::format("eigh           {:22} N={}", type_name<T>(), n)) = [&] { std::ignore = gr::math::eigh(A); };
 }
 
 inline const boost::ut::suite<"Hermitian solve and eigendecomposition benchmark"> _hermitian_bm_tests = [] {

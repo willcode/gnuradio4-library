@@ -185,10 +185,10 @@ const boost::ut::suite<"eigh"> _eigh = [] {
     using namespace boost::ut;
 
     "reconstruction A = V diag(values) V^H and orthonormal V"_test = []<typename T> {
-        const Tensor<T> A = chosenHermitian<T>();
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>();
+        const Tensor<T> A      = chosenHermitian<T>();
+        const auto      result = eigh(A);
+        expect(fatal(result.has_value())) << typeName<T>();
+        const auto& [values, V] = *result;
         expect(eq(values.size(), 5UZ) && eq(V.extent(0), 5UZ) && eq(V.extent(1), 5UZ)) << typeName<T>();
         expect(le(relativeError(multiply(multiply(V, diagonal<T>(values)), adjoint(V)), A), tolerance<T>(5))) << typeName<T>() << "A = V diag V^H";
         expect(le(relativeError(multiply(adjoint(V), V), identity<T>(5)), tolerance<T>(5))) << typeName<T>() << "V^H V = I";
@@ -204,9 +204,9 @@ const boost::ut::suite<"eigh"> _eigh = [] {
             for (auto& a : A) {
                 a *= scale;
             }
-            Tensor<Real<T>> values;
-            Tensor<T>       V;
-            expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>() << scale << fatal;
+            const auto result = eigh(A);
+            expect(fatal(result.has_value())) << typeName<T>() << scale;
+            const auto& [values, V] = *result;
             expect(le(relativeError(multiply(multiply(V, diagonal<T>(values)), adjoint(V)), A), tolerance<T>(5))) << typeName<T>() << scale << "A = V diag V^H";
             expect(le(relativeError(multiply(adjoint(V), V), identity<T>(5)), tolerance<T>(5))) << typeName<T>() << scale << "V^H V = I";
         }
@@ -215,9 +215,9 @@ const boost::ut::suite<"eigh"> _eigh = [] {
         for (auto& a : beyond) {
             a *= std::numeric_limits<Real<T>>::max() / Real<T>{8};
         }
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, beyond) == eig::Status::InvalidInput) << typeName<T>();
+        const auto refused = eigh(beyond);
+        expect(fatal(!refused.has_value())) << typeName<T>();
+        expect(refused.error().message.contains("Frobenius norm of A is not finite")) << typeName<T>() << refused.error().message;
     } | ElementTypes{};
 
     "a pair whose diagonal difference overflows decomposes as it does at unit scale"_test = []<typename T> {
@@ -231,9 +231,9 @@ const boost::ut::suite<"eigh"> _eigh = [] {
             for (auto& a : A) {
                 a *= scale;
             }
-            Tensor<Real<T>> values;
-            Tensor<T>       V;
-            expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>() << scale << fatal;
+            const auto result = eigh(A);
+            expect(fatal(result.has_value())) << typeName<T>() << scale;
+            const auto& [values, V] = *result;
             expect(le(scaledResidual(A, V, values, scale), tolerance<T>(2))) << typeName<T>() << scale << "A V = V diag(values)";
             expect(le(std::abs(values[0] / scale + lambda), tolerance<T>(2))) << typeName<T>() << scale << values[0];
             expect(le(std::abs(values[1] / scale - lambda), tolerance<T>(2))) << typeName<T>() << scale << values[1];
@@ -251,9 +251,9 @@ const boost::ut::suite<"eigh"> _eigh = [] {
             for (auto& a : A) {
                 a *= scale;
             }
-            Tensor<Real<T>> values;
-            Tensor<T>       V;
-            expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>() << scale << fatal;
+            const auto result = eigh(A);
+            expect(fatal(result.has_value())) << typeName<T>() << scale;
+            const auto& [values, V] = *result;
             expect(std::isfinite(values[0]) && std::isfinite(values[1])) << typeName<T>() << scale << values[0] << values[1];
             expect(le(scaledResidual(A, V, values, scale), tolerance<T>(2))) << typeName<T>() << scale << "A V = V diag(values)";
             expect(le(std::abs(values[0] / scale - (Real<T>{1} - root5) / Real<T>{2}), tolerance<T>(2))) << typeName<T>() << scale << values[0];
@@ -266,10 +266,10 @@ const boost::ut::suite<"eigh"> _eigh = [] {
         // pair is about 2.9 degrees, far from the 45 degrees of an equal pair. The gaps 0 and 1e-3 are controls.
         const std::pair<double, double> g = gr::meta::complex_like<T> ? std::pair{0.6e-5, 0.8e-5} : std::pair{1e-5, 0.0};
         for (const double gap : {0.0, 2e-4, 1e-3}) {
-            const Tensor<T> A = matrix<T>(2, 2, {{1, 0}, g, {g.first, -g.second}, {1.0 + gap, 0}});
-            Tensor<Real<T>> values;
-            Tensor<T>       V;
-            expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>() << gap << fatal;
+            const Tensor<T> A      = matrix<T>(2, 2, {{1, 0}, g, {g.first, -g.second}, {1.0 + gap, 0}});
+            const auto      result = eigh(A);
+            expect(fatal(result.has_value())) << typeName<T>() << gap;
+            const auto& [values, V] = *result;
             expect(le(scaledResidual(A, V, values, Real<T>{1}), tolerance<T>(2))) << typeName<T>() << gap << "A V = V diag(values)";
             expect(le(relativeError(multiply(adjoint(V), V), identity<T>(2)), tolerance<T>(2))) << typeName<T>() << gap << "V^H V = I";
         }
@@ -277,18 +277,20 @@ const boost::ut::suite<"eigh"> _eigh = [] {
 
     "eigenvalues worked by hand"_test = []<typename T> {
         // [[2, g], [conj(g), 2]] with |g| = 1 has eigenvalues 2 - |g| and 2 + |g|
-        const std::pair<double, double> g = gr::meta::complex_like<T> ? std::pair{0.6, 0.8} : std::pair{1.0, 0.0};
-        const Tensor<T>                 A = matrix<T>(2, 2, {{2, 0}, g, {g.first, -g.second}, {2, 0}});
-        Tensor<Real<T>>                 values;
-        Tensor<T>                       V;
-        expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>();
+        const std::pair<double, double> g    = gr::meta::complex_like<T> ? std::pair{0.6, 0.8} : std::pair{1.0, 0.0};
+        const Tensor<T>                 A    = matrix<T>(2, 2, {{2, 0}, g, {g.first, -g.second}, {2, 0}});
+        const auto                      pair = eigh(A);
+        expect(fatal(pair.has_value())) << typeName<T>();
+        const auto& values = pair->values;
         expect(le(std::abs(values[0] - Real<T>{1}), tolerance<T>(2) * Real<T>{3})) << typeName<T>() << values[0];
         expect(le(std::abs(values[1] - Real<T>{3}), tolerance<T>(2) * Real<T>{3})) << typeName<T>() << values[1];
 
         // a diagonal matrix is sorted, and its eigenvectors are the permuted unit vectors
-        const Tensor<T> D = matrix<T>(3, 3, {{3, 0}, {0, 0}, {0, 0}, {0, 0}, {-1, 0}, {0, 0}, {0, 0}, {0, 0}, {2, 0}});
-        expect(eigh(values, V, D) == eig::Status::Success) << typeName<T>();
-        expect(values[0] == Real<T>{-1} && values[1] == Real<T>{2} && values[2] == Real<T>{3}) << typeName<T>();
+        const Tensor<T> D            = matrix<T>(3, 3, {{3, 0}, {0, 0}, {0, 0}, {0, 0}, {-1, 0}, {0, 0}, {0, 0}, {0, 0}, {2, 0}});
+        const auto      diagonalPair = eigh(D);
+        expect(fatal(diagonalPair.has_value())) << typeName<T>();
+        const auto& [sorted, V] = *diagonalPair;
+        expect(sorted[0] == Real<T>{-1} && sorted[1] == Real<T>{2} && sorted[2] == Real<T>{3}) << typeName<T>();
         expect(V[1, 0] == T{1} && V[2, 1] == T{1} && V[0, 2] == T{1}) << typeName<T>();
     } | ElementTypes{};
 
@@ -300,26 +302,25 @@ const boost::ut::suite<"eigh"> _eigh = [] {
                 upper[i, j] = element<T>(100, -50);
             }
         }
-        Tensor<Real<T>> values;
-        Tensor<Real<T>> valuesUpper;
-        Tensor<T>       V;
-        expect(eigh(values, V, A) == eig::Status::Success) << typeName<T>();
-        expect(eigh(valuesUpper, V, upper) == eig::Status::Success) << typeName<T>();
-        expect(std::ranges::equal(values, valuesUpper)) << typeName<T>();
+        const auto full      = eigh(A);
+        const auto fromUpper = eigh(upper);
+        expect(fatal(full.has_value() && fromUpper.has_value())) << typeName<T>();
+        expect(std::ranges::equal(full->values, fromUpper->values)) << typeName<T>();
     } | ElementTypes{};
 
-    "too few sweeps report MaxIterations; invalid input is refused"_test = []<typename T> {
-        const Tensor<T> A = chosenHermitian<T>();
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, A, eig::Config<Real<T>>{.maxIterations = 1UZ}) == eig::Status::MaxIterations) << typeName<T>();
-        expect(eq(values.size(), 5UZ)) << typeName<T>() << "the estimate is returned";
+    "too few sweeps are an error; invalid input is refused"_test = []<typename T> {
+        const Tensor<T> A          = chosenHermitian<T>();
+        const auto      unfinished = eigh(A, eig::Config<Real<T>>{.maxIterations = 1UZ});
+        expect(fatal(!unfinished.has_value())) << typeName<T>();
+        expect(unfinished.error().message.contains("no convergence within 1 sweeps")) << typeName<T>() << unfinished.error().message;
 
         const Tensor<T> rectangular({2UZ, 3UZ});
-        expect(eigh(values, V, rectangular) == eig::Status::InvalidInput) << typeName<T>();
+        const auto      notSquare = eigh(rectangular);
+        expect(fatal(!notSquare.has_value())) << typeName<T>();
+        expect(notSquare.error().message.contains("not a finite square matrix")) << typeName<T>() << notSquare.error().message;
         Tensor<T> withInf = A;
         withInf[0, 1]     = element<T>(std::numeric_limits<double>::infinity());
-        expect(eigh(values, V, withInf) == eig::Status::InvalidInput) << typeName<T>();
+        expect(!eigh(withInf).has_value()) << typeName<T>();
     } | ElementTypes{};
 };
 
@@ -343,17 +344,17 @@ const boost::ut::suite<"subspace"> _subspace = [] {
             R[i, i] += T{noisePower};
         }
 
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, R) == eig::Status::Success) << typeName<T>();
+        const auto pair = eigh(R);
+        expect(fatal(pair.has_value())) << typeName<T>();
+        const auto& [values, V] = *pair;
         for (std::size_t k = 0UZ; k < 4UZ; ++k) {
             expect(le(std::abs(values[k] - noisePower), tolerance<T>(6) * Real<T>{12})) << typeName<T>() << "noise eigenvalue" << k;
         }
         expect(gt(values[4], Real<T>{1})) << typeName<T>();
 
-        Tensor<T> signal;
-        Tensor<T> noise;
-        expect(subspace(signal, noise, values, V, eig::Rank{2UZ}) == eig::Status::Success) << typeName<T>();
+        const auto byRank = subspace(values, V, eig::Rank{2UZ});
+        expect(fatal(byRank.has_value())) << typeName<T>();
+        const auto& [signal, noise] = *byRank;
         expect(eq(signal.extent(1), 2UZ) && eq(noise.extent(1), 4UZ) && eq(noise.extent(0), 6UZ)) << typeName<T>();
         const Real<T> bound = tolerance<T>(6) * Real<T>{12} / (values[4] - values[3]); // the error of R over the eigenvalue gap bounds the subspace error
         expect(le(projectionNorm(noise, a1), bound)) << typeName<T>() << "En^H a1 = 0";
@@ -361,34 +362,33 @@ const boost::ut::suite<"subspace"> _subspace = [] {
         expect(le(std::abs(projectionNorm(signal, a1) - Real<T>{1}), bound)) << typeName<T>() << "a1 lies in the signal subspace";
         expect(le(std::abs(projectionNorm(signal, a2) - Real<T>{1}), bound)) << typeName<T>() << "a2 lies in the signal subspace";
 
-        Tensor<T> signalByThreshold;
-        Tensor<T> noiseByThreshold;
-        expect(subspace(signalByThreshold, noiseByThreshold, values, V, eig::Threshold{Real<T>{10} * noisePower}) == eig::Status::Success) << typeName<T>();
-        expect(std::ranges::equal(signalByThreshold, signal) && std::ranges::equal(noiseByThreshold, noise)) << typeName<T>() << "a threshold above the noise floor splits as rank 2";
+        const auto byThreshold = subspace(values, V, eig::Threshold{Real<T>{10} * noisePower});
+        expect(fatal(byThreshold.has_value())) << typeName<T>();
+        expect(std::ranges::equal(byThreshold->signal, signal) && std::ranges::equal(byThreshold->noise, noise)) << typeName<T>() << "a threshold above the noise floor splits as rank 2";
     } | ElementTypes{};
 
     "an out-of-range rank is refused"_test = []<typename T> {
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, identity<T>(3)) == eig::Status::Success) << typeName<T>();
-        Tensor<T> signal;
-        Tensor<T> noise;
-        expect(subspace(signal, noise, values, V, eig::Rank{4UZ}) == eig::Status::InvalidInput) << typeName<T>();
-        expect(subspace(signal, noise, values, V, eig::Rank{3UZ}) == eig::Status::Success && eq(noise.extent(1), 0UZ)) << typeName<T>();
-        expect(subspace(signal, noise, values, V, eig::Threshold{Real<T>{2}}) == eig::Status::Success && eq(signal.extent(1), 0UZ)) << typeName<T>();
+        const auto pair = eigh(identity<T>(3));
+        expect(fatal(pair.has_value())) << typeName<T>();
+        const auto& [values, V] = *pair;
+        const auto tooLarge     = subspace(values, V, eig::Rank{4UZ});
+        expect(fatal(!tooLarge.has_value())) << typeName<T>();
+        expect(tooLarge.error().message.contains("a rank of 4 exceeds the 3 eigenvalues")) << typeName<T>() << tooLarge.error().message;
+        const auto notFinite = subspace(values, V, eig::Threshold{std::numeric_limits<Real<T>>::quiet_NaN()});
+        expect(fatal(!notFinite.has_value())) << typeName<T>();
+        expect(notFinite.error().message.contains("threshold is not finite")) << typeName<T>() << notFinite.error().message;
+        const auto allSignal = subspace(values, V, eig::Rank{3UZ});
+        expect(allSignal.has_value() && eq(allSignal->noise.extent(1), 0UZ)) << typeName<T>();
+        const auto allNoise = subspace(values, V, eig::Threshold{Real<T>{2}});
+        expect(allNoise.has_value() && eq(allNoise->signal.extent(1), 0UZ)) << typeName<T>();
     } | ElementTypes{};
 
-    "an eigenpair with a non-finite entry is refused and leaves both subspaces as they were"_test = []<typename T> {
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, chosenHermitian<T>()) == eig::Status::Success) << typeName<T>() << fatal;
-        Tensor<T> signal;
-        Tensor<T> noise;
-        expect(subspace(signal, noise, values, V, eig::Rank{2UZ}) == eig::Status::Success) << typeName<T>() << "a finite eigenpair";
-        const Tensor<T> signalBefore = signal;
-        const Tensor<T> noiseBefore  = noise;
+    "an eigenpair with a non-finite entry is refused"_test = []<typename T> {
+        const auto result = eigh(chosenHermitian<T>());
+        expect(fatal(result.has_value())) << typeName<T>();
+        const auto& [values, V] = *result;
+        expect(subspace(values, V, eig::Rank{2UZ}).has_value()) << typeName<T>() << "a finite eigenpair";
 
-        // a call that returned Success would write a split other than the saved one: three signal columns, or all five
         const eig::Rank               rank{3UZ};
         const eig::Threshold<Real<T>> threshold{std::numeric_limits<Real<T>>::lowest()};
         for (const double bad : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
@@ -396,20 +396,14 @@ const boost::ut::suite<"subspace"> _subspace = [] {
             badVectors[1, 2]          = element<T>(bad);
             Tensor<Real<T>> badValues = values;
             badValues[4]              = static_cast<Real<T>>(bad); // the order test alone admits NaN and +inf as the last value
-            const auto unchanged      = [&] {
-                const bool same = std::ranges::equal(signal, signalBefore) && std::ranges::equal(noise, noiseBefore);
-                signal          = signalBefore;
-                noise           = noiseBefore;
-                return same;
+            const auto refused        = [bad](const auto& split, const char* what) {
+                expect(fatal(!split.has_value())) << typeName<T>() << bad << what;
+                expect(split.error().message.contains("not a finite ascending eigenvalue and eigenvector pair")) << typeName<T>() << bad << what << split.error().message;
             };
-            expect(subspace(signal, noise, values, badVectors, rank) == eig::Status::InvalidInput) << typeName<T>() << bad << "in vectors, by rank";
-            expect(unchanged()) << typeName<T>() << bad << "in vectors, by rank: both subspaces are left as they were";
-            expect(subspace(signal, noise, values, badVectors, threshold) == eig::Status::InvalidInput) << typeName<T>() << bad << "in vectors, by threshold";
-            expect(unchanged()) << typeName<T>() << bad << "in vectors, by threshold: both subspaces are left as they were";
-            expect(subspace(signal, noise, badValues, V, rank) == eig::Status::InvalidInput) << typeName<T>() << bad << "in values, by rank";
-            expect(unchanged()) << typeName<T>() << bad << "in values, by rank: both subspaces are left as they were";
-            expect(subspace(signal, noise, badValues, V, threshold) == eig::Status::InvalidInput) << typeName<T>() << bad << "in values, by threshold";
-            expect(unchanged()) << typeName<T>() << bad << "in values, by threshold: both subspaces are left as they were";
+            refused(subspace(values, badVectors, rank), "in vectors, by rank");
+            refused(subspace(values, badVectors, threshold), "in vectors, by threshold");
+            refused(subspace(badValues, V, rank), "in values, by rank");
+            refused(subspace(badValues, V, threshold), "in values, by threshold");
         }
     } | ElementTypes{};
 };

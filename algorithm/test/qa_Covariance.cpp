@@ -232,13 +232,12 @@ const boost::ut::suite<"CovarianceAccumulator"> _accumulator = [] {
         }
         expect(le(relativeError(R, expected), tolerance<T>(4))) << typeName<T>();
 
-        Tensor<Real<T>> values;
-        Tensor<T>       V;
-        expect(eigh(values, V, R) == eig::Status::Success) << typeName<T>();
-        Tensor<T> signal;
-        Tensor<T> noise;
-        expect(subspace(signal, noise, values, V, eig::Rank{2UZ}) == eig::Status::Success) << typeName<T>();
-        const Real<T> scale = std::max(std::abs(vdot(a1, a1)), std::abs(vdot(a2, a2)));
+        const auto pair = eigh(R);
+        expect(fatal(pair.has_value())) << typeName<T>();
+        const auto split = subspace(pair->values, pair->vectors, eig::Rank{2UZ});
+        expect(fatal(split.has_value())) << typeName<T>();
+        const Tensor<T>& noise = split->noise;
+        const Real<T>    scale = std::max(std::abs(vdot(a1, a1)), std::abs(vdot(a2, a2)));
         for (std::size_t k = 0UZ; k < noise.extent(1); ++k) {
             Tensor<T> column({4UZ});
             for (std::size_t i = 0UZ; i < 4UZ; ++i) {
