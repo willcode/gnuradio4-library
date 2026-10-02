@@ -5,6 +5,8 @@
 #include <format>
 #include <stdexcept>
 
+#include <gnuradio-4.0/algorithm/fec/Gf2Polynomial.hpp>
+
 /**
  * A systematic shortened cyclic block code with coset offset words. It is the arithmetic of
  * offset-word framing. EN 50067 and RBDS Annex C are its main instance.
@@ -33,15 +35,7 @@ struct CyclicSyndrome {
     }
 
     //! The remainder of a word of `bits` coefficients modulo the generator.
-    [[nodiscard]] constexpr std::uint16_t remainder(std::uint64_t word, unsigned bits) const noexcept {
-        std::uint64_t r = word;
-        for (unsigned bit = bits; bit-- > checkBits;) {
-            if ((r >> bit) & 1U) {
-                r ^= static_cast<std::uint64_t>(polynomial) << (bit - checkBits);
-            }
-        }
-        return static_cast<std::uint16_t>(r & ((1ULL << checkBits) - 1ULL));
-    }
+    [[nodiscard]] constexpr std::uint16_t remainder(std::uint64_t word, unsigned bits) const noexcept { return static_cast<std::uint16_t>(gr::fec::gf2Remainder(word, bits, polynomial, checkBits)); }
 
     //! The checkword of a data word, the remainder of `data * x^C`.
     [[nodiscard]] constexpr std::uint16_t check(std::uint32_t data) const noexcept { return remainder(static_cast<std::uint64_t>(data) << checkBits, dataBits + checkBits); }
