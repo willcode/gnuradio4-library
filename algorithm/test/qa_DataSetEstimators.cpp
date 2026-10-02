@@ -511,7 +511,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         "ramp"_test = [] {
             auto ds = generate::ramp<T>("ramp", 5, value_t(0.), value_t(1.));
 
-            auto           derivative = computeDerivative(ds);
+            auto           derivative = computeDerivative(ds).value();
             std::vector<T> expected   = {0.2, 0.2, 0.2, 0.2};
 
             for (std::size_t i = 0; i < expected.size(); ++i) {
@@ -522,7 +522,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
 
         "step"_test = [] {
             auto ds_step         = generate::randomStepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
-            auto derivative_step = computeDerivative(ds_step);
+            auto derivative_step = computeDerivative(ds_step).value();
 
             std::vector<T> expected_step = {0.0, 0.0, 1.0, 0.0, 0.0};
             for (std::size_t i = 0; i < expected_step.size(); ++i) {
@@ -674,7 +674,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
 
         auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, {.order = 1UZ, .fLow = 0.05, .fs = 1.0}).value();
         auto val      = gr::dataset::filter::applyFilter<ProcessMode::InPlace>(generate::stepFunction<T>("damped step", 100, 20), response);
-        auto ds_step  = gr::dataset::addNoise<ProcessMode::InPlace>(val, noiseLevel, 0UZ, 42U);
+        auto ds_step  = gr::dataset::addNoise<ProcessMode::InPlace>(val, noiseLevel, 0UZ, 42U).value();
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step).value();
 
         if constexpr (std::is_same_v<T, float>) {
@@ -710,7 +710,7 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
         using value_t     = gr::meta::fundamental_base_value_type_t<T>;
         gr::DataSet<T> ds = generate::ramp<T>("ramp", 5, value_t(0), value_t(1)); // [0, 0.2, 0.4, 0.6, 0.8]
 
-        auto smoothed = filter::applyMovingAverage(ds, 3UZ);
+        auto smoothed = filter::applyMovingAverage(ds, 3UZ).value();
 
         std::vector<T> expected = {value_t(0.1), value_t(0.2), value_t(0.4), value_t(0.6), value_t(0.7)};
         for (std::size_t i = 0; i < expected.size(); ++i) {
@@ -718,17 +718,28 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
             expect(approx(val, expected[i], T(1e-3))) << std::format("smoothed value at index {}: expected {}, got {}", i, expected[i], val);
         }
 
-        expect(throws([&]() { filter::applyMovingAverage(ds, 4); }));
+        const auto evenWindow = filter::applyMovingAverage(ds, 4UZ);
+        expect(fatal(!evenWindow.has_value()));
+        expect(evenWindow.error().message.contains("positive odd number")) << evenWindow.error().message;
+        expect(!filter::applyMedian(ds, 0UZ).has_value()) << "applyMedian refuses an empty window";
+        expect(!filter::applyRms(ds, 0UZ).has_value()) << "applyRms refuses an empty window";
+        expect(!filter::applyPeakToPeak(ds, 0UZ).has_value()) << "applyPeakToPeak refuses an empty window";
+        const auto negativeNoise = addNoise(ds, value_t(-1));
+        expect(fatal(!negativeNoise.has_value()));
+        expect(negativeNoise.error().message.contains("must be a positive number")) << negativeNoise.error().message;
+        const auto oneSample = computeDerivative(generate::ramp<T>("one", 1, value_t(0), value_t(1)));
+        expect(fatal(!oneSample.has_value()));
+        expect(oneSample.error().message.contains("at least two samples")) << oneSample.error().message;
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 
     "applyMedian"_test = []<typename T>() {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
 
-        auto ds1 = filter::applyMedian<ProcessMode::Copy>(generate::from<T>("median_test", std::vector<value_t>{1, 5, 3, 2, 0, 8}), 3UZ);
+        auto ds1 = filter::applyMedian<ProcessMode::Copy>(generate::from<T>("median_test", std::vector<value_t>{1, 5, 3, 2, 0, 8}), 3UZ).value();
         expect(eq(ds1.signal_values[1], T(3))); // median of {1,5,3} is 3
         expect(eq(ds1.signal_values[2], T(3))); // median of {5,3,2} is 3
 
-        auto ds2 = filter::applyMedian<ProcessMode::InPlace>(generate::from<T>("median_test", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}), 3UZ);
+        auto ds2 = filter::applyMedian<ProcessMode::InPlace>(generate::from<T>("median_test", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}), 3UZ).value();
         for (std::size_t i = 0UZ; i < ds2.signal_values.size(); ++i) {
             expect(eq(ds2.signal_values[i], T(3))) << "filter outlier around 3";
         }
@@ -737,13 +748,13 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
     "applyRms"_test = []<typename T>() {
         using value_t            = gr::meta::fundamental_base_value_type_t<T>;
         auto           ds        = generate::from<T>("rms_test", std::vector<value_t>{0, 10, 10, 10, 0});
-        gr::DataSet<T> ds_median = filter::applyRms<ProcessMode::Copy>(ds, 3UZ);
+        gr::DataSet<T> ds_median = filter::applyRms<ProcessMode::Copy>(ds, 3UZ).value();
         expect(eq(ds_median.signal_values[2], T(0))) << "RMS with identical points => 0 stdev (around mean).";
         expect(eq(ds_median.signal_values[2], estimators::getRms(ds, 1UZ, 3UZ).value())) << "RMS with identical points => 0 stdev (around mean).";
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 
     "applyPeakToPeak"_test = []<typename T>() {
-        auto ds = filter::applyPeakToPeak(generate::from<T>("p2p_test", std::vector<T>{1, 2, 3, 5, 5, 0}), 3UZ);
+        auto ds = filter::applyPeakToPeak(generate::from<T>("p2p_test", std::vector<T>{1, 2, 3, 5, 5, 0}), 3UZ).value();
 
         expect(eq(ds.signal_values[0], T(1))); // window is {1, 2}    min=1, max=2 => range = 1
         expect(eq(ds.signal_values[1], T(2))); // window is {1, 2, 3} min=1, max=3 => range = 2
@@ -778,24 +789,24 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
             auto       out    = op(std::move(ds));
             return out.signal_values.data() == buffer;
         };
-        expect(that % movesTheBuffer([](auto&& in) { return gr::dataset::addNoise<ProcessMode::InPlace>(std::move(in), value_t(0.1), 0UZ, 42U); })) << "addNoise";
-        expect(that % movesTheBuffer([](auto&& in) { return filter::applyMovingAverage<ProcessMode::InPlace>(std::move(in), 3UZ); })) << "applyMovingAverage";
-        expect(that % movesTheBuffer([](auto&& in) { return filter::applyMedian<ProcessMode::InPlace>(std::move(in), 3UZ); })) << "applyMedian";
-        expect(that % movesTheBuffer([](auto&& in) { return filter::applyRms<ProcessMode::InPlace>(std::move(in), 3UZ); })) << "applyRms";
-        expect(that % movesTheBuffer([](auto&& in) { return filter::applyPeakToPeak<ProcessMode::InPlace>(std::move(in), 3UZ); })) << "applyPeakToPeak";
+        expect(that % movesTheBuffer([](auto&& in) { return gr::dataset::addNoise<ProcessMode::InPlace>(std::move(in), value_t(0.1), 0UZ, 42U).value(); })) << "addNoise";
+        expect(that % movesTheBuffer([](auto&& in) { return filter::applyMovingAverage<ProcessMode::InPlace>(std::move(in), 3UZ).value(); })) << "applyMovingAverage";
+        expect(that % movesTheBuffer([](auto&& in) { return filter::applyMedian<ProcessMode::InPlace>(std::move(in), 3UZ).value(); })) << "applyMedian";
+        expect(that % movesTheBuffer([](auto&& in) { return filter::applyRms<ProcessMode::InPlace>(std::move(in), 3UZ).value(); })) << "applyRms";
+        expect(that % movesTheBuffer([](auto&& in) { return filter::applyPeakToPeak<ProcessMode::InPlace>(std::move(in), 3UZ).value(); })) << "applyPeakToPeak";
 
         // and the answer is the one the copying mode gives: a window that reads samples the pass has
         // already written would differ from it as soon as the pass writes into its own input
         auto       source  = generate::ramp<T>("ramp", 5, value_t(0), value_t(1));
-        const auto viaCopy = filter::applyMovingAverage<ProcessMode::Copy>(source, 3UZ);
-        const auto inPlace = filter::applyMovingAverage<ProcessMode::InPlace>(std::move(source), 3UZ);
+        const auto viaCopy = filter::applyMovingAverage<ProcessMode::Copy>(source, 3UZ).value();
+        const auto inPlace = filter::applyMovingAverage<ProcessMode::InPlace>(std::move(source), 3UZ).value();
         for (std::size_t i = 0UZ; i < viaCopy.signal_values.size(); ++i) {
             expect(eq(inPlace.signal_values[i], viaCopy.signal_values[i])) << std::format("moving average at index {}", i);
         }
 
         auto       kept   = generate::from<T>("kept", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3});
         const auto buffer = kept.signal_values.data();
-        const auto copied = filter::applyMedian<ProcessMode::Copy>(kept, 3UZ);
+        const auto copied = filter::applyMedian<ProcessMode::Copy>(kept, 3UZ).value();
         expect(neq(copied.signal_values.data(), buffer)) << "the copying mode leaves the caller's record where it was";
         expect(eq(kept.signal_values[2], T(4))) << "and unfiltered";
     } | std::tuple<float, double>{};

@@ -1,8 +1,10 @@
 #ifndef DATASETMATH_HPP
 #define DATASETMATH_HPP
 
+#include <expected>
 #include <format>
 #include <random>
+#include <source_location>
 
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
@@ -128,10 +130,10 @@ template<typename T>
 // WIP complete other convenience and missing math functions
 
 template<typename T>
-std::vector<T> computeDerivative(const DataSet<T>& ds, std::size_t signalIndex = 0UZ) {
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> computeDerivative(const DataSet<T>& ds, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     auto signal = ds.signalValues(signalIndex);
     if (signal.size() < 2) {
-        throw gr::exception("signal must contain at least two samples to compute derivative.");
+        return std::unexpected(gr::Error("signal must contain at least two samples to compute derivative.", location));
     }
 
     std::vector<T> derivative;
@@ -143,10 +145,10 @@ std::vector<T> computeDerivative(const DataSet<T>& ds, std::size_t signalIndex =
 }
 
 template<ProcessMode mode = ProcessMode::Copy, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-DataSet<T> addNoise(D&& ds, TValue noiseLevel, std::size_t signalIndex = 0UZ, std::uint64_t seed = 0U) {
+[[nodiscard]] std::expected<DataSet<T>, gr::Error> addNoise(D&& ds, TValue noiseLevel, std::size_t signalIndex = 0UZ, std::uint64_t seed = 0U, std::source_location location = std::source_location::current()) {
     static_assert(!(std::is_const_v<std::remove_reference_t<D>> && mode == ProcessMode::InPlace), "cannot perform in-place computation on const DataSet<T>");
     if (noiseLevel < TValue(0)) {
-        throw gr::exception(std::format("noiseLevel {} must be a positive number.", noiseLevel));
+        return std::unexpected(gr::Error(std::format("noiseLevel {} must be a positive number.", noiseLevel), location));
     }
 
     DataSet<T> noisy;
@@ -171,10 +173,10 @@ DataSet<T> addNoise(D&& ds, TValue noiseLevel, std::size_t signalIndex = 0UZ, st
 namespace filter {
 
 template<ProcessMode mode = ProcessMode::Copy, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-DataSet<T> applyMovingAverage(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ) {
+[[nodiscard]] std::expected<DataSet<T>, gr::Error> applyMovingAverage(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     static_assert(!(std::is_const_v<std::remove_reference_t<D>> && mode == ProcessMode::InPlace), "cannot perform in-place computation on const DataSet<T>");
     if (windowSize == 0 || !(windowSize & 1)) {
-        throw gr::exception("windowSize must be a positive odd number.");
+        return std::unexpected(gr::Error(std::format("windowSize: {} must be a positive odd number.", windowSize), location));
     }
 
     DataSet<T> smoothed;
@@ -199,10 +201,10 @@ DataSet<T> applyMovingAverage(D&& ds, std::size_t windowSize, std::size_t signal
 }
 
 template<ProcessMode mode = ProcessMode::Copy, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-constexpr DataSet<T> applyMedian(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<DataSet<T>, gr::Error> applyMedian(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     static_assert(!(std::is_const_v<std::remove_reference_t<D>> && mode == ProcessMode::InPlace), "cannot perform in-place computation on const DataSet<T>");
     if (windowSize == 0) {
-        throw gr::exception(std::format("windowSize: {} must be a positive number.", windowSize), location);
+        return std::unexpected(gr::Error(std::format("windowSize: {} must be a positive number.", windowSize), location));
     }
 
     DataSet<T> filtered;
@@ -241,10 +243,10 @@ constexpr DataSet<T> applyMedian(D&& ds, std::size_t windowSize, std::size_t sig
 }
 
 template<ProcessMode mode = ProcessMode::Copy, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-constexpr DataSet<T> applyRms(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<DataSet<T>, gr::Error> applyRms(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     static_assert(!(std::is_const_v<std::remove_reference_t<D>> && mode == ProcessMode::InPlace), "cannot perform in-place computation on const DataSet<T>");
     if (windowSize == 0UZ) {
-        throw gr::exception(std::format("windowSize: {} must be a positive number.", windowSize), location);
+        return std::unexpected(gr::Error(std::format("windowSize: {} must be a positive number.", windowSize), location));
     }
 
     DataSet<T> filtered;
@@ -281,10 +283,10 @@ constexpr DataSet<T> applyRms(D&& ds, std::size_t windowSize, std::size_t signal
 }
 
 template<ProcessMode mode = ProcessMode::Copy, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-constexpr DataSet<T> applyPeakToPeak(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::expected<DataSet<T>, gr::Error> applyPeakToPeak(D&& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     static_assert(!(std::is_const_v<std::remove_reference_t<D>> && mode == ProcessMode::InPlace), "cannot perform in-place computation on const DataSet<T>");
     if (windowSize == 0UZ) {
-        throw gr::exception(std::format("windowSize: {} must be a positive number.", windowSize), location);
+        return std::unexpected(gr::Error(std::format("windowSize: {} must be a positive number.", windowSize), location));
     }
 
     DataSet<T> filtered;

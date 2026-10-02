@@ -875,7 +875,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
             cleanDs.signal_values[i]  = std::exp(-x * x / (2.0 * width * width));
         }
 
-        auto noisyDs = gr::dataset::addNoise(cleanDs, 0.25, 0UZ, 321U);
+        auto noisyDs = gr::dataset::addNoise(cleanDs, 0.25, 0UZ, 321U).value();
 
         constexpr std::size_t sgWindowSize = 71UZ;
         Config<double>        configCentred{.boundaryPolicy = BoundaryPolicy::Reflect};
@@ -886,7 +886,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         apply<double>(noisyDs.signal_values, sgCentredFiltered, sgCentredCoeffs, configCentred);
         apply<double>(noisyDs.signal_values, sgCausalFiltered, sgCausalCoeffs, configCausal);
 
-        auto maDs = gr::dataset::filter::applyMovingAverage(noisyDs, sgWindowSize);
+        auto maDs = gr::dataset::filter::applyMovingAverage(noisyDs, sgWindowSize).value();
 
         const auto            cleanSignal = cleanDs.signalValues(0UZ);
         const auto            noisySignal = noisyDs.signalValues(0UZ);

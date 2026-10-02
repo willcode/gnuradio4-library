@@ -757,13 +757,13 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
             cleanDs.signal_values[i]  = std::exp(-x * x / (2.0 * width * width));
         }
 
-        auto noisyDs = gr::dataset::addNoise(cleanDs, 0.25, 0UZ, 321U);
+        auto noisyDs = gr::dataset::addNoise(cleanDs, 0.25, 0UZ, 321U).value();
 
         constexpr std::size_t    svdWindowSize = 71UZ;
         constexpr Config<double> svdConfig{.maxRank = 2UZ, .energyFraction = 0.99};
         auto                     svdFiltered = denoiseWindow<double>(noisyDs.signal_values, svdWindowSize, svdConfig).value();
 
-        auto maDs = gr::dataset::filter::applyMovingAverage(noisyDs, svdWindowSize);
+        auto maDs = gr::dataset::filter::applyMovingAverage(noisyDs, svdWindowSize).value();
 
         const auto            cleanSignal = cleanDs.signalValues(0UZ);
         const auto            noisySignal = noisyDs.signalValues(0UZ);
