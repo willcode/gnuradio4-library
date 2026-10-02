@@ -141,7 +141,9 @@ const boost::ut::suite<"vdot and outer"> _products = [] {
         const Tensor<T> b = vector<T>({{3, 0}, {1, -1}});
         expect(vdot(a, b) == element<T>(5, -5)) << typeName<T>();
         expect(vdot(a, a) == element<T>(gr::meta::complex_like<T> ? 6.0 : 5.0)) << typeName<T>() << "vdot(a, a) = ||a||^2";
-        expect(throws([&] { std::ignore = vdot(a, vector<T>({{1, 0}})); })) << typeName<T>();
+        const auto refused = vdot(a, vector<T>({{1, 0}}));
+        expect(fatal(!refused.has_value())) << typeName<T>();
+        expect(refused.error().message.contains("equal length")) << typeName<T>() << refused.error().message;
     } | ElementTypes{};
 
     "outer is a b^H"_test = []<typename T> {
@@ -149,10 +151,14 @@ const boost::ut::suite<"vdot and outer"> _products = [] {
         const Tensor<T> a        = vector<T>({{1, 1}, {2, 0}});
         const Tensor<T> b        = vector<T>({{3, 0}, {1, -1}});
         const Tensor<T> expected = gr::meta::complex_like<T> ? matrix<T>(2, 2, {{3, 3}, {0, 2}, {6, 0}, {2, 2}}) : matrix<T>(2, 2, {{3, 0}, {1, 0}, {6, 0}, {2, 0}});
-        Tensor<T>       C;
-        outer(C, a, b);
-        expect(eq(C.extent(0), 2UZ) && eq(C.extent(1), 2UZ)) << typeName<T>();
-        expect(std::ranges::equal(C, expected)) << typeName<T>();
+        const auto      C        = outer(a, b);
+        expect(fatal(C.has_value())) << typeName<T>();
+        expect(eq(C->extent(0), 2UZ) && eq(C->extent(1), 2UZ)) << typeName<T>();
+        expect(std::ranges::equal(*C, expected)) << typeName<T>();
+
+        const auto refused = outer(matrix<T>(2, 2, {{1, 0}, {0, 0}, {0, 0}, {1, 0}}), b);
+        expect(fatal(!refused.has_value())) << typeName<T>();
+        expect(refused.error().message.contains("rank-1")) << typeName<T>() << refused.error().message;
     } | ElementTypes{};
 };
 
@@ -237,14 +243,14 @@ const boost::ut::suite<"CovarianceAccumulator"> _accumulator = [] {
         const auto split = subspace(pair->values, pair->vectors, eig::Rank{2UZ});
         expect(fatal(split.has_value())) << typeName<T>();
         const Tensor<T>& noise = split->noise;
-        const Real<T>    scale = std::max(std::abs(vdot(a1, a1)), std::abs(vdot(a2, a2)));
+        const Real<T>    scale = std::max(std::abs(vdot(a1, a1).value()), std::abs(vdot(a2, a2).value()));
         for (std::size_t k = 0UZ; k < noise.extent(1); ++k) {
             Tensor<T> column({4UZ});
             for (std::size_t i = 0UZ; i < 4UZ; ++i) {
                 column[i] = noise[i, k];
             }
-            expect(le(std::abs(vdot(column, a1)), tolerance<T>(4) * scale)) << typeName<T>() << "noise column" << k << "against a1";
-            expect(le(std::abs(vdot(column, a2)), tolerance<T>(4) * scale)) << typeName<T>() << "noise column" << k << "against a2";
+            expect(le(std::abs(vdot(column, a1).value()), tolerance<T>(4) * scale)) << typeName<T>() << "noise column" << k << "against a1";
+            expect(le(std::abs(vdot(column, a2).value()), tolerance<T>(4) * scale)) << typeName<T>() << "noise column" << k << "against a2";
         }
     } | ElementTypes{};
 };

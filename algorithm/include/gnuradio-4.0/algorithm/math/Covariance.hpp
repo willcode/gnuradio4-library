@@ -1,6 +1,7 @@
 #ifndef GNURADIO_COVARIANCE_HPP
 #define GNURADIO_COVARIANCE_HPP
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/algorithm/math/SVD.hpp>
 #include <gnuradio-4.0/algorithm/math/TensorMath.hpp>
@@ -8,8 +9,10 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <expected>
+#include <format>
+#include <source_location>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 /**
@@ -21,14 +24,13 @@ namespace gr::math {
 /**
  * @brief Conjugated dot product sum_i conj(a_i) * b_i of two rank-1 tensors of equal length.
  *
- * Equals dot(a, b) for a real element type. Throws std::runtime_error on another rank or length,
- * as dot does.
+ * Equals dot(a, b) for a real element type. Returns an error on another rank or length.
  */
 template<TensorLike TensorA, TensorLike TensorB, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires TensorOf<TensorB, T>
-[[nodiscard]] T vdot(const TensorA& a, const TensorB& b) {
+[[nodiscard]] std::expected<T, gr::Error> vdot(const TensorA& a, const TensorB& b, std::source_location loc = std::source_location::current()) {
     if (a.rank() != 1UZ || b.rank() != 1UZ || a.size() != b.size()) {
-        throw std::runtime_error("vdot requires two rank-1 tensors of equal length");
+        return std::unexpected(gr::Error(std::format("vdot: needs two rank-1 tensors of equal length, got ranks {} and {} with {} and {} elements", a.rank(), b.rank(), a.size(), b.size()), loc));
     }
     T sum{0};
     for (std::size_t i = 0UZ; i < a.size(); ++i) {
@@ -40,20 +42,21 @@ requires TensorOf<TensorB, T>
 /**
  * @brief Outer product C = a b^H of two rank-1 tensors, C[i, j] = a_i * conj(b_j).
  *
- * C is resized to a.size() x b.size(). Throws std::runtime_error when a or b is not rank 1.
+ * C is a.size() x b.size(). Returns an error when a or b is not rank 1.
  */
 template<TensorLike TensorA, TensorLike TensorB, typename T = typename std::remove_cvref_t<TensorA>::value_type>
 requires TensorOf<TensorB, T>
-void outer(Tensor<T>& C, const TensorA& a, const TensorB& b) {
+[[nodiscard]] std::expected<Tensor<T>, gr::Error> outer(const TensorA& a, const TensorB& b, std::source_location loc = std::source_location::current()) {
     if (a.rank() != 1UZ || b.rank() != 1UZ) {
-        throw std::runtime_error("outer requires two rank-1 tensors");
+        return std::unexpected(gr::Error(std::format("outer: needs two rank-1 tensors, got ranks {} and {}", a.rank(), b.rank()), loc));
     }
-    C.resize({a.size(), b.size()});
+    Tensor<T> C({a.size(), b.size()});
     for (std::size_t i = 0UZ; i < a.size(); ++i) {
         for (std::size_t j = 0UZ; j < b.size(); ++j) {
             C[i, j] = a[i] * detail::conj(b[j]);
         }
     }
+    return C;
 }
 
 /**
