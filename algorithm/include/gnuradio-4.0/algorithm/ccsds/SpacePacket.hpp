@@ -1,8 +1,10 @@
 #ifndef GNURADIO_ALGORITHM_CCSDS_SPACE_PACKET_HPP
 #define GNURADIO_ALGORITHM_CCSDS_SPACE_PACKET_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <span>
 
 #include <gnuradio-4.0/algorithm/ccsds/TransferFrame.hpp>
@@ -30,7 +32,8 @@
  * least one octet. A length field of 0 therefore means a one-octet data field and is legal. No value
  * encodes an empty data field. That is the reason for the minus one.
  *
- * Bit numbering and the status enumerations are the same as in `TransferFrame.hpp`.
+ * Bit numbering is the same as in `TransferFrame.hpp`. A parse returns the header or a `ParseStatus`
+ * as the error. A build returns the header or its octets, or a `WriteStatus` as the error.
  */
 namespace gr::ccsds {
 
@@ -70,10 +73,12 @@ struct SpacePacketHeader {
 /// @brief True for an idle packet, 133.0-B-2 4.1.3.3.4.4.
 [[nodiscard]] inline constexpr bool isIdlePacket(const SpacePacketHeader& header) noexcept { return header.apid == kIdleApid; }
 
-[[nodiscard]] inline constexpr ParseStatus parseSpacePacketHeader(std::span<const std::uint8_t> octets, SpacePacketHeader& out) noexcept {
+/// @brief Parse the six header octets. A version other than `'000'` is an error (4.1.3.2.2).
+[[nodiscard]] inline constexpr std::expected<SpacePacketHeader, ParseStatus> parseSpacePacketHeader(std::span<const std::uint8_t> octets) noexcept {
     if (octets.size() < kSpacePacketHeaderSize) {
-        return ParseStatus::short_span;
+        return std::unexpected(ParseStatus::short_span);
     }
+    SpacePacketHeader out;
     out.version          = static_cast<std::uint8_t>(detail::readField(octets, 0UZ, 3UZ));
     out.type             = detail::readField(octets, 3UZ, 1UZ) != 0U;
     out.secondary_header = detail::readField(octets, 4UZ, 1UZ) != 0U;
@@ -82,16 +87,18 @@ struct SpacePacketHeader {
     out.sequence_count   = static_cast<std::uint16_t>(detail::readField(octets, 18UZ, 14UZ));
     out.data_length      = static_cast<std::uint16_t>(detail::readField(octets, 32UZ, 16UZ));
 
-    return out.version != 0U ? ParseStatus::bad_version : ParseStatus::ok;
+    if (out.version != 0U) {
+        return std::unexpected(ParseStatus::bad_version);
+    }
+    return out;
 }
 
-[[nodiscard]] inline constexpr WriteStatus writeSpacePacketHeader(const SpacePacketHeader& header, std::span<std::uint8_t> octets) noexcept {
-    if (octets.size() < kSpacePacketHeaderSize) {
-        return WriteStatus::short_span;
-    }
+/// @brief Build the six header octets. A field wider than its bits is refused.
+[[nodiscard]] inline constexpr std::expected<std::array<std::uint8_t, kSpacePacketHeaderSize>, WriteStatus> writeSpacePacketHeader(const SpacePacketHeader& header) noexcept {
     if (!detail::fits(header.version, 3UZ) || !detail::fits(header.apid, 11UZ) || !detail::fits(header.sequence_flags, 2UZ) || !detail::fits(header.sequence_count, 14UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    std::array<std::uint8_t, kSpacePacketHeaderSize> octets{};
     detail::writeField(octets, 0UZ, 3UZ, header.version);
     detail::writeField(octets, 3UZ, 1UZ, header.type ? 1U : 0U);
     detail::writeField(octets, 4UZ, 1UZ, header.secondary_header ? 1U : 0U);
@@ -99,7 +106,7 @@ struct SpacePacketHeader {
     detail::writeField(octets, 16UZ, 2UZ, header.sequence_flags);
     detail::writeField(octets, 18UZ, 14UZ, header.sequence_count);
     detail::writeField(octets, 32UZ, 16UZ, header.data_length);
-    return WriteStatus::ok;
+    return octets;
 }
 
 /**
@@ -109,13 +116,14 @@ struct SpacePacketHeader {
  * `packetDataOctets`. A payload of zero octets is refused, because 4.1.4.1.2 makes the data field at
  * least one octet. A payload above 65 536 octets is refused, because the field cannot describe it.
  */
-[[nodiscard]] inline constexpr WriteStatus headerForPayload(std::uint16_t apid, bool type, bool secondaryHeader, std::uint8_t sequenceFlags, std::uint16_t sequenceCount, std::size_t payloadOctets, SpacePacketHeader& out) noexcept {
+[[nodiscard]] inline constexpr std::expected<SpacePacketHeader, WriteStatus> headerForPayload(std::uint16_t apid, bool type, bool secondaryHeader, std::uint8_t sequenceFlags, std::uint16_t sequenceCount, std::size_t payloadOctets) noexcept {
     if (payloadOctets == 0UZ || payloadOctets > kMaxPacketDataOctets) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
     if (!detail::fits(apid, 11UZ) || !detail::fits(sequenceFlags, 2UZ) || !detail::fits(sequenceCount, 14UZ)) {
-        return WriteStatus::field_out_of_range;
+        return std::unexpected(WriteStatus::field_out_of_range);
     }
+    SpacePacketHeader out;
     out.version          = 0U;
     out.type             = type;
     out.secondary_header = secondaryHeader;
@@ -123,7 +131,7 @@ struct SpacePacketHeader {
     out.sequence_flags   = sequenceFlags;
     out.sequence_count   = sequenceCount;
     out.data_length      = static_cast<std::uint16_t>(payloadOctets - 1UZ);
-    return WriteStatus::ok;
+    return out;
 }
 
 } // namespace gr::ccsds

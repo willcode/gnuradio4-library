@@ -31,10 +31,12 @@ std::uint32_t next() {
 }
 
 std::vector<std::uint8_t> makePacket(std::uint16_t apid, std::uint16_t sequenceCount, std::size_t payloadOctets, std::uint8_t seed) {
-    SpacePacketHeader header{};
-    boost::ut::expect(headerForPayload(apid, false, false, static_cast<std::uint8_t>(SequenceFlags::unsegmented), sequenceCount, payloadOctets, header) == WriteStatus::ok);
-    std::vector<std::uint8_t> packet(totalPacketOctets(header));
-    boost::ut::expect(writeSpacePacketHeader(header, packet) == WriteStatus::ok);
+    const auto header = headerForPayload(apid, false, false, static_cast<std::uint8_t>(SequenceFlags::unsegmented), sequenceCount, payloadOctets);
+    boost::ut::expect(header.has_value());
+    const auto octets = writeSpacePacketHeader(header.value());
+    boost::ut::expect(octets.has_value());
+    std::vector<std::uint8_t> packet(totalPacketOctets(header.value()));
+    std::ranges::copy(octets.value(), packet.begin());
     std::uint8_t value = seed;
     for (std::size_t i = 0UZ; i < payloadOctets; ++i) {
         value                              = static_cast<std::uint8_t>(value * 31U + 17U);
@@ -261,9 +263,9 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
             for (const std::size_t z : {0UZ, 2UZ, 3UZ}) {
                 concatenated.insert(concatenated.end(), laid.zones[z].begin(), laid.zones[z].end());
             }
-            SpacePacketHeader head{};
-            expect(parseSpacePacketHeader(concatenated, head) == ParseStatus::ok);
-            const std::size_t firstTotal = totalPacketOctets(head);
+            const auto head = parseSpacePacketHeader(concatenated);
+            expect(head.has_value());
+            const std::size_t firstTotal = totalPacketOctets(head.value());
             expect(eq(firstTotal, 506UZ));
             expect(lt(firstTotal, concatenated.size()));
             expect(!std::equal(packets[1].begin(), packets[1].begin() + 6, concatenated.begin() + static_cast<std::ptrdiff_t>(firstTotal))) << "ignoring the pointer loses the rest of the pass, not one packet";
@@ -414,6 +416,55 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
         expect(eq(loose.config().max_packet_length, kMaxPacketOctets));
     };
 
+    "a header whose version is not '000' gives no length, and the next pointer recovers"_test = [] {
+        const std::vector<std::uint8_t> first   = makePacket(90U, 0U, 20UZ, 0x11U);
+        std::vector<std::uint8_t>       foreign = makePacket(91U, 1U, 20UZ, 0x22U);
+        foreign[0] |= 0x20U; // version 1 in bits 0-2
+        const std::vector<std::uint8_t> third = makePacket(92U, 2U, 20UZ, 0x33U);
+
+        // In the forward walk. The packet before is emitted. The rest of the zone is discarded.
+        {
+            PacketExtractor                        extractor;
+            std::vector<std::vector<std::uint8_t>> got;
+            const auto                             emit = [&got](std::span<const std::uint8_t> p) { got.emplace_back(p.begin(), p.end()); };
+
+            std::vector<std::uint8_t> zone = first;
+            zone.insert(zone.end(), foreign.begin(), foreign.end());
+            zone.insert(zone.end(), third.begin(), third.end());
+            extractor.feed(zone, 0U, 0U, emit);
+            expect(eq(extractor.counters().bad_version, 1ULL));
+            expect(eq(got.size(), 1UZ));
+            expect(got[0] == first);
+
+            extractor.feed(third, 0U, 1U, emit);
+            expect(eq(got.size(), 2UZ));
+            expect(got[1] == third);
+        }
+
+        // In a header split across two zones. The completed header is refused, and no pointer mismatch is counted.
+        {
+            PacketExtractor                        extractor;
+            std::vector<std::vector<std::uint8_t>> got;
+            const auto                             emit = [&got](std::span<const std::uint8_t> p) { got.emplace_back(p.begin(), p.end()); };
+
+            std::vector<std::uint8_t> zoneA = first;
+            zoneA.insert(zoneA.end(), foreign.begin(), foreign.begin() + 3);
+            std::vector<std::uint8_t> zoneB(foreign.begin() + 3, foreign.end());
+            const auto                pointer = static_cast<std::uint16_t>(zoneB.size());
+            zoneB.insert(zoneB.end(), third.begin(), third.end());
+
+            extractor.feed(zoneA, 0U, 0U, emit);
+            expect(eq(extractor.fragment().size(), 3UZ));
+            extractor.feed(zoneB, pointer, 1U, emit);
+            expect(eq(extractor.counters().bad_version, 1ULL));
+            expect(eq(extractor.counters().pointer_mismatch, 0ULL));
+            expect(extractor.fragment().empty());
+            expect(eq(got.size(), 2UZ));
+            expect(got[0] == first);
+            expect(got[1] == third);
+        }
+    };
+
     "reset returns the machine to its opening state"_test = [] {
         const std::vector<std::uint8_t> packet = makePacket(80U, 0U, 400UZ, 0xF0U);
         PacketExtractor                 extractor;
@@ -451,9 +502,9 @@ const boost::ut::suite<"ccsds packet extraction"> packetExtractorTests = [] {
 
             std::vector<std::vector<std::uint8_t>> expected;
             for (const std::vector<std::uint8_t>& packet : packets) {
-                SpacePacketHeader header{};
-                static_cast<void>(parseSpacePacketHeader(packet, header));
-                if (!isIdlePacket(header)) {
+                const auto header = parseSpacePacketHeader(packet);
+                expect(header.has_value());
+                if (!isIdlePacket(header.value())) {
                     expected.push_back(packet);
                 }
             }

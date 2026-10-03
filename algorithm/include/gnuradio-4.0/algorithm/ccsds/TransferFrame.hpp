@@ -41,11 +41,11 @@
  */
 namespace gr::ccsds {
 
-/// @brief What a header parse reports. A transfer-frame parse returns `short_span` and `bad_version` as its errors.
-enum class ParseStatus { ok, short_span, bad_version, reserved_violation };
+/// @brief Why a header parse failed.
+enum class ParseStatus { short_span, bad_version };
 
-/// @brief What a header build reports. A transfer-frame build returns `field_out_of_range` as its error.
-enum class WriteStatus { ok, short_span, field_out_of_range };
+/// @brief Why a header build failed.
+enum class WriteStatus { field_out_of_range };
 
 /// @brief A parsed header and whether a reserved or spare field in it held a value other than the mandated one.
 template<typename Header>

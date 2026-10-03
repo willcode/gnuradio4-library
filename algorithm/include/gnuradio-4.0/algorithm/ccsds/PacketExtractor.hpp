@@ -70,6 +70,7 @@ public:
         std::uint64_t bad_pointer       = 0ULL; //!< a pointer at or beyond the zone
         std::uint64_t orphan_octets     = 0ULL; //!< residue with no fragment to complete
         std::uint64_t oversize_dropped  = 0ULL; //!< a packet longer than `max_packet_length`
+        std::uint64_t bad_version       = 0ULL; //!< a packet header whose version is not `'000'`, its length not trusted
 
         [[nodiscard]] bool operator==(const Counters&) const noexcept = default;
     };
@@ -137,8 +138,8 @@ public:
             append(zone.first(fhp));
             const bool resolved = resolveExpected();
             if (partial_.empty()) {
-                // The completed header declared a packet past `max_packet_length`. That drop is
-                // already counted.
+                // The completed header was refused for its version or for a length past
+                // `max_packet_length`. That drop is already counted.
             } else if (!resolved || partial_.size() != expected_) {
                 // The fragment and the pointer disagree, and the pointer is taken as correct. The
                 // fragment is dropped when it is short, from a packet lost between. It is dropped
@@ -197,9 +198,13 @@ private:
         if (partial_.size() < kSpacePacketHeaderSize) {
             return false;
         }
-        SpacePacketHeader header{};
-        static_cast<void>(parseSpacePacketHeader(partial_, header));
-        const std::size_t total = totalPacketOctets(header);
+        const auto header = parseSpacePacketHeader(partial_);
+        if (!header) {
+            ++counters_.bad_version;
+            clearFragment();
+            return false;
+        }
+        const std::size_t total = totalPacketOctets(*header);
         if (total > config_.max_packet_length) {
             ++counters_.oversize_dropped;
             clearFragment();
@@ -245,9 +250,13 @@ private:
                 expected_ = 0UZ;
                 return;
             }
-            SpacePacketHeader header{};
-            static_cast<void>(parseSpacePacketHeader(zone.subspan(o, kSpacePacketHeaderSize), header));
-            const std::size_t total = totalPacketOctets(header);
+            const auto header = parseSpacePacketHeader(zone.subspan(o, kSpacePacketHeaderSize));
+            if (!header) {
+                // A header of another version gives no length. The walk stops as for an oversize packet.
+                ++counters_.bad_version;
+                return;
+            }
+            const std::size_t total = totalPacketOctets(*header);
             if (total > config_.max_packet_length) {
                 // The length is not trusted, and no second pointer in the zone allows recovery.
                 ++counters_.oversize_dropped;
@@ -265,11 +274,11 @@ private:
     }
 
     /// @brief Step 5. An idle packet is counted and discarded. Every other packet is emitted whole.
+    /// Every packet that reaches this step has a header that parsed when its length was read.
     template<typename Emit>
     void emitPacket(std::span<const std::uint8_t> packet, Emit& emit) {
-        SpacePacketHeader header{};
-        static_cast<void>(parseSpacePacketHeader(packet, header));
-        if (isIdlePacket(header)) {
+        const auto header = parseSpacePacketHeader(packet);
+        if (header.has_value() && isIdlePacket(*header)) {
             ++counters_.idle_packets;
             return;
         }
