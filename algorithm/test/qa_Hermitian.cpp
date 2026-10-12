@@ -312,7 +312,7 @@ const boost::ut::suite<"eigh"> _eigh = [] {
         const Tensor<T> A          = chosenHermitian<T>();
         const auto      unfinished = eigh(A, eig::Config<Real<T>>{.maxIterations = 1UZ});
         expect(fatal(!unfinished.has_value())) << typeName<T>();
-        expect(unfinished.error().message.contains("no convergence within 1 sweeps")) << typeName<T>() << unfinished.error().message;
+        expect(eq(unfinished.error().message, std::string("eigh: no convergence within 1 sweep"))) << typeName<T>();
 
         const Tensor<T> rectangular({2UZ, 3UZ});
         const auto      notSquare = eigh(rectangular);

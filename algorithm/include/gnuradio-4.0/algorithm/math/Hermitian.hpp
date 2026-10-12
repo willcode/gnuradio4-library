@@ -19,9 +19,9 @@
 /**
  * Eigendecomposition of a Hermitian (real: symmetric) matrix and its split into a signal and a noise
  * subspace, for real and complex floating-point element types. Each function returns its result in a
- * std::expected and reports a bad input through its gr::Error, which names the function and the
- * fault: wrong tensor rank, mismatched extents, a non-finite entry or norm, an out-of-range split, or
- * off-diagonal entries that stay above the tolerance after maxIterations sweeps.
+ * std::expected and reports a bad input through its gr::Error, which names the function that refused
+ * the input and the fault: wrong tensor rank, mismatched extents, a non-finite entry or norm, an
+ * out-of-range split, or off-diagonal entries that stay above the tolerance after maxIterations sweeps.
  */
 namespace gr::math {
 
@@ -155,7 +155,7 @@ requires detail::FloatingElement<T>
     }
 
     if (!converged) {
-        return std::unexpected(gr::Error(std::format("eigh: no convergence within {} sweeps", maxSweeps), loc));
+        return std::unexpected(gr::Error(std::format("eigh: no convergence within {} sweep{}", maxSweeps, maxSweeps == 1UZ ? "" : "s"), loc));
     }
 
     std::vector<std::size_t> order(n);

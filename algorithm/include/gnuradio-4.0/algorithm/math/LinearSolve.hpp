@@ -21,9 +21,9 @@
  * A matrix is a rank-2 tensor. A right-hand side `b` is a rank-1 tensor of n elements or a rank-2
  * tensor of n rows, one system per column; the solution `x` takes the rank and the column count of
  * `b`. Every function returns its result in a std::expected and reports a bad input through its
- * gr::Error, which names the function and the fault: wrong tensor rank, mismatched extents or a
- * non-finite entry; a Cholesky pivot that is zero, negative or not finite; or a triangular factor with
- * a diagonal entry that is zero or negligible.
+ * gr::Error, which names the function that refused the input and the fault: wrong tensor rank,
+ * mismatched extents or a non-finite entry; a Cholesky pivot that is zero, negative or not finite; or
+ * a triangular factor with a diagonal entry that is zero or negligible.
  */
 namespace gr::math {
 
